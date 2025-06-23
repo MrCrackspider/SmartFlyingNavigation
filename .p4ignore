@@ -1,7 +1,8 @@
 Saved/
 LocalBuilds/
 *.csproj.*
-.vs/*
+.vs/
+.idea/
 *.pdb
 *.suo
 *.opensdf
@@ -23,6 +24,8 @@ FeaturePacks/*
 Engine/Documentation/*
 .git/*
 *.csprojAssemblyReference.cache
+Binaries/
+
 
 #Linux Debug Files
 *.sym
@@ -30,7 +33,7 @@ Engine/Documentation/*
 
 # Engine intermediates
 Engine/Intermediate/*
-Intermediate/*
+Intermediate/
 
 # Intermediate folders for programs should not be checked in
 Engine\Programs\*\Intermediate\*
