@@ -24,7 +24,18 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Pathfinding")
 	const TArray<FVector>& GetFoundPath() const { return FoundPath; }
+	
+	// 이동 속도 (블루프린트에서 수정 가능)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+	float MovementSpeed = 500.f;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Pathfinding", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UStaticMeshComponent> MovableMeshComponent; // TObjectPtr은 UPROPERTY와 함께 쓸 때 더 안전합니다
 
+private:
+	// 현재 이동 목표인 경로상의 인덱스 (-1은 이동 중이 아님을 의미)
+	int32 CurrentPathIndex;
+	
 protected:
 	virtual void BeginPlay() override;
 
