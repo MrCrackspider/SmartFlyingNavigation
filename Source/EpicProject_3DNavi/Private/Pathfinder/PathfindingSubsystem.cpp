@@ -4,13 +4,39 @@
 #include "Pathfinder/PathfindingSubsystem.h"
 #include "Pathfinder/VoxelVolume.h"
 #include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
 
 void UPathfindingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 
-    const FIntVector MapSize(64, 64, 64);
-    AVoxelVolume* MainVolume = CreateVoxelVolume(MapSize, 100);
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("UPathfindingSubsystem::Initialize: Could not get a valid UWorld."));
+		return;
+	}
+
+	TArray<AActor*> Actors;
+	UGameplayStatics::GetAllActorsOfClass(World, AVoxelVolume::StaticClass(), Actors);
+	Volumes.Empty();
+
+	for (AActor* Actor : Actors)
+	{
+		AVoxelVolume* VoxelVolume = Cast<AVoxelVolume>(Actor);
+		if (VoxelVolume)
+		{
+			Volumes.Add(VoxelVolume);
+		}
+	}
+	if (Volumes.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("UPathfindingSubsystem::Initialize: No AVoxelVolume actors found in the world. Consider placing some in the level."));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("UPathfindingSubsystem: Initialization complete. %d VoxelVolume(s) registered."), Volumes.Num());
+	}
 }
 
 void UPathfindingSubsystem::Deinitialize()
@@ -81,8 +107,22 @@ bool UPathfindingSubsystem::BuildVoxelVolumes()
         UE_LOG(LogTemp, Verbose, TEXT("UPathfindingSubsystem::BuildVoxelVolumes(): There are no volumes to build."));
         return true;
     }
-    return false;
 
+	UE_LOG(LogTemp, Log, TEXT("UPathfindingSubsystem::BuildVoxelVolumes: Requesting rebuild of static obstacles for %d volume(s)."), Volumes.Num());
+
+	bool bAllBuildsSuccessful = true; // 예시: 모든 빌드가 성공했는지 추적
+	for (AVoxelVolume* Volume : Volumes)
+	{
+		if (IsValid(Volume))
+		{
+			Volume->BuildStaticObstacles(); 
+		}
+		else
+		{
+			bAllBuildsSuccessful = false;
+		}
+	}
+	return bAllBuildsSuccessful;
 }
 
 void UPathfindingSubsystem::RenderVoxelVolume(const FLinearColor& WalkableColor, const FLinearColor& ObstacleColor) const

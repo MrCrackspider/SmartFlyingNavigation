@@ -31,7 +31,7 @@ void UPathfindingComponent::BeginPlay()
 			UE_LOG(LogTemp, Error, TEXT("PathfindingComponent: PathfindingSubsystem not found!"));
 			return;
 		}
-		
+
 		const TArray<TObjectPtr<AVoxelVolume>>& Volumes = PathSubsystem->GetVoxelVolumes();
 		if (Volumes.Num() > 0)
 		{
@@ -52,24 +52,29 @@ void UPathfindingComponent::BeginPlay()
 		}
 		else
 		{
-			UE_LOG(LogTemp, Error, TEXT("PathfindingComponent on Actor '%s': PathfindingStrategyClass is not set! Please assign a strategy in the Details panel."), *GetOwner()->GetName());
+			UE_LOG(LogTemp, Error,
+			       TEXT(
+				       "PathfindingComponent on Actor '%s': PathfindingStrategyClass is not set! Please assign a strategy in the Details panel."
+			       ), *GetOwner()->GetName());
 		}
 	}
-
 }
 
-void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
+                                          FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
+	AActor* Actor = GetOwner();
 	// 1. 이동 중이 아니거나, 움직일 대상이 없거나, 경로가 없으면 아무것도 안 함
-	if (CurrentPathIndex < 0 || !MovableMeshComponent || FoundPath.Num() == 0)
+	if (CurrentPathIndex < 0 || Actor == nullptr || FoundPath.Num() == 0)
 	{
 		return;
 	}
 
 	// 2. 현재 위치와 목표 지점 설정
-	const FVector CurrentLocation = MovableMeshComponent->GetComponentLocation();
+
+	const FVector CurrentLocation = Actor->GetActorLocation();
 	const FVector TargetPoint = FoundPath[CurrentPathIndex];
 
 	// 3. 목표 지점에 거의 도착했는지 확인
@@ -82,7 +87,7 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		if (CurrentPathIndex >= FoundPath.Num())
 		{
 			// 이동 완료: 정지
-			CurrentPathIndex = -1; 
+			CurrentPathIndex = -1;
 			UE_LOG(LogTemp, Log, TEXT("Movement Finished."));
 			return; // 이번 틱에서는 더 이상 움직이지 않음
 		}
@@ -98,7 +103,7 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		const FVector NewLocation = CurrentLocation + Direction * MovementSpeed * DeltaTime;
 
 		// MovableMeshComponent의 월드 위치를 업데이트
-		MovableMeshComponent->SetWorldLocation(NewLocation);
+		Actor->SetActorLocation(NewLocation);
 	}
 }
 
@@ -126,16 +131,18 @@ bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
 	const bool bPathFound = PathfindingStrategy->FindPathWithStrategy(StartIndex, EndIndex, PathIndices);
 
 	FoundPath.Empty();
+	TArray<FVector> RawPath;
 	CurrentPathIndex = -1; // 우선 이동 중지 상태로 초기화
-	
+
 	if (bPathFound && PathIndices.Num() > 0)
 	{
 		UE_LOG(LogTemp, Log, TEXT("Path found with %d points. Starting movement."), PathIndices.Num());
 		for (const FIntVector& Index : PathIndices)
-		{   
-			FoundPath.Add(TargetVolume->VoxelIndexToWorld(Index));
+		{
+			RawPath.Add(TargetVolume->VoxelIndexToWorld(Index));
 		}
-
+		const TArray<FVector> SmoothedPath = ApplyStringPulling(RawPath);
+		FoundPath = SmoothedPath;
 		// ==================================================
 		// 이동 시작 신호!
 		// ==================================================
@@ -145,9 +152,14 @@ bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
 		// 디버그 드로잉
 		if (bDrawDebugPath && FoundPath.Num() > 1)
 		{
+			for (int32 i = 0; i < RawPath.Num() - 1; ++i)
+			{
+				DrawDebugLine(GetWorld(), RawPath[i], RawPath[i + 1], FColor::White, false, 10.f, 0, 2.f);
+			}
+			// 부드러워진 경로 (녹색)
 			for (int32 i = 0; i < FoundPath.Num() - 1; ++i)
 			{
-				DrawDebugLine(GetWorld(), FoundPath[i], FoundPath[i + 1], FColor::Green, true, 10.f, 0, 5.f);
+				DrawDebugLine(GetWorld(), FoundPath[i], FoundPath[i + 1], FColor::Green, false, 10.f, 0, 5.f);
 			}
 		}
 	}
@@ -159,3 +171,60 @@ bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
 	return bPathFound;
 }
 
+//To Do. 아래 코드 수정 필요함. 보정용 함수인데 대충짠 코드이기 때문에 무조건 수정하거나 없앨 것
+TArray<FVector> UPathfindingComponent::ApplyStringPulling(const TArray<FVector>& RawPath) const
+{
+	// 경로에 점이 2개 미만이면 단순화할 필요가 없음
+	if (RawPath.Num() < 2)
+	{
+		return RawPath;
+	}
+
+	TArray<FVector> SmoothedPath;
+	SmoothedPath.Add(RawPath[0]); // 시작점은 항상 포함
+
+	int32 CurrentIndex = 0;
+	while (CurrentIndex < RawPath.Num() - 1)
+	{
+		int32 LookAheadIndex = CurrentIndex + 1;
+		int32 LastVisibleIndex = CurrentIndex; // 현재까지 장애물 없이 도달 가능한 마지막 인덱스
+
+		while (LookAheadIndex < RawPath.Num())
+		{
+			FHitResult HitResult;
+			// CurrentIndex의 위치에서 LookAheadIndex의 위치까지 광선을 쏴서 장애물이 있는지 확인
+			const bool bHit = GetWorld()->LineTraceSingleByChannel(
+				HitResult,
+				RawPath[CurrentIndex], // 시작점
+				RawPath[LookAheadIndex], // 끝점
+				ECC_Visibility // 충돌을 검사할 채널 (보통 ECC_Visibility나 ECC_WorldStatic을 사용)
+			);
+			
+			if (bHit)
+			{
+				// 장애물에 부딪혔다면, 바로 이전 지점까지만 직선으로 이동 가능했다는 의미
+				// 루프를 중단하고 LastVisibleIndex를 다음 웨이포인트로 사용
+				break;
+			}
+			else
+			{
+				// 장애물이 없다면, 이 지점까지는 직선으로 올 수 있음. LastVisibleIndex를 업데이트하고 계속 탐색
+				LastVisibleIndex = LookAheadIndex;
+				LookAheadIndex++;
+			}
+		}
+
+		// 장애물 없이 갈 수 있었던 가장 먼 지점을 새로운 경로에 추가
+		// 만약 바로 다음 점조차 장애물에 막혔다면, LastVisibleIndex는 CurrentIndex와 같을 것이고,
+		// 이 경우 바로 다음 점(CurrentIndex + 1)을 경로에 추가해야 함.
+		if (LastVisibleIndex == CurrentIndex)
+		{
+			LastVisibleIndex = CurrentIndex + 1;
+		}
+		
+		SmoothedPath.Add(RawPath[LastVisibleIndex]);
+		CurrentIndex = LastVisibleIndex; // 새로운 시작점으로 설정
+	}
+
+	return SmoothedPath;
+}
