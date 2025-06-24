@@ -57,7 +57,7 @@ public:
 	FColor DebugObstacleColor = FColor::Red;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VoxelVolume|Debug", meta = (EditCondition = "bDrawDebugObstacles"))
-	float DebugObstacleThickness = 1.0f;
+	float DebugObstacleThickness = 2.0f;
 private:
 
 	// 비트마스크 데이터. 각 축을 64개 단위로 묶음
