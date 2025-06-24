@@ -89,7 +89,7 @@ bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
 		UE_LOG(LogTemp, Log, TEXT("Path found with %d points."), PathIndices.Num());
 		// 인덱스 경로를 월드 좌표 경로로 변환
 		for (const FIntVector& Index : PathIndices)
-		{
+		{   
 			FoundPath.Add(TargetVolume->VoxelIndexToWorld(Index));
 		}
 

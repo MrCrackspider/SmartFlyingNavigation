@@ -28,7 +28,7 @@ void ANavigationVolume::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	
-	BuildVoxelDataInVolume();
+	BuildVoxelDataInVolume(); // 일정시간마다 호출하도록 수정 (ex 0.5초 또는 editor에서 수정)
 }
 
 void ANavigationVolume::GenerateVoxelGrid()
@@ -51,7 +51,7 @@ void ANavigationVolume::BuildVoxelDataInVolume()
 	TArray<FOverlapResult> OverlappingActors;
 	FCollisionShape VolumeShape = FCollisionShape::MakeBox(VoxelGrid->BoxExtent);
 	FCollisionObjectQueryParams ObjectQueryParams;
-	ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+	ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
 	ObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
 
 	FCollisionQueryParams CollisionParams;

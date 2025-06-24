@@ -28,8 +28,11 @@ public:
 	uint64 GetObstacleChunk_Y(int32 ChunkY, int32 X, int32 Z) const;
 	uint64 GetObstacleChunk_Z(int32 ChunkZ, int32 X, int32 Y) const;
 
-	void CreateMap(const FIntVector& InMapSize);
+	void InitializeMap(const FIntVector& InMapSize);
 
+	void BuildStaticObstacles();
+	void UpdateDynamicObstacles();
+	
 	void SetStaticObstacle(const FIntVector& Index, bool bIsObstacle);
 	
 	bool IsIndexValid(const FIntVector& Index) const;
@@ -38,13 +41,23 @@ public:
 	FVector VoxelIndexToWorld(const FIntVector& VoxelIndex) const;
 	UFUNCTION(BlueprintPure, Category = "VoxelVolume|Coordinates")
 	FIntVector WorldToVoxelIndex(const FVector& WorldPosition) const;
-
+	bool CheckVoxelOverlap(const FIntVector& VoxelIndex, UPrimitiveComponent* ComponentToTest) const;
+	bool ClampVoxelIndicesToVolume(FIntVector& MinVoxelIndex, FIntVector& MaxVoxelIndex) const;
+	bool GetOverlappingComponentsInVolume(const FCollisionObjectQueryParams& ObjectQueryParams, TArray<FOverlapResult>& OutResults) const;
+	void DrawDebugVoxelObstacles() const;
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding", meta = (AllowPrivateAccess = "true"))
 	FIntVector MapSize;// 들어가는 복셀의 갯수
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding", meta = (AllowPrivateAccess = "true"))
 	float VoxelExtent;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VoxelVolume|Debug")
+	bool bDrawDebugObstacles = true; // 디버그 드로잉 활성화 여부
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VoxelVolume|Debug", meta = (EditCondition = "bDrawDebugObstacles"))
+	FColor DebugObstacleColor = FColor::Red;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VoxelVolume|Debug", meta = (EditCondition = "bDrawDebugObstacles"))
+	float DebugObstacleThickness = 1.0f;
 private:
 
 	// 비트마스크 데이터. 각 축을 64개 단위로 묶음
@@ -52,6 +65,8 @@ private:
 	TArray<uint64_t> ObstacleBitmasks_Y;
 	TArray<uint64_t> ObstacleBitmasks_Z;
 
+	// 동적 장애물들이 위치한 복셀들의 인덱스를 저장하는 Map
+	TMap<FIntVector, bool> DynamicObstacleOverriddenVoxels;
 public:
 	FIntVector GetMapSize() const { return MapSize; }
 	float GetVoxelExtent() const { return VoxelExtent; }

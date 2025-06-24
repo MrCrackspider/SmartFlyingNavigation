@@ -20,7 +20,7 @@ void UPathfindingSubsystem::Deinitialize()
 }
 
 //// TO-DO: Implement
-AVoxelVolume* UPathfindingSubsystem::CreateVoxelVolume(const FIntVector& InMapSize, const uint32 Extent)
+AVoxelVolume* UPathfindingSubsystem::CreateVoxelVolume(const FIntVector& InMapSize, const uint32 InVoxelExtent)
 {
     UWorld* World = GetWorld();
     if (!World)
@@ -40,10 +40,11 @@ AVoxelVolume* UPathfindingSubsystem::CreateVoxelVolume(const FIntVector& InMapSi
 	AVoxelVolume* SpawnedVolume = World->SpawnActor<AVoxelVolume>();
     if (SpawnedVolume)
     {
-        SpawnedVolume->CreateMap(InMapSize);
+    	SpawnedVolume->MapSize = InMapSize;
+    	SpawnedVolume->VoxelExtent = InVoxelExtent;
         Volumes.Add(SpawnedVolume);
         // Begin Test
-        CreateTestVolume(); // 0번 볼륨을 가져와서 벽을 세움.
+        //CreateTestVolume(); // 0번 볼륨을 가져와서 벽을 세움.
         // End Test
 
     }
