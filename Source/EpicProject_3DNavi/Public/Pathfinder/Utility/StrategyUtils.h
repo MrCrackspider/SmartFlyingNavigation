@@ -16,14 +16,17 @@ struct FPathNode
 
     FIntVector Position;
     TSharedPtr<FPathNode> Parent;
-    int32 GCost = 0;
-    int32 HCost = 0;
-    int32 FCost = 0;
+    int64  GCost = 0;
+    int64  HCost = 0;
+    int64  FCost = 0;
 
+    FIntVector Direction; // ë¶€ëª¨ë¡œë¶€í„° ì´ ë…¸ë“œê¹Œì§€ì˜ ì´ë™ ë°©í–¥
+    bool bIsJumpPoint = false; // ì´ ë…¸ë“œê°€ ì í”„ í¬ì¸íŠ¸ì¸ì§€ ì—¬ë¶€
+    
     FPathNode() = default;
 
     explicit FPathNode(const FIntVector& InPos)
-        : Position(InPos), Parent(nullptr), GCost(0), HCost(0), FCost(0)
+     : Position(InPos), Parent(nullptr), GCost(0), HCost(0), FCost(0), Direction(FIntVector::ZeroValue), bIsJumpPoint(false)
     {
     }
 
@@ -32,12 +35,22 @@ struct FPathNode
         FCost = GCost + HCost;
     }
 
-    void SetParent(const TSharedPtr<FPathNode>& InParent, int32 NewGCost, int32 NewHCost)
+    void SetParent(const TSharedPtr<FPathNode>& InParent, int64  NewGCost, int64  NewHCost)
     {
         Parent = InParent;
         GCost = NewGCost;
         HCost = NewHCost;
         CalculateAndSetFCost();
+        
+        // ë¶€ëª¨ê°€ ì„¤ì •ë˜ë©´, í˜„ì¬ ë…¸ë“œê¹Œì§€ì˜ ë°©í–¥ì„ ì—…ë°ì´íŠ¸í•©ë‹ˆë‹¤.
+        if (Parent.IsValid())
+        {
+            Direction = Position - Parent->Position; // ë¶€ëª¨ë¡œë¶€í„° í˜„ì¬ê¹Œì§€ì˜ ë°©í–¥ ë²¡í„°
+        }
+        else
+        {
+            Direction = FIntVector::ZeroValue; // ë¶€ëª¨ê°€ ì—†ìœ¼ë©´ ë°©í–¥ 0
+        }
     }
 };
 struct FPathNodePtrCompare
@@ -45,7 +58,7 @@ struct FPathNodePtrCompare
     FORCEINLINE bool operator()(const TSharedPtr<FPathNode>& A, const TSharedPtr<FPathNode>& B) const
     {
         return A->FCost < B->FCost;
-        // FIX-ME: MinheapÀÌ¶ó¼­ A->FCost > B->FCost°¡ µÇ´Â°Ô ¸ÂÁö¸¸, ÈŞ¸®½ºÆ½ÇÔ¼ö³ª ¾Ë ¼ö ¾ø´Â ¹®Á¦·Î ¹İÀüµÇ¾î¾ß Á¤»óÀûÀÎ °æ·Î°¡ ³ª¿È.
+        // FIX-ME: Minheapï¿½Ì¶ï¿½ A->FCost > B->FCostï¿½ï¿½ ï¿½Ç´Â°ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½, ï¿½Ş¸ï¿½ï¿½ï¿½Æ½ï¿½Ô¼ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ç¾ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Î°ï¿½ ï¿½ï¿½ï¿½ï¿½.
         //return A->FCost > B->FCost;
     }
 };

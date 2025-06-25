@@ -142,7 +142,7 @@ bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
 			RawPath.Add(TargetVolume->VoxelIndexToWorld(Index));
 		}
 		const TArray<FVector> SmoothedPath = ApplyStringPulling(RawPath);
-		FoundPath = SmoothedPath;
+		FoundPath = RawPath;
 		// ==================================================
 		// 이동 시작 신호!
 		// ==================================================
