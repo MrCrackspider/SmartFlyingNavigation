@@ -227,7 +227,6 @@ TOptional<FIntVector> UJPSStrategy::Jump(const FIntVector& CurrentPos, const FIn
     return Jump(NextPos, Direction, Goal);
 }
 
-
 bool UJPSStrategy::IsMoveFeasible(const FIntVector& From, const FIntVector& To) const
 {
     // 1. 기본 유효성 검사
@@ -287,6 +286,7 @@ bool UJPSStrategy::IsMoveFeasible(const FIntVector& From, const FIntVector& To) 
     // 위에서 처리되지 않은 경우는 없지만, 안전을 위해 true 반환
     return true;
 }
+
 void UJPSStrategy::RetracePath(TSharedPtr<FPathNode> EndNode, TArray<FIntVector>& OutGridPath) const
 {
     // 안전한 경로 복원: Bresenham 알고리즘을 이용한 보간
@@ -394,16 +394,6 @@ void UJPSStrategy::OptimizePath_ThetaStarStyle(const TArray<FIntVector>& GridPat
     }
 }
 
-int32 UJPSStrategy::CalculateHeuristic(const FIntVector& A, const FIntVector& B) const
-{
-    return FStrategyUtils::Heuristic_Octile(A, B);
-}
-
-int32 UJPSStrategy::GetMoveCost(const FIntVector& A, const FIntVector& B) const
-{
-    return FStrategyUtils::Heuristic_Octile(A, B);
-}
-
 bool UJPSStrategy::HasLineOfSight(const FIntVector& From, const FIntVector& To) const
 {
     FIntVector Diff = To - From;
@@ -473,4 +463,42 @@ bool UJPSStrategy::HasLineOfSight(const FIntVector& From, const FIntVector& To) 
 
     // 최종 목적지까지 모든 스텝이 안전했는지 확인
     return true;
+}
+
+int32 UJPSStrategy::CalculateHeuristic(const FIntVector& A, const FIntVector& B) const
+{
+    return FStrategyUtils::Heuristic_Octile(A, B);
+}
+
+int32 UJPSStrategy::GetMoveCost(const FIntVector& A, const FIntVector& B) const
+{
+    return FStrategyUtils::Heuristic_Octile(A, B);
+}
+bool UJPSStrategy::HasForcedNeighbour(const FIntVector& NodePos, const FIntVector& CheckDir, const FIntVector& ParentDir) const
+{
+    // 아이디어: CheckDir 방향으로 가야만 하는 이유가 있는가?
+    // -> CheckDir의 반대편에 장애물이 있고, 그 장애물이 ParentDir로부터의 직선 경로를 막고 있을 때
+    const FIntVector BackDir = FStrategyUtils::GetNormalizedDirection(CheckDir, FIntVector::ZeroValue); // -CheckDir
+    const FIntVector ObstaclePos = NodePos + BackDir;
+
+    // 1. 장애물이 없으면 강제 이웃이 아님
+    if (Volume->IsVoxelWalkable(ObstaclePos))
+    {
+        return false;
+    }
+    
+    // 2. 장애물이 있지만, 더 나은 경로(ParentDir에서 직접 가는)가 열려있으면 강제 이웃이 아님
+    const FIntVector ParentToObstacleDir = FStrategyUtils::GetNormalizedDirection(NodePos + ParentDir, ObstaclePos);
+    if (IsMoveFeasible(NodePos + ParentDir, NodePos + ParentDir + ParentToObstacleDir))
+    {
+        return false;
+    }
+
+    // 3. 위 조건들을 모두 통과하고, CheckDir 방향이 실제로 갈 수 있는 길이라면 강제 이웃임
+    if (IsMoveFeasible(NodePos, NodePos + CheckDir))
+    {
+        return true;
+    }
+
+    return false;
 }

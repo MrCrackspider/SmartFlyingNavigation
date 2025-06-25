@@ -47,7 +47,7 @@ protected:
     /** @brief 한 방향으로 점프하며 Goal, Forced Neighbour, 또는 하위 차원 점프 포인트를 찾습니다. */
     TOptional<FIntVector> Jump(const FIntVector& CurrentPos, const FIntVector& Direction, const FIntVector& Goal);
 
-      bool HasForcedNeighbour(const FIntVector& NodePos, const FIntVector& CheckDir, const FIntVector& ParentDir) const;
+    bool HasForcedNeighbour(const FIntVector& NodePos, const FIntVector& CheckDir, const FIntVector& ParentDir) const;
     
     /** @brief 두 지점 간 이동 시, 인접 공간의 장애물 분포를 직접 검사하여 코너 컷팅 발생 여부를 엄밀하게 판단합니다. */
     bool IsMoveFeasible(const FIntVector& From, const FIntVector& To) const;
