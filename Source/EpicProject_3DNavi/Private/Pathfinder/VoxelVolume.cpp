@@ -190,10 +190,6 @@ void AVoxelVolume::UpdateDynamicObstacles()
 	TArray<FOverlapResult> OverlapResults;
 	if (!GetOverlappingComponentsInVolume(DynamicObjectQueryParams, OverlapResults))
 	{
-		UE_LOG(LogTemp, Error,
-		       TEXT(
-			       "UpdateDynamicObstacles: No dynamic components found in volume via GetOverlappingComponentsInVolume."
-		       ));
 	}
 
 	for (const FOverlapResult& Result : OverlapResults)
