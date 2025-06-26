@@ -24,9 +24,7 @@ protected:
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding")
 	TObjectPtr<UPathfindingComponent> PathfindingComponent;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding|Test", meta = (MakeEditWidget = true))
-	FVector TargetLocation;
+	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding|Test")
 	AActor* TargetActor;
 
