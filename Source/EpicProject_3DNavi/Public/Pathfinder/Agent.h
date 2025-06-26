@@ -27,6 +27,8 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding|Test", meta = (MakeEditWidget = true))
 	FVector TargetLocation;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding|Test")
+	AActor* TargetActor;
 
 	UFUNCTION(CallInEditor, Category = "Pathfinding|Test")
 	void ExecuteFindPath();

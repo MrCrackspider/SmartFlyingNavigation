@@ -27,6 +27,6 @@ void AAgent::ExecuteFindPath()
     if (PathfindingComponent)
     {
         UE_LOG(LogTemp, Log, TEXT("--- Executing Find Path Test ---"));
-        PathfindingComponent->FindPathToLocation(TargetLocation);
+        PathfindingComponent->FindPathToLocation(TargetActor->GetActorLocation());
     }
 }

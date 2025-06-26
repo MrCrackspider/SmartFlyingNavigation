@@ -50,7 +50,6 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding", meta = (AllowPrivateAccess = "true"))
 	TArray<FVector> FoundPath;
-	TArray<FVector> ApplyStringPulling(const TArray<FVector>& RawPath) const;
 	/**
 	* DEBUGGING
 	*/

@@ -131,7 +131,6 @@ bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
 	const bool bPathFound = PathfindingStrategy->FindPathWithStrategy(StartIndex, EndIndex, PathIndices);
 
 	FoundPath.Empty();
-	TArray<FVector> RawPath;
 	CurrentPathIndex = -1; // 우선 이동 중지 상태로 초기화
 
 	if (bPathFound && PathIndices.Num() > 0)
@@ -139,27 +138,17 @@ bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
 		UE_LOG(LogTemp, Log, TEXT("Path found with %d points. Starting movement."), PathIndices.Num());
 		for (const FIntVector& Index : PathIndices)
 		{
-			RawPath.Add(TargetVolume->VoxelIndexToWorld(Index));
+			FoundPath.Add(TargetVolume->VoxelIndexToWorld(Index));
 		}
-		const TArray<FVector> SmoothedPath = ApplyStringPulling(RawPath);
-		FoundPath = RawPath;
-		// ==================================================
-		// 이동 시작 신호!
-		// ==================================================
-		// 첫 번째 지점(인덱스 0)을 목표로 설정해서 Tick에서 이동을 시작하게 함
+
 		CurrentPathIndex = 0;
 
 		// 디버그 드로잉
-		if (bDrawDebugPath && FoundPath.Num() > 1)
+		if (bDrawDebugPath)
 		{
-			for (int32 i = 0; i < RawPath.Num() - 1; ++i)
-			{
-				DrawDebugLine(GetWorld(), RawPath[i], RawPath[i + 1], FColor::White, false, 10.f, 0, 2.f);
-			}
-			// 부드러워진 경로 (녹색)
 			for (int32 i = 0; i < FoundPath.Num() - 1; ++i)
 			{
-				DrawDebugLine(GetWorld(), FoundPath[i], FoundPath[i + 1], FColor::Green, false, 10.f, 0, 5.f);
+				DrawDebugLine(GetWorld(), FoundPath[i], FoundPath[i + 1], FColor::Green, false, 10.f, 0, 2.f);
 			}
 		}
 	}
@@ -169,62 +158,4 @@ bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
 	}
 
 	return bPathFound;
-}
-
-//To Do. 아래 코드 수정 필요함. 보정용 함수인데 대충짠 코드이기 때문에 무조건 수정하거나 없앨 것
-TArray<FVector> UPathfindingComponent::ApplyStringPulling(const TArray<FVector>& RawPath) const
-{
-	// 경로에 점이 2개 미만이면 단순화할 필요가 없음
-	if (RawPath.Num() < 2)
-	{
-		return RawPath;
-	}
-
-	TArray<FVector> SmoothedPath;
-	SmoothedPath.Add(RawPath[0]); // 시작점은 항상 포함
-
-	int32 CurrentIndex = 0;
-	while (CurrentIndex < RawPath.Num() - 1)
-	{
-		int32 LookAheadIndex = CurrentIndex + 1;
-		int32 LastVisibleIndex = CurrentIndex; // 현재까지 장애물 없이 도달 가능한 마지막 인덱스
-
-		while (LookAheadIndex < RawPath.Num())
-		{
-			FHitResult HitResult;
-			// CurrentIndex의 위치에서 LookAheadIndex의 위치까지 광선을 쏴서 장애물이 있는지 확인
-			const bool bHit = GetWorld()->LineTraceSingleByChannel(
-				HitResult,
-				RawPath[CurrentIndex], // 시작점
-				RawPath[LookAheadIndex], // 끝점
-				ECC_Visibility // 충돌을 검사할 채널 (보통 ECC_Visibility나 ECC_WorldStatic을 사용)
-			);
-			
-			if (bHit)
-			{
-				// 장애물에 부딪혔다면, 바로 이전 지점까지만 직선으로 이동 가능했다는 의미
-				// 루프를 중단하고 LastVisibleIndex를 다음 웨이포인트로 사용
-				break;
-			}
-			else
-			{
-				// 장애물이 없다면, 이 지점까지는 직선으로 올 수 있음. LastVisibleIndex를 업데이트하고 계속 탐색
-				LastVisibleIndex = LookAheadIndex;
-				LookAheadIndex++;
-			}
-		}
-
-		// 장애물 없이 갈 수 있었던 가장 먼 지점을 새로운 경로에 추가
-		// 만약 바로 다음 점조차 장애물에 막혔다면, LastVisibleIndex는 CurrentIndex와 같을 것이고,
-		// 이 경우 바로 다음 점(CurrentIndex + 1)을 경로에 추가해야 함.
-		if (LastVisibleIndex == CurrentIndex)
-		{
-			LastVisibleIndex = CurrentIndex + 1;
-		}
-		
-		SmoothedPath.Add(RawPath[LastVisibleIndex]);
-		CurrentIndex = LastVisibleIndex; // 새로운 시작점으로 설정
-	}
-
-	return SmoothedPath;
 }
