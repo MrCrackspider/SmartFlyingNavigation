@@ -58,7 +58,9 @@ protected:
 	// --- 유틸리티 함수 ---
 	int32 CalculateHeuristic(const FIntVector& A, const FIntVector& B) const;
 	int32 GetMoveCost(const FIntVector& A, const FIntVector& B) const;
-
+public:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding|Performance")
+	int32 MaxNodesToProcessForPathfinding = 2000;
 private:
 	TWeakObjectPtr<AFenwickVoxelVolume> Volume;
 

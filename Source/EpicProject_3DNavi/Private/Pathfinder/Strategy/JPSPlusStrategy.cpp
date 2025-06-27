@@ -28,6 +28,14 @@ void UJPSPlusStrategy::Initialize(AVoxelVolume* InVolume)
 bool UJPSPlusStrategy::FindPathWithStrategy(const FIntVector& StartIndex, const FIntVector& EndIndex,
                                             int32 AgentRadiusInVoxel, TArray<FIntVector>& OutPath)
 {
+
+	if (!Volume.IsValid())
+	{
+		UE_LOG(LogTemp, Error, TEXT("UJPSPlusStrategy: VoxelVolume is not valid. Pathfinding aborted."));
+		OutPath.Empty();
+		return false;
+	}
+	
 	const EPathfindingResult Result = FindPathInternal(StartIndex, EndIndex, OutPath, AgentRadiusInVoxel);
 
 	// 실패 원인에 대한 로그 기록 (디버깅 용이성)
@@ -69,10 +77,8 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 	{
 		return EPathfindingResult::Failed_InvalidStart;
 	}
-	if (!Volume->IsRegionWalkable(EndIndex, AgentRadiusInVoxels))
-	{
-		return EPathfindingResult::Failed_InvalidGoal;
-	}
+	const bool bIsGoalValid = Volume->IsRegionWalkable(EndIndex, AgentRadiusInVoxels);
+	
 
 	OpenSet.Empty();
 	OpenSetLookup.Empty();
@@ -87,20 +93,44 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 	OpenSetLookup.Add(StartIndex, StartNode);
 
 	TSharedPtr<FPathNode> GoalNode = nullptr;
+	// --- 실시간 최적 노드 추적을 위한 변수 추가 ---
+	TSharedPtr<FPathNode> BestPartialNode = nullptr;
+	int64 MinHeuristic = MAX_int64;
 
+	int32 ProcessedNodeCount = 0;
+	
 	while (OpenSet.Num() > 0)
 	{
+		if (++ProcessedNodeCount > MaxNodesToProcessForPathfinding) break;
+		
 		TSharedPtr<FPathNode> CurrentNode;
 		OpenSet.HeapPop(CurrentNode, FPathNodePtrCompare());
 		OpenSetLookup.Remove(CurrentNode->Position);
 		ClosedSet.Add(CurrentNode->Position, CurrentNode);
-
+		
+		if (CurrentNode->HCost < MinHeuristic)
+		{
+			if (CurrentNode->Parent.IsValid())
+			{
+				if (IsAgentMoveFeasible(CurrentNode->Parent->Position, CurrentNode->Position, AgentRadiusInVoxels))
+				{
+					// 이동이 가능할 때만 최적 후보로 인정하고 업데이트.
+					MinHeuristic = CurrentNode->HCost;
+					BestPartialNode = CurrentNode;
+				}
+			}
+			else
+			{
+				// 부모가 없는 경우 (시작 노드) 항상 유효.
+				MinHeuristic = CurrentNode->HCost;
+				BestPartialNode = CurrentNode;
+			}
+		}
 		if (CurrentNode->Position == EndIndex)
 		{
 			GoalNode = CurrentNode;
 			break;
 		}
-
 		TArray<TSharedPtr<FPathNode>> Successors;
 		IdentifySuccessors(CurrentNode, EndIndex, AgentRadiusInVoxels, Successors);
 
@@ -116,7 +146,6 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 				if (NewGCost < (*ExistingNodePtr)->GCost)
 				{
 					(*ExistingNodePtr)->SetParent(CurrentNode, NewGCost, (*ExistingNodePtr)->HCost);
-					OpenSet.Heapify(FPathNodePtrCompare());
 				}
 			}
 			else
@@ -136,7 +165,27 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 		OptimizePath_ThetaStarStyle(GridPath, OutPath, AgentRadiusInVoxels);
 		return EPathfindingResult::Success;
 	}
+	else // 길찾기에 실패한 경우 (목표가 무효하거나 도달 불가)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Full path not found. Attempting to find a partial path..."));
+		
+		if (BestPartialNode.IsValid())
+		{
+			GoalNode = BestPartialNode;
+			
+			TArray<FIntVector> GridPath;
 
+			// --- 스레드 안전성 강화 ---
+			if (!Volume.IsValid()) return EPathfindingResult::Failed_Unreachable;
+			RetracePath(GoalNode, GridPath);
+
+			if (!Volume.IsValid()) return EPathfindingResult::Failed_Unreachable;
+			OptimizePath_ThetaStarStyle(GridPath, OutPath, AgentRadiusInVoxels);
+		
+			return EPathfindingResult::Success_Partial;
+		}
+	}
+	
 	return EPathfindingResult::Failed_Unreachable;
 }
 
@@ -209,14 +258,34 @@ void UJPSPlusStrategy::IdentifySuccessors(const TSharedPtr<FPathNode>& Node, con
 	}
 
 	// 3. 최종 방향 목록에 대해 점프 수행
-	for (const FIntVector& Dir : DirsToSearch)
+	// for (const FIntVector& Dir : DirsToSearch)
+	// {
+	// 	TOptional<FIntVector> JumpPoint = Jump(Node->Position, Dir, Goal, AgentRadiusInVoxels);
+	// 	if (JumpPoint.IsSet())
+	// 	{
+	// 		OutSuccessors.Add(MakeShared<FPathNode>(JumpPoint.GetValue()));
+	// 	}
+	// }
+
+	FCriticalSection SuccessorMutex;
+
+	// 3. ParallelFor를 사용하여 탐색할 방향 목록(DirsToSearch)을 여러 스레드에 분배합니다.
+	ParallelFor(DirsToSearch.Num(), [&](int32 Index)
 	{
+		// 이 람다 함수는 여러 스레드에서 동시에 실행됩니다.
+		const FIntVector& Dir = DirsToSearch[Index];
+
+		// 각 스레드는 자신에게 할당된 방향에 대해서만 Jump를 수행합니다.
 		TOptional<FIntVector> JumpPoint = Jump(Node->Position, Dir, Goal, AgentRadiusInVoxels);
+		
 		if (JumpPoint.IsSet())
 		{
+			// 점프 포인트를 찾았다면, 결과 배열(OutSuccessors)에 추가합니다.
+			// TArray는 스레드에 안전하지 않으므로, 반드시 Mutex로 잠가서 데이터 충돌을 방지해야 합니다.
+			FScopeLock Lock(&SuccessorMutex);
 			OutSuccessors.Add(MakeShared<FPathNode>(JumpPoint.GetValue()));
 		}
-	}
+	});
 }
 
 TOptional<FIntVector> UJPSPlusStrategy::Jump(const FIntVector& CurrentPos, const FIntVector& Direction,
@@ -260,6 +329,11 @@ TOptional<FIntVector> UJPSPlusStrategy::Jump(const FIntVector& CurrentPos, const
 bool UJPSPlusStrategy::IsAgentMoveFeasible(const FIntVector& From, const FIntVector& To,
                                            int32 AgentRadiusInVoxels) const
 {
+	if (Volume.IsValid() == false)
+	{
+		return false;
+	}
+	
 	if (!Volume->IsRegionWalkable(To, AgentRadiusInVoxels))
 	{
 		return false;
@@ -280,7 +354,8 @@ bool UJPSPlusStrategy::IsAgentMoveFeasible(const FIntVector& From, const FIntVec
 
 	// 3. Swept Volume 전체에 대해 단 한 번의 펜윅 트리 쿼리를 수행합니다.
 	// 이 영역에 장애물이 하나라도 있으면 이동 불가.
-	if (Volume->FenwRangeSum(SweptMin, SweptMax) > 0)
+	
+	if (Volume.IsValid() && Volume->FenwRangeSum(SweptMin, SweptMax) > 0)
 	{
 		return false;
 	}
@@ -291,6 +366,12 @@ bool UJPSPlusStrategy::IsAgentMoveFeasible(const FIntVector& From, const FIntVec
 void UJPSPlusStrategy::RetracePath(TSharedPtr<FPathNode> EndNode, TArray<FIntVector>& OutGridPath) const
 {
 	// 안전한 경로 복원: Bresenham 알고리즘을 이용한 보간
+	if (!Volume.IsValid()) 
+	{
+		OutGridPath.Empty();
+		return;
+	}
+	
 	OutGridPath.Empty();
 	TArray<FIntVector> JumpPoints;
 
@@ -422,6 +503,11 @@ void UJPSPlusStrategy::OptimizePath_ThetaStarStyle(const TArray<FIntVector>& Gri
 
 bool UJPSPlusStrategy::HasLineOfSight(const FIntVector& From, const FIntVector& To, int32 AgentRadiusInVoxels) const
 {
+	if (Volume.IsValid() == false)
+	{
+		return false;
+	}
+	
 	FIntVector Diff = To - From;
 	FIntVector Step(FMath::Sign(Diff.X), FMath::Sign(Diff.Y), FMath::Sign(Diff.Z));
 	FIntVector AbsDiff(FMath::Abs(Diff.X), FMath::Abs(Diff.Y), FMath::Abs(Diff.Z));

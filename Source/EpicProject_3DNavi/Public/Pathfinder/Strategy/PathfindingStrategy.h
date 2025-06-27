@@ -13,6 +13,7 @@ UENUM(BlueprintType)
 enum class EPathfindingResult : uint8
 {
     Success,
+    Success_Partial,
     Failed_Unreachable,
     Failed_InvalidStart,
     Failed_InvalidGoal,

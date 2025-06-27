@@ -15,6 +15,7 @@ enum class EPathfindingState : uint8
 {
 	Idle,			// 대기 중
 	Moving,			// 경로 따라 이동 중
+	RequestingPath, // 백그라운드 스레드에 경로를 요청하고 결과를 기다리는 중
 	PathInvalidated	// 경로가 막혀 재탐색 대기 중
 };
 
@@ -36,6 +37,7 @@ public:
 	EPathfindingState CurrentState;
 	FTimerHandle RepathCooldownTimer;
 
+	
 	// 재탐색 타이머가 만료되었을 때 호출될 함수
 	void OnRepathTimerFired();
 	
@@ -55,14 +57,20 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding|Dynamic")
 	FVector CurrentTargetLocation;
-	
 private:
 	// 현재 이동 목표인 경로상의 인덱스 (-1은 이동 중이 아님을 의미)
 	int32 CurrentPathIndex;
+	
+	TFuture<TArray<FIntVector>> PathfindingTaskFuture;
+private:
 	bool IsPathAheadValid() const;
+	void HandleMovingState(float DeltaTime);
+	void HandleRequestingPathState();
+	bool CheckAndHandlePathInvalidation();
+	void FollowCurrentPath(float DeltTime);
 protected:
 	virtual void BeginPlay() override;
-	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason);
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<UPathfindingStrategy> PathfindingStrategyClass;
