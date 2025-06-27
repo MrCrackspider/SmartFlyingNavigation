@@ -8,6 +8,17 @@
 
 class UPathfindingSubsystem;
 class AVoxelVolume;
+
+UENUM(BlueprintType)
+enum class EPathfindingResult : uint8
+{
+    Success,
+    Failed_Unreachable,
+    Failed_InvalidStart,
+    Failed_InvalidGoal,
+    Failed_Timeout
+};
+
 /**
  * 
  */
@@ -24,6 +35,7 @@ public:
         const FIntVector& EndIndex,
         TArray<FIntVector>& OutPath
     );
-
+    virtual bool FindPathWithStrategy(const FIntVector& StartIndex, const FIntVector& EndIndex, int32 AgentRadiusInVoxels, TArray<FIntVector>& OutPath);
+ 
     virtual FName GetStrategyName() const;
 };

@@ -8,18 +8,26 @@
 
 static constexpr uint32 CHUNK_SIZE = 64;
 
+struct FDebugBoxCullingResult
+{
+	TArray<FVector> VisibleStaticVoxels;
+	TArray<FVector> VisibleDynamicVoxels;
+};
+
+
 UCLASS()
 class EPICPROJECT_3DNAVI_API AVoxelVolume : public AActor
 {
 	GENERATED_BODY()
 
-public:	
+public:
 	AVoxelVolume();
 
 	virtual void Tick(float DeltaTime) override;
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
 	bool IsVoxelWalkable(const FIntVector& Index) const;
@@ -30,43 +38,47 @@ public:
 
 	void InitializeMap(const FIntVector& InMapSize);
 
-	void BuildStaticObstacles();
-	void UpdateDynamicObstacles();
-	
+	virtual void BuildStaticObstacles();
+	virtual void UpdateDynamicObstacles();
+	void DrawDebugVoxelObstacles() const;
+
 	void SetStaticObstacle(const FIntVector& Index, bool bIsObstacle);
-	
+
 	bool IsIndexValid(const FIntVector& Index) const;
-	
+
 	UFUNCTION(BlueprintPure, Category = "VoxelVolume|Coordinates")
 	FVector VoxelIndexToWorld(const FIntVector& VoxelIndex) const;
 	UFUNCTION(BlueprintPure, Category = "VoxelVolume|Coordinates")
 	FIntVector WorldToVoxelIndex(const FVector& WorldPosition) const;
 	bool CheckVoxelOverlap(const FIntVector& VoxelIndex, UPrimitiveComponent* ComponentToTest) const;
 	bool ClampVoxelIndicesToVolume(FIntVector& MinVoxelIndex, FIntVector& MaxVoxelIndex) const;
-	bool GetOverlappingComponentsInVolume(const FCollisionObjectQueryParams& ObjectQueryParams, TArray<FOverlapResult>& OutResults) const;
-	void DrawDebugVoxelObstacles() const;
+	bool GetOverlappingComponentsInVolume(const FCollisionObjectQueryParams& ObjectQueryParams,
+	                                      TArray<FOverlapResult>& OutResults) const;
+
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding", meta = (AllowPrivateAccess = "true"))
-	FIntVector MapSize;// 들어가는 복셀의 갯수
+	FIntVector MapSize; // 들어가는 복셀의 갯수
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding", meta = (AllowPrivateAccess = "true"))
 	float VoxelExtent;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VoxelVolume|Debug")
 	bool bDrawDebugObstacles = true; // 디버그 드로잉 활성화 여부
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VoxelVolume|Debug", meta = (EditCondition = "bDrawDebugObstacles"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VoxelVolume|Debug",
+		meta = (EditCondition = "bDrawDebugObstacles"))
 	FColor DebugObstacleColor = FColor::Red;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VoxelVolume|Debug", meta = (EditCondition = "bDrawDebugObstacles"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VoxelVolume|Debug",
+		meta = (EditCondition = "bDrawDebugObstacles"))
 	float DebugObstacleThickness = 2.0f;
-private:
 
+protected:
 	// 비트마스크 데이터. 각 축을 64개 단위로 묶음
 	TArray<uint64_t> ObstacleBitmasks_X;
 	TArray<uint64_t> ObstacleBitmasks_Y;
 	TArray<uint64_t> ObstacleBitmasks_Z;
 
-	// 동적 장애물들이 위치한 복셀들의 인덱스를 저장하는 Map
-	TMap<FIntVector, bool> DynamicObstacleOverriddenVoxels;
+	TMap<FIntVector, int32> DynamicObstacleVoxelCounts;
+
 public:
 	FIntVector GetMapSize() const { return MapSize; }
 	float GetVoxelExtent() const { return VoxelExtent; }
@@ -95,4 +107,13 @@ public:
 		return (Y * MapSize.X + X) * ChunksAlongZ + ChunkZ;
 	}
 
+protected: // Draw DebugBox
+	TSet<FIntVector> StaticObstacleVoxels;
+
+	void StartAsyncCullingTask();
+	bool IsVoxelVisible(const UWorld* World, const FVector& ViewLocation, const FVector& VoxelWorldPos,
+	                    const FVector& VoxelBoxExtent, const FCollisionQueryParams& OcclusionParams) const;
+	TSharedPtr<FDebugBoxCullingResult> LastCompletedCullingResult;
+
+	TFuture<TSharedPtr<FDebugBoxCullingResult>> CullingTaskFuture;
 };

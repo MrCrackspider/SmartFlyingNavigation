@@ -15,6 +15,12 @@ bool UPathfindingStrategy::FindPathWithStrategy(
     return false;
 }
 
+bool UPathfindingStrategy::FindPathWithStrategy(const FIntVector& StartIndex, const FIntVector& EndIndex,
+    int32 AgentRadiusInVoxels, TArray<FIntVector>& OutPath)
+{
+    return false;
+}
+
 FName UPathfindingStrategy::GetStrategyName() const
 {
 	return NAME_None;

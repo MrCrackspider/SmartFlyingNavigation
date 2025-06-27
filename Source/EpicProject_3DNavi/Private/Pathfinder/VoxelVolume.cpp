@@ -5,6 +5,11 @@
 
 #include "EpicProject_3DNavi/Voxel/DynamicObstacle.h"
 
+#include "Engine/LocalPlayer.h"
+#include "GameFramework/PlayerController.h"
+#include "SceneView.h"
+#include "Kismet/GameplayStatics.h"
+
 // Sets default values
 AVoxelVolume::AVoxelVolume() : MapSize(64, 64, 64), VoxelExtent(100.f)
 {
@@ -21,10 +26,40 @@ void AVoxelVolume::BeginPlay()
 	BuildStaticObstacles();
 }
 
+void AVoxelVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	Super::EndPlay(EndPlayReason);
+	if (CullingTaskFuture.IsValid())
+	{
+		CullingTaskFuture.Wait();
+	}
+}
+
 void AVoxelVolume::Tick(float DeltaTime)
 {
-	Super::Tick(DeltaTime);
 	UpdateDynamicObstacles();
+
+	// 1. 이전 프레임의 비동기 작업이 완료되었는지 확인합니다.
+	if (CullingTaskFuture.IsValid() && CullingTaskFuture.IsReady())
+	{
+		// 2. 완료되었다면, 계산 결과를 가져와 멤버 변수를 업데이트합니다.
+		// Get()은 결과를 한 번만 가져올 수 있습니다.
+		TSharedPtr<FDebugBoxCullingResult> NewResult = CullingTaskFuture.Get();
+		if (NewResult.IsValid())
+		{
+			LastCompletedCullingResult = NewResult;
+		}
+		CullingTaskFuture.Reset(); // Future를 리셋하여 다음 작업을 받을 준비를 합니다.
+	}
+
+	// 3. 현재 실행 중인 작업이 없다면, 새로운 비동기 작업을 시작합니다.
+	if (!CullingTaskFuture.IsValid())
+	{
+		StartAsyncCullingTask();
+	}
+
+	// 4. 실제 디버그 그리기는 매 프레임 호출됩니다.
+	// 이 함수는 이제 계산을 하지 않고, LastCompletedCullingResult에 담긴 '지난 프레임의 결과'를 그리기만 합니다.
 	if (bDrawDebugObstacles)
 	{
 		DrawDebugVoxelObstacles();
@@ -155,6 +190,7 @@ void AVoxelVolume::BuildStaticObstacles()
 					FIntVector CurrentVoxelIndex(x, y, z);
 					if (CheckVoxelOverlap(CurrentVoxelIndex, OverlappedComponent))
 					{
+						StaticObstacleVoxels.Add(CurrentVoxelIndex);
 						SetStaticObstacle(CurrentVoxelIndex, true);
 					}
 				}
@@ -170,94 +206,96 @@ void AVoxelVolume::UpdateDynamicObstacles()
 		return;
 	}
 
-	// 1. 이전 프레임의 동적 장애물 복셀 상태 복원
-	for (const TPair<FIntVector, bool>& Pair : DynamicObstacleOverriddenVoxels)
-	{
-		const FIntVector& Index = Pair.Key; // const 참조로 변경
-		const bool bWasOriginallyObstacle = Pair.Value;
-		if (IsIndexValid(Index))
-		{
-			SetStaticObstacle(Index, bWasOriginallyObstacle);
-		}
-	}
-	DynamicObstacleOverriddenVoxels.Empty();
+	// --- 1. 현재 프레임의 동적 장애물 상태 계산 ---
+	// 이번 프레임에 각 복셀을 점유한 장애물의 수를 계산하여 TMap에 저장합니다.
+	TMap<FIntVector, int32> CurrentFrameVoxelCounts;
 
+	// 물리 쿼리를 위한 파라미터 설정
 	FCollisionObjectQueryParams DynamicObjectQueryParams;
-
 	DynamicObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
 	DynamicObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
 	DynamicObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
+
+	// 볼륨 내의 모든 동적 장애물 컴포넌트를 찾습니다.
 	TArray<FOverlapResult> OverlapResults;
-	if (!GetOverlappingComponentsInVolume(DynamicObjectQueryParams, OverlapResults))
+	if (GetOverlappingComponentsInVolume(DynamicObjectQueryParams, OverlapResults))
 	{
-	}
-
-	for (const FOverlapResult& Result : OverlapResults)
-	{
-		AActor* OverlappedActor = Result.GetActor();
-		UPrimitiveComponent* OverlappedComponent = Result.GetComponent(); // 오버랩된 특정 프리미티브 컴포넌트
-
-		if (OverlappedActor == nullptr || OverlappedComponent == nullptr)
+		for (const FOverlapResult& Result : OverlapResults)
 		{
-			continue;
-		}
+			AActor* OverlappedActor = Result.GetActor();
+			UPrimitiveComponent* OverlappedComponent = Result.GetComponent();
 
-		// 이 액터가 UDynamicObstacle 컴포넌트를 가지고 있는지 확인
-		if (OverlappedActor->GetComponentByClass<UDynamicObstacle>() == nullptr)
-		{
-			continue; // UDynamicObstacle 컴포넌트가 없으면 이 액터/컴포넌트는 동적 장애물로 처리하지 않음
-		}
-
-		if (OverlappedComponent->IsQueryCollisionEnabled() == false)
-		{
-			continue;
-		}
-
-		FVector ObstacleCompOrigin, ObstacleCompExtent;
-		OverlappedComponent->Bounds.GetBox().GetCenterAndExtents(ObstacleCompOrigin, ObstacleCompExtent);
-		FBox ObstacleCompBounds(ObstacleCompOrigin - ObstacleCompExtent, ObstacleCompOrigin + ObstacleCompExtent);
-
-		FIntVector MinVoxelIndex = WorldToVoxelIndex(ObstacleCompBounds.Min);
-
-		// "한 줄 더 생기는" 문제 해결을 위해 Max 좌표에서 작은 값을 뺌
-		const float Epsilon = KINDA_SMALL_NUMBER; // 1.e-4f
-		FVector AdjustedMaxBound = ObstacleCompBounds.Max - FVector(Epsilon, Epsilon, Epsilon);
-		FIntVector MaxVoxelIndex = WorldToVoxelIndex(AdjustedMaxBound);
-
-		// ClampVoxelIndicesToVolume 헬퍼 함수 사용
-		if (!ClampVoxelIndicesToVolume(MinVoxelIndex, MaxVoxelIndex))
-		{
-			UE_LOG(LogTemp, Error, TEXT("UpdateDynamicObstacles: No IsQueryCollisionEnabled"));
-			continue;
-		}
-
-		for (int32 z = MinVoxelIndex.Z; z <= MaxVoxelIndex.Z; ++z)
-		{
-			for (int32 y = MinVoxelIndex.Y; y <= MaxVoxelIndex.Y; ++y)
+			// 유효성 검사: UDynamicObstacle 컴포넌트가 있는지, 콜리전이 활성화되어 있는지 확인
+			if (!OverlappedActor || !OverlappedComponent || !OverlappedComponent->IsQueryCollisionEnabled() || !
+				OverlappedActor->GetComponentByClass<UDynamicObstacle>())
 			{
-				for (int32 x = MinVoxelIndex.X; x <= MaxVoxelIndex.X; ++x)
+				continue;
+			}
+
+			// 장애물의 바운딩 박스 계산
+			const FBox ObstacleCompBounds = OverlappedComponent->Bounds.GetBox();
+			FIntVector MinVoxelIndex = WorldToVoxelIndex(ObstacleCompBounds.Min);
+			FIntVector MaxVoxelIndex = WorldToVoxelIndex(ObstacleCompBounds.Max - FVector(KINDA_SMALL_NUMBER));
+
+			if (!ClampVoxelIndicesToVolume(MinVoxelIndex, MaxVoxelIndex))
+			{
+				continue;
+			}
+
+			// 장애물이 점유하는 모든 복셀에 대해...
+			for (int32 z = MinVoxelIndex.Z; z <= MaxVoxelIndex.Z; ++z)
+			{
+				for (int32 y = MinVoxelIndex.Y; y <= MaxVoxelIndex.Y; ++y)
 				{
-					FIntVector CurrentVoxelIndex(x, y, z);
-
-					// 이미 이번 프레임에서 다른 동적 장애물 컴포넌트에 의해 이 복셀이 처리되었다면 건너뜀
-					// (여러 동적 장애물이 겹칠 때, 하나의 상태만 저장해도 되는 경우에 대한 최적화)
-					if (DynamicObstacleOverriddenVoxels.Contains(CurrentVoxelIndex))
+					for (int32 x = MinVoxelIndex.X; x <= MaxVoxelIndex.X; ++x)
 					{
-						UE_LOG(LogTemp, Verbose, TEXT("DynamicObstacleOverriddenVoxels"));
-						continue;
-					}
-
-					// CheckVoxelOverlap 헬퍼 함수 사용
-					if (CheckVoxelOverlap(CurrentVoxelIndex, OverlappedComponent))
-					{
-						bool bWasOriginallyObstacle = !IsVoxelWalkable(CurrentVoxelIndex);
-						DynamicObstacleOverriddenVoxels.Add(CurrentVoxelIndex, bWasOriginallyObstacle);
-						SetStaticObstacle(CurrentVoxelIndex, true);
+						const FIntVector CurrentVoxelIndex(x, y, z);
+						if (CheckVoxelOverlap(CurrentVoxelIndex, OverlappedComponent))
+						{
+							// 해당 복셀의 카운트를 1 증가시킵니다.
+							// 키가 없으면 0으로 자동 추가된 후 1이 됩니다.
+							CurrentFrameVoxelCounts.FindOrAdd(CurrentVoxelIndex, 0)++;
+						}
 					}
 				}
 			}
 		}
 	}
+
+	// --- 2. 이전 프레임과 현재 프레임을 비교하여 '실제로 변경된' 복셀만 업데이트 ---
+
+	// 2-1. '사라진' 장애물 처리: 지난 프레임에는 있었지만, 현재 프레임에는 없는 복셀
+	for (const auto& Pair : DynamicObstacleVoxelCounts)
+	{
+		const FIntVector& Index = Pair.Key;
+		const int32 PreviousCount = Pair.Value;
+
+		// 현재 프레임의 카운트를 가져옵니다. 키가 없으면 0을 반환합니다.
+		const int32 CurrentCount = CurrentFrameVoxelCounts.FindRef(Index);
+
+		// 이전에는 장애물이었는데(PreviousCount > 0), 이제는 아니다(CurrentCount == 0) -> 장애물 상태를 제거
+		if (PreviousCount > 0 && CurrentCount == 0)
+		{
+			SetStaticObstacle(Index, false);
+		}
+	}
+
+	// 2-2. '새로 생긴' 장애물 처리: 지난 프레임에는 없었지만, 현재 프레임에는 있는 복셀
+	for (const auto& Pair : CurrentFrameVoxelCounts)
+	{
+		const FIntVector& Index = Pair.Key;
+
+		// 지난 프레임의 맵에 이 키가 없었다면, 이 복셀은 완전히 새로운 동적 장애물입니다.
+		if (!DynamicObstacleVoxelCounts.Contains(Index))
+		{
+			// 장애물 상태로 설정합니다.
+			SetStaticObstacle(Index, true);
+		}
+	}
+
+	// --- 3. 다음 프레임을 위해 현재 상태를 저장 ---
+	// MoveTemp를 사용하여 불필요한 데이터 복사를 피하고 소유권을 이전합니다.
+	DynamicObstacleVoxelCounts = MoveTemp(CurrentFrameVoxelCounts);
 }
 
 void AVoxelVolume::SetStaticObstacle(const FIntVector& Index, bool bIsObstacle)
@@ -370,8 +408,6 @@ bool AVoxelVolume::GetOverlappingComponentsInVolume(const FCollisionObjectQueryP
 	                                       CollisionQueryParams);
 }
 
-#include "Async/Async.h"
-
 bool AVoxelVolume::IsIndexValid(const FIntVector& Index) const
 {
 	return Index.X >= 0 && Index.X < MapSize.X &&
@@ -401,168 +437,169 @@ FIntVector AVoxelVolume::WorldToVoxelIndex(const FVector& WorldPosition) const
 	return FIntVector(IndexX, IndexY, IndexZ);
 }
 
+bool AVoxelVolume::IsVoxelVisible(const UWorld* World, const FVector& ViewLocation, const FVector& VoxelWorldPos,
+                                  const FVector& VoxelBoxExtent,
+                                  const FCollisionQueryParams& OcclusionParams) const
+{
+	// --- 1단계: 빠른 경로 (Fast Path) ---
+	// 대부분의 복셀은 완전히 보이거나 완전히 가려져 있으므로, 가장 먼저 중심점을 검사합니다.
+	// 이 검사만으로도 대다수의 경우를 빠르게 처리할 수 있습니다.
+	FHitResult HitResult;
+	if (!World->LineTraceSingleByObjectType(
+		HitResult,
+		ViewLocation,
+		VoxelWorldPos,
+		FCollisionObjectQueryParams(ECC_WorldStatic), // 'WorldStatic' 타입의 오브젝트만 장애물로 간주
+		OcclusionParams
+	))
+	{
+		return true;
+	}
+
+	// --- 2단계: 정확한 경로 (Accurate Path) ---
+	for (int32 i = 0; i < 8; ++i)
+	{
+		const FVector CornerDirection(
+			(i & 1) ? 1.f : -1.f,
+			(i & 2) ? 1.f : -1.f,
+			(i & 4) ? 1.f : -1.f
+		);
+
+		// 복셀 중심에서 꼭짓점까지의 최종 월드 좌표를 계산합니다.
+		const FVector CornerWorldPos = VoxelWorldPos + CornerDirection * VoxelBoxExtent;
+
+		// 각 꼭짓점으로 라인 트레이스를 수행합니다.
+		if (!World->LineTraceSingleByObjectType(
+			HitResult,
+			ViewLocation,
+			CornerWorldPos,
+			FCollisionObjectQueryParams(ECC_WorldStatic),
+			OcclusionParams
+		))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void AVoxelVolume::StartAsyncCullingTask()
+{
+	// --- 스레드에 안전하게 데이터를 전달하기 위해 필요한 정보들을 복사합니다. ---
+	UWorld* World = GetWorld();
+	if (IsValid(World) == false) return;
+	APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+	if (!PC) return;
+
+	// 카메라 정보는 게임 스레드에서 미리 가져옵니다.
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	PC->GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	int32 ViewportSizeX, ViewportSizeY;
+	PC->GetViewportSize(ViewportSizeX, ViewportSizeY);
+
+	// 복셀 데이터도 복사합니다.
+	TSet<FIntVector> StaticVoxelsCopy = StaticObstacleVoxels;
+	TArray<FIntVector> DynamicVoxelsCopy;
+	DynamicObstacleVoxelCounts.GetKeys(DynamicVoxelsCopy);
+
+	FVector VoxelSizeCopy = FVector(VoxelExtent * 0.5);
+	const FTransform ActorTransformCopy = GetActorTransform();
+
+	FCollisionQueryParams OcclusionParams;
+	OcclusionParams.bTraceComplex = false;
+	OcclusionParams.AddIgnoredActor(this);
+	if (PC->GetPawn())
+	{
+		OcclusionParams.AddIgnoredActor(PC->GetPawn());
+	}
+	const float VoxelExtentCopy = VoxelExtent;
+
+	// --- 비동기 작업(Task)을 스레드 풀(ThreadPool)에 보냅니다. ---
+	CullingTaskFuture = Async(EAsyncExecution::ThreadPool, [this, World, VoxelSizeCopy, StaticVoxelsCopy, PC,
+		                          ViewportSizeX, ViewportSizeY, ViewLocation,DynamicVoxelsCopy, OcclusionParams,
+		                          ActorTransformCopy,VoxelExtentCopy
+	                          ]() -> TSharedPtr<FDebugBoxCullingResult>
+	                          {
+		                          // 월드가 유효한지 반드시 확인합니다.
+		                          if (IsValid(World) == false)
+		                          {
+			                          return nullptr;
+		                          }
+
+		                          // 스레드에서 사용할 로컬 변수들을 설정합니다.
+
+		                          const FVector VoxelBoxHalfExtent = FVector(VoxelExtentCopy * 0.5f);
+		                          TSharedPtr<FDebugBoxCullingResult> Result = MakeShared<FDebugBoxCullingResult>();
+
+		                          // --- 정적 복셀에 대한 무거운 계산 수행 ---
+		                          for (const FIntVector& VoxelIndex : StaticVoxelsCopy)
+		                          {
+			                          const FVector VoxelCenterLocal = FVector(VoxelIndex) * VoxelExtentCopy +
+				                          VoxelBoxHalfExtent;
+			                          const FVector VoxelWorldPos = ActorTransformCopy.TransformPosition(
+				                          VoxelCenterLocal);
+
+			                          FVector2D ScreenLocation;
+			                          if (UGameplayStatics::ProjectWorldToScreen(
+				                          PC, VoxelWorldPos, ScreenLocation, false))
+			                          {
+				                          if (ScreenLocation.X >= 0 && ScreenLocation.X <= ViewportSizeX &&
+					                          ScreenLocation.Y >= 0 && ScreenLocation.Y <= ViewportSizeY)
+				                          {
+					                          // IsVoxelVisible에 올바른 절반 크기를 전달합니다.
+					                          if (IsVoxelVisible(World, ViewLocation, VoxelWorldPos, VoxelBoxHalfExtent,
+					                                             OcclusionParams))
+					                          {
+						                            Result->VisibleStaticVoxels.Add(VoxelWorldPos);
+					                          }
+				                          }
+			                          }
+		                          }
+
+		                          for (const FIntVector& VoxelIndex : DynamicVoxelsCopy)
+		                          {
+			                          const FVector VoxelWorldPos = VoxelIndexToWorld(VoxelIndex);
+			                          FVector2D ScreenLocation;
+
+			                          if (UGameplayStatics::ProjectWorldToScreen(
+				                          PC, VoxelWorldPos, ScreenLocation, false))
+			                          {
+				                          if (ScreenLocation.X >= 0 && ScreenLocation.X <= ViewportSizeX &&
+					                          ScreenLocation.Y >= 0 && ScreenLocation.Y <= ViewportSizeY)
+				                          {
+					                          if (IsVoxelVisible(World, ViewLocation, VoxelWorldPos, VoxelBoxHalfExtent,
+					                                             OcclusionParams))
+					                          {
+						                          Result->VisibleDynamicVoxels.Add(VoxelWorldPos);
+					                          }
+				                          }
+			                          }
+		                          }
+
+		                          return Result;
+	                          });
+}
+
 void AVoxelVolume::DrawDebugVoxelObstacles() const
 {
-	UWorld* World = GetWorld();
-	if (!World || (MapSize.X == 0 && MapSize.Y == 0 && MapSize.Z == 0) || VoxelExtent <= 0.f)
+	if (LastCompletedCullingResult.IsValid())
 	{
-		return;
+		UWorld* World = GetWorld();
+		const FVector VoxelBoxExtent = FVector(VoxelExtent * 0.5);;
+
+		// 계산된 정적 복셀 그리기
+		for (const FVector& WorldPos : LastCompletedCullingResult->VisibleStaticVoxels)
+		{
+			DrawDebugBox(World, WorldPos, VoxelBoxExtent, FColor::Red, false, -1.f, 0, 1.0f);
+		}
+
+		// 계산된 동적 복셀 그리기
+		for (const FVector& WorldPos : LastCompletedCullingResult->VisibleDynamicVoxels)
+		{
+			DrawDebugBox(World, WorldPos, VoxelBoxExtent, FColor::Yellow, false, -1.f, 0, 2.0f);
+		}
 	}
-	// 람다에서 사용할 멤버 변수들을 값으로 캡처합니다.
-	const FIntVector CurrentMapSize = MapSize;
-	const float CurrentVoxelExtent = VoxelExtent;
-	const FColor CurrentDebugObstacleColor = DebugObstacleColor;
-	const float CurrentDebugObstacleThickness = DebugObstacleThickness;
-
-	// 액터와 월드의 약한 포인터를 캡처합니다.
-	TWeakObjectPtr<const AVoxelVolume> WeakThis(this);
-	TWeakObjectPtr<UWorld> WeakWorld(World);
-
-	// 비동기 작업을 백그라운드 스레드에서 실행합니다.
-	AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask,
-	          [WeakThis, WeakWorld, CurrentMapSize, CurrentVoxelExtent, CurrentDebugObstacleColor,
-		          CurrentDebugObstacleThickness]()
-	          {
-		          if (!WeakThis.IsValid()) // VoxelVolume 액터가 유효한지 확인
-		          {
-			          return;
-		          }
-		          TArray<FIntVector> ObstacleIndices;
-		          ObstacleIndices.Reserve(CurrentMapSize.X * CurrentMapSize.Y);
-
-		          for (int32 z = 0; z < CurrentMapSize.Z; ++z)
-		          {
-			          for (int32 y = 0; y < CurrentMapSize.Y; ++y)
-			          {
-				          
-				          const int32 ChunksAlongX = CurrentMapSize.X / CHUNK_SIZE;
-				          for (int32 ChunkX_idx = 0; ChunkX_idx < ChunksAlongX; ++ChunkX_idx)
-				          {
-					          const AVoxelVolume* StrongThis = WeakThis.Get();
-					          uint64 ObstacleChunkBits = StrongThis->GetObstacleChunk_X(ChunkX_idx, y, z);
-
-					          if (ObstacleChunkBits == 0)
-					          {
-						          continue;
-					          }
-
-					      
-					          for (int32 BitPos = 0; BitPos < CHUNK_SIZE; ++BitPos)
-					          {
-						          if ((ObstacleChunkBits & (1ULL << BitPos)) != 0) // BitPos 번째 비트가 1이면 장애물
-						          {
-							          const int32 x = ChunkX_idx * CHUNK_SIZE + BitPos;
-							          ObstacleIndices.Add(FIntVector(x, y, z));
-						          }
-					          }
-				          }
-			          }
-		          }
-
-		          if (ObstacleIndices.Num() == 0)
-		          {
-			          return; // 그릴 장애물이 없으면 종료
-		          }
-
-		          // 2. 게임 스레드: 수집된 인덱스를 기반으로 실제 그리기 작업 예약
-		          // 게임 스레드 람다 내부
-		          AsyncTask(ENamedThreads::GameThread,
-		                    [WeakThis, WeakWorld, ObstacleIndices, CurrentVoxelExtent, CurrentDebugObstacleColor,
-			                    CurrentDebugObstacleThickness]()
-		                    {
-			                    if (!WeakWorld.IsValid() || !WeakThis.IsValid()) return;
-			                    UWorld* StrongWorld = WeakWorld.Get();
-			                    const AVoxelVolume* StrongThis = WeakThis.Get();
-
-			                    APlayerController* PC = StrongWorld->GetFirstPlayerController();
-			                    if (!PC) return;
-
-			                    FVector CameraLocation;
-			                    FRotator CameraRotation;
-			                    PC->GetPlayerViewPoint(CameraLocation, CameraRotation);
-			                    FVector CameraForward = CameraRotation.Vector();
-
-			                    const FVector SingleVoxelHalfExtent(CurrentVoxelExtent * 0.5f);
-			                    const FQuat ActorQuat = StrongThis->GetActorQuat();
-
-			                    // 레이캐스트를 위한 콜리전 파라미터 설정
-			                    FCollisionQueryParams CollisionParams;
-			                    CollisionParams.AddIgnoredActor(PC->GetPawn()); // 플레이어 폰은 무시 (선택적)
-			                    CollisionParams.AddIgnoredActor(StrongThis); // VoxelVolume 자체도 무시
-
-			                    const float MinDist = CurrentVoxelExtent * 8.5f;
-			                    for (const FIntVector& VoxelIndex : ObstacleIndices)
-			                    {
-				                    const FVector VoxelWorldCenter = StrongThis->VoxelIndexToWorld(VoxelIndex);
-
-				                    // 1. 거리 기반 필터링 (필수)
-				                    float DistSq = FVector::DistSquared(VoxelWorldCenter, CameraLocation);
-
-				                    if (DistSq < FMath::Square(MinDist))
-				                    {
-					                    FVector Center = StrongThis->VoxelIndexToWorld(VoxelIndex);
-
-					                    DrawDebugBox(StrongWorld, Center, SingleVoxelHalfExtent, ActorQuat,
-					                                 CurrentDebugObstacleColor, false, -1.f, 0,
-					                                 CurrentDebugObstacleThickness);
-					                    continue;
-				                    }
-
-				                    FVector DirToVoxel = (VoxelWorldCenter - CameraLocation);
-				                    float ActualDistanceToVoxel = DirToVoxel.Size(); // 실제 거리
-				                    DirToVoxel.Normalize();
-				                    float FOV = PC->PlayerCameraManager->GetFOVAngle();
-				                    float CosHalfFov = FMath::Cos(FMath::DegreesToRadians(FOV * 0.5f));
-
-				                    if (FVector::DotProduct(CameraForward, DirToVoxel) < CosHalfFov)
-				                    {
-					                    continue;
-				                    }
-
-
-				                    // 3. 레이캐스트 기반 오클루전 테스트
-				                    FHitResult HitResult;
-				                    FVector RayStart = CameraLocation; // + DirToVoxel * (CurrentVoxelExtent * 0.1f);
-				                    FVector RayEnd = VoxelWorldCenter;
-
-				                    bool bHit = StrongWorld->LineTraceSingleByChannel(
-					                    HitResult,
-					                    RayStart, // 시작점
-					                    RayEnd, // 끝점
-					                    ECC_Visibility, // 가시성 채널 사용 (또는 ECC_WorldStatic 등)
-					                    CollisionParams
-				                    );
-
-				                    if (bHit)
-				                    {
-					                    // 무언가에 부딪혔다면
-					                    // 그 물체가 복셀보다 카메라에 더 가까운지 확인
-					                    // (VoxelWorldCenter - HitResult.ImpactPoint).IsNearlyZero(VoxelExtent * 0.1f) 등으로 복셀 자체 충돌 허용 가능
-					                    if ((HitResult.ImpactPoint - CameraLocation).SizeSquared() < (
-						                    ActualDistanceToVoxel - SingleVoxelHalfExtent.X) * (ActualDistanceToVoxel -
-						                    SingleVoxelHalfExtent.X) * 0.9f) // 복셀 표면보다 약간 안쪽과 비교
-					                    {
-						                    // 복셀에 도달하기 "전에" 다른 물체에 막혔음
-						                    continue;
-					                    }
-					                    // 만약 복셀 자체가 콜리전이 있다면, HitResult.GetActor() == StrongThis 이고 HitResult.Item (복셀인덱스) 등으로 구분해야하는데,
-					                    // DrawDebugBox는 콜리전이 없으므로 이 방식은 어려움.
-					                    // 여기서는 단순히 "복셀에 도달하기 전에 다른 것에 막히면 컬링"
-				                    }
-
-
-				                    DrawDebugBox(
-					                    StrongWorld,
-					                    VoxelWorldCenter,
-					                    SingleVoxelHalfExtent,
-					                    ActorQuat,
-					                    CurrentDebugObstacleColor,
-					                    false,
-					                    -1.0f,
-					                    0,
-					                    CurrentDebugObstacleThickness
-				                    );
-			                    }
-		                    });
-	          });
 }

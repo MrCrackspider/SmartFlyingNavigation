@@ -12,17 +12,6 @@ class AVoxelVolume;
 struct FPathNode;
 
 
- // 경로 탐색 결과 상태
-UENUM(BlueprintType)
-enum class EPathfindingResult : uint8
-{
-    Success,
-    Failed_Unreachable,
-    Failed_InvalidStart,
-    Failed_InvalidGoal,
-    Failed_Timeout
-};
-
 UCLASS()
 class EPICPROJECT_3DNAVI_API UJPSStrategy final : public UPathfindingStrategy
 {
