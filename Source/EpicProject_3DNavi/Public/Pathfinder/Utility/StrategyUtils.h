@@ -13,12 +13,11 @@ USTRUCT()
 struct FPathNode
 {
     GENERATED_BODY()
-
     FIntVector Position;
-    TSharedPtr<FPathNode> Parent;
-    int64  GCost = 0;
-    int64  HCost = 0;
-    int64  FCost = 0;
+    FPathNode* Parent = nullptr;
+    uint32 GCost = 0;
+    uint32 HCost = 0;
+    uint32 FCost = 0;
 
     FIntVector Direction; // 부모로부터 이 노드까지의 이동 방향
     bool bIsJumpPoint = false; // 이 노드가 점프 포인트인지 여부
@@ -35,7 +34,7 @@ struct FPathNode
         FCost = GCost + HCost;
     }
 
-    void SetParent(const TSharedPtr<FPathNode>& InParent, int64  NewGCost, int64  NewHCost)
+    void SetParent(FPathNode*& InParent, int64  NewGCost, int64  NewHCost)
     {
         Parent = InParent;
         GCost = NewGCost;
@@ -43,7 +42,7 @@ struct FPathNode
         CalculateAndSetFCost();
         
         // 부모가 설정되면, 현재 노드까지의 방향을 업데이트합니다.
-        if (Parent.IsValid())
+        if (Parent)
         {
             Direction = Position - Parent->Position; // 부모로부터 현재까지의 방향 벡터
         }
@@ -55,11 +54,32 @@ struct FPathNode
 };
 struct FPathNodePtrCompare
 {
-    FORCEINLINE bool operator()(const TSharedPtr<FPathNode>& A, const TSharedPtr<FPathNode>& B) const
+    // ★★★ 버전 1: 기존의 포인터 비교 함수 (그대로 둡니다) ★★★
+    bool operator()(const FPathNode& A, const FPathNode& B) const
     {
-        return A->FCost < B->FCost;
-        // FIX-ME: Minheap�̶� A->FCost > B->FCost�� �Ǵ°� ������, �޸���ƽ�Լ��� �� �� ���� ������ �����Ǿ�� �������� ��ΰ� ����.
-        //return A->FCost > B->FCost;
+        // F-Cost가 낮은 노드가 우선순위가 높습니다 (힙의 top에 위치).
+        // F-Cost가 같다면 H-Cost가 낮은 노드를 우선합니다.
+        if (A.FCost != B.FCost)
+        {
+            return A.FCost < B.FCost;
+        }
+        return A.HCost < B.HCost;
+    }
+
+    // ★★★ 버전 2: 포인터를 받는 경우를 위한 오버로딩 ★★★
+    // TArray::HeapPush/Pop은 내부적으로 포인터를 역참조하여 
+    // 위 버전 1의 비교 함수를 호출합니다.
+    // 따라서 이 함수는 아래와 같이 포인터를 받아서 역참조하여
+    // 버전 1의 비교를 수행하도록 만들어야 합니다.
+    bool operator()(const FPathNode* A, const FPathNode* B) const
+    {
+        // 널 포인터 체크는 안전을 위해 추가합니다.
+        if (!A || !B)
+        {
+            return false;
+        }
+        // 포인터를 역참조(*)하여 실제 객체 비교 로직을 재사용합니다.
+        return (*this)(*A, *B);
     }
 };
 
