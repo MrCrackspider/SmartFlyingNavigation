@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "PathfindingStrategy.h"
+#include "Pathfinder/Utility/MemoryPool.h"
 #include "JPSPlusStrategy.generated.h"
 
 struct FPathNode;
@@ -32,8 +33,8 @@ protected:
 	void GetPrunedDirections(const FIntVector& Dir, TArray<FIntVector>& OutDirections) const;
 
 	/** @brief Pruned Directions에 대해 Jump를 수행하여 후속 점프 포인트(Successors)를 식별합니다. */
-	void IdentifySuccessors(const TSharedPtr<FPathNode>& Node, const FIntVector& Goal, int32 AgentRadiusInVoxels,
-	                        TArray<TSharedPtr<FPathNode>>& OutSuccessors);
+	void IdentifySuccessors(FPathNode*& Node, const FIntVector& Goal, int32 AgentRadiusInVoxels,
+	                        TArray<FPathNode*>& OutSuccessors);
 
 	/** @brief 한 방향으로 점프하며 Goal, Forced Neighbour, 또는 하위 차원 점프 포인트를 찾습니다. */
 	TOptional<FIntVector> Jump(const FIntVector& CurrentPos, const FIntVector& Direction, const FIntVector& Goal,
@@ -46,9 +47,9 @@ protected:
 
 	// --- 안전성이 강화된 경로 복원 및 최적화 ---
 
-	void OptimizePathFromJumpPoints(TSharedPtr<FPathNode> EndNode,  TArray<FIntVector>& OutOptimizedPath, uint32 AgentRadiusInVoxels) const;
+	void OptimizePathFromJumpPoints(FPathNode* EndNode,  TArray<FIntVector>& OutOptimizedPath, uint32 AgentRadiusInVoxels) const;
 	/** @brief 3D Bresenham 알고리즘을 이용, 점프 포인트 체인으로부터 안전한 전체 그리드 경로를 보간하여 복원합니다. */
-	void RetracePath(TSharedPtr<FPathNode> EndNode, TArray<FIntVector>& OutGridPath) const;
+	void RetracePath(FPathNode* EndNode, TArray<FIntVector>& OutGridPath) const;
 
 	/** @brief 그리드 경로를 Theta* 스타일의 LOS 검사를 통해 직선화하여 최종 경로를 생성합니다. 경계 조건 처리가 강화되었습니다. */
 	void OptimizePath_ThetaStarStyle(const TArray<FIntVector>& GridPath, TArray<FIntVector>& OutOptimizedPath, uint32 AgentRadiusInVoxels) const;
@@ -65,10 +66,12 @@ public:
 private:
 	TWeakObjectPtr<AFenwickVoxelVolume> Volume;
 
+	TUniquePtr<FPathNodeMemoryPool> NodePool;
+
 	// A* 탐색을 위한 자료구조
-	TArray<TSharedPtr<FPathNode>> OpenSet;
-	TMap<FIntVector, TSharedPtr<FPathNode>> OpenSetLookup;
-	TMap<FIntVector, TSharedPtr<FPathNode>> ClosedSet;
+	TArray<FPathNode*> OpenSet;
+	TMap<FIntVector, FPathNode*> OpenSetLookup;
+	TMap<FIntVector, FPathNode*> ClosedSet;
 
 	// 미리 계산된 26개 방향 벡터
 	TArray<FIntVector> AllDirections;
