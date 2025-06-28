@@ -10,6 +10,13 @@
 
 void UJPSPlusStrategy::Initialize(AVoxelVolume* InVolume)
 {
+	if (!NodePool.IsValid())
+	{
+		int64 VolumeNodeCount = InVolume->MapSize.X * InVolume->MapSize.Y * InVolume->MapSize.Z;
+    
+		NodePool = MakeUnique<FPathNodeMemoryPool>(VolumeNodeCount); //일단 16384개 노드만
+	}
+	
 	Volume = Cast<AFenwickVoxelVolume>(InVolume);
 	if (Volume.IsValid() == false)
 	{
@@ -84,16 +91,16 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 	ClosedSet.Empty();
 	OutPath.Empty();
 
-	TSharedPtr<FPathNode> StartNode = MakeShared<FPathNode>(StartIndex);
+	FPathNode* StartNode = NodePool->NewNode(StartIndex);
 	StartNode->HCost = CalculateHeuristic(StartIndex, EndIndex);
 	StartNode->CalculateAndSetFCost();
 
 	OpenSet.HeapPush(StartNode, FPathNodePtrCompare());
 	OpenSetLookup.Add(StartIndex, StartNode);
 
-	TSharedPtr<FPathNode> GoalNode = nullptr;
+	FPathNode* GoalNode = nullptr;
 	// --- 실시간 최적 노드 추적을 위한 변수 추가 ---
-	TSharedPtr<FPathNode> BestPartialNode = nullptr;
+	FPathNode* BestPartialNode = nullptr;
 	int64 MinHeuristic = MAX_int64;
 
 	int32 ProcessedNodeCount = 0;
@@ -102,14 +109,14 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 	{
 		if (++ProcessedNodeCount > MaxNodesToProcessForPathfinding) break;
 
-		TSharedPtr<FPathNode> CurrentNode;
+		FPathNode* CurrentNode;
 		OpenSet.HeapPop(CurrentNode, FPathNodePtrCompare());
 		OpenSetLookup.Remove(CurrentNode->Position);
 		ClosedSet.Add(CurrentNode->Position, CurrentNode);
 
 		if (CurrentNode->HCost < MinHeuristic)
 		{
-			if (CurrentNode->Parent.IsValid())
+			if (CurrentNode->Parent)
 			{
 				if (IsAgentMoveFeasible(CurrentNode->Parent->Position, CurrentNode->Position, AgentRadiusInVoxels))
 				{
@@ -130,7 +137,7 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 			GoalNode = CurrentNode;
 			break;
 		}
-		TArray<TSharedPtr<FPathNode>> Successors;
+		TArray<FPathNode*> Successors;
 		IdentifySuccessors(CurrentNode, EndIndex, AgentRadiusInVoxels, Successors);
 
 		for (const auto& Successor : Successors)
@@ -139,7 +146,7 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 
 			const int64 NewGCost = CurrentNode->GCost + GetMoveCost(CurrentNode->Position, Successor->Position);
 
-			TSharedPtr<FPathNode>* ExistingNodePtr = OpenSetLookup.Find(Successor->Position);
+			FPathNode** ExistingNodePtr = OpenSetLookup.Find(Successor->Position);
 			if (ExistingNodePtr)
 			{
 				if (NewGCost < (*ExistingNodePtr)->GCost)
@@ -157,7 +164,7 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 		}
 	}
 
-	if (GoalNode.IsValid())
+	if (GoalNode)
 	{
 		OptimizePathFromJumpPoints(GoalNode, OutPath, AgentRadiusInVoxels);
 		return EPathfindingResult::Success;
@@ -166,7 +173,7 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Full path not found. Attempting to find a partial path..."));
 
-		if (BestPartialNode.IsValid())
+		if (BestPartialNode)
 		{
 			GoalNode = BestPartialNode;
 
@@ -227,12 +234,12 @@ void UJPSPlusStrategy::GetPrunedDirections(const FIntVector& Dir, TArray<FIntVec
 	// 여기서는 자연스러운 이웃만 반환하고, IdentifySuccessors에서 강제 이웃을 추가하는 것으로 역할을 분리.
 }
 
-void UJPSPlusStrategy::IdentifySuccessors(const TSharedPtr<FPathNode>& Node, const FIntVector& Goal,
-                                          int32 AgentRadiusInVoxels, TArray<TSharedPtr<FPathNode>>& OutSuccessors)
+void UJPSPlusStrategy::IdentifySuccessors(FPathNode*& Node, const FIntVector& Goal,
+                                          int32 AgentRadiusInVoxels, TArray<FPathNode*>& OutSuccessors)
 {
 	OutSuccessors.Empty();
 	TArray<FIntVector> DirsToSearch;
-	const FIntVector ParentDir = Node->Parent.IsValid()
+	const FIntVector ParentDir = Node->Parent
 		                             ? FStrategyUtils::GetNormalizedDirection(Node->Parent->Position, Node->Position)
 		                             : FIntVector::ZeroValue;
 
@@ -274,7 +281,7 @@ void UJPSPlusStrategy::IdentifySuccessors(const TSharedPtr<FPathNode>& Node, con
 			// 점프 포인트를 찾았다면, 결과 배열(OutSuccessors)에 추가합니다.
 			// TArray는 스레드에 안전하지 않으므로, 반드시 Mutex로 잠가서 데이터 충돌을 방지해야 합니다.
 			FScopeLock Lock(&SuccessorMutex);
-			OutSuccessors.Add(MakeShared<FPathNode>(JumpPoint.GetValue()));
+			OutSuccessors.Add(NodePool->NewNode(JumpPoint.GetValue()));
 		}
 	});
 }
@@ -356,7 +363,7 @@ bool UJPSPlusStrategy::IsAgentMoveFeasible(const FIntVector& From, const FIntVec
 	return true;
 }
 
-void UJPSPlusStrategy::RetracePath(TSharedPtr<FPathNode> EndNode, TArray<FIntVector>& OutGridPath) const
+void UJPSPlusStrategy::RetracePath(FPathNode* EndNode, TArray<FIntVector>& OutGridPath) const
 {
 	// 안전한 경로 복원: Bresenham 알고리즘을 이용한 보간
 	if (!Volume.IsValid())
@@ -368,8 +375,8 @@ void UJPSPlusStrategy::RetracePath(TSharedPtr<FPathNode> EndNode, TArray<FIntVec
 	OutGridPath.Empty();
 	TArray<FIntVector> JumpPoints;
 
-	TSharedPtr<FPathNode> Current = EndNode;
-	while (Current.IsValid())
+	FPathNode* Current = EndNode;
+	while (Current)
 	{
 		JumpPoints.Add(Current->Position);
 		Current = Current->Parent;
@@ -464,19 +471,19 @@ void UJPSPlusStrategy::RetracePath(TSharedPtr<FPathNode> EndNode, TArray<FIntVec
 	}
 }
 
-void UJPSPlusStrategy::OptimizePathFromJumpPoints(TSharedPtr<FPathNode> EndNode, TArray<FIntVector>& OutOptimizedPath,
+void UJPSPlusStrategy::OptimizePathFromJumpPoints(FPathNode* EndNode, TArray<FIntVector>& OutOptimizedPath,
                                                   uint32 AgentRadiusInVoxels) const
 {
 	OutOptimizedPath.Empty();
-	if (!EndNode.IsValid() || !Volume.IsValid())
+	if (!EndNode || !Volume.IsValid())
 	{
 		return;
 	}
 
 	// 1. EndNode에서 시작하여 부모를 따라가며 Jump Point 목록을 생성합니다.
 	TArray<FIntVector> JumpPoints;
-	TSharedPtr<FPathNode> CurrentNode = EndNode;
-	while (CurrentNode.IsValid())
+	FPathNode* CurrentNode = EndNode;
+	while (CurrentNode)
 	{
 		JumpPoints.Add(CurrentNode->Position);
 		CurrentNode = CurrentNode->Parent;

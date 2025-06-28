@@ -7,12 +7,17 @@
 #include "Containers/BinaryHeap.h"
 #include "Algo/Reverse.h"
 #include "DrawDebugHelpers.h"
-
-
 #include "Pathfinder/Utility/StrategyUtils.h"
 
 void UJPSStrategy::Initialize(AVoxelVolume* InVolume)
 {
+    if (!NodePool.IsValid())
+    {
+        int64 VolumeNodeCount = InVolume->MapSize.X * InVolume->MapSize.Y * InVolume->MapSize.Z;
+    
+        NodePool = MakeUnique<FPathNodeMemoryPool>(VolumeNodeCount); //일단 16384개 노드만
+    }
+    
     Volume = InVolume;
     if (AllDirections.Num() == 0)
     {
@@ -70,23 +75,26 @@ EPathfindingResult UJPSStrategy::FindPathInternal(const FIntVector& StartIndex, 
         return EPathfindingResult::Failed_InvalidGoal;
     }
 
+    //길찾기 시작 시 메모리풀 리셋
+    NodePool->Reset();
+    
     OpenSet.Empty();
     OpenSetLookup.Empty();
     ClosedSet.Empty();
     OutPath.Empty();
 
-    TSharedPtr<FPathNode> StartNode = MakeShared<FPathNode>(StartIndex);
+    FPathNode* StartNode = NodePool->NewNode(StartIndex);
     StartNode->HCost = CalculateHeuristic(StartIndex, EndIndex);
     StartNode->CalculateAndSetFCost();
 
     OpenSet.HeapPush(StartNode, FPathNodePtrCompare());
     OpenSetLookup.Add(StartIndex, StartNode);
     
-    TSharedPtr<FPathNode> GoalNode = nullptr;
+    FPathNode* GoalNode = nullptr;
 
     while (OpenSet.Num() > 0)
     {
-        TSharedPtr<FPathNode> CurrentNode;
+        FPathNode* CurrentNode;
         OpenSet.HeapPop(CurrentNode, FPathNodePtrCompare());
         OpenSetLookup.Remove(CurrentNode->Position);
         ClosedSet.Add(CurrentNode->Position, CurrentNode);
@@ -97,7 +105,7 @@ EPathfindingResult UJPSStrategy::FindPathInternal(const FIntVector& StartIndex, 
             break;
         }
 
-        TArray<TSharedPtr<FPathNode>> Successors;
+        TArray<FPathNode*> Successors;
         IdentifySuccessors(CurrentNode, EndIndex, Successors);
 
         for (const auto& Successor : Successors)
@@ -106,8 +114,7 @@ EPathfindingResult UJPSStrategy::FindPathInternal(const FIntVector& StartIndex, 
             
             const int64 NewGCost = CurrentNode->GCost + GetMoveCost(CurrentNode->Position, Successor->Position);
 
-            TSharedPtr<FPathNode>* ExistingNodePtr = OpenSetLookup.Find(Successor->Position);
-            if (ExistingNodePtr)
+            if (FPathNode** ExistingNodePtr = OpenSetLookup.Find(Successor->Position))
             {
                 if (NewGCost < (*ExistingNodePtr)->GCost)
                 {
@@ -125,7 +132,7 @@ EPathfindingResult UJPSStrategy::FindPathInternal(const FIntVector& StartIndex, 
         }
     }
 
-    if (GoalNode.IsValid())
+    if (GoalNode)
     {
         TArray<FIntVector> GridPath;
         RetracePath(GoalNode, GridPath);
@@ -167,11 +174,11 @@ void UJPSStrategy::GetPrunedDirections(const FIntVector& Dir, TArray<FIntVector>
     // 여기서는 자연스러운 이웃만 반환하고, IdentifySuccessors에서 강제 이웃을 추가하는 것으로 역할을 분리.
 }
 
-void UJPSStrategy::IdentifySuccessors(const TSharedPtr<FPathNode>& Node, const FIntVector& Goal, TArray<TSharedPtr<FPathNode>>& OutSuccessors)
+void UJPSStrategy::IdentifySuccessors(FPathNode*& Node, const FIntVector& Goal, TArray<FPathNode*>& OutSuccessors)
 {
     OutSuccessors.Empty();
     TArray<FIntVector> DirsToSearch;
-    const FIntVector ParentDir = Node->Parent.IsValid() ? FStrategyUtils::GetNormalizedDirection(Node->Parent->Position, Node->Position) : FIntVector::ZeroValue;
+    const FIntVector ParentDir = Node->Parent ? FStrategyUtils::GetNormalizedDirection(Node->Parent->Position, Node->Position) : FIntVector::ZeroValue;
     
     // 1. 자연스러운 이웃 방향 가져오기
     GetPrunedDirections(ParentDir, DirsToSearch);
@@ -191,7 +198,12 @@ void UJPSStrategy::IdentifySuccessors(const TSharedPtr<FPathNode>& Node, const F
         TOptional<FIntVector> JumpPoint = Jump(Node->Position, Dir, Goal);
         if (JumpPoint.IsSet())
         {
-            OutSuccessors.Add(MakeShared<FPathNode>(JumpPoint.GetValue()));
+            FPathNode* SuccessorNode = NodePool->NewNode(JumpPoint.GetValue());
+            if(SuccessorNode) // 풀이 가득 차지 않았는지 항상 확인 -> 풀이 가득차면 다른 조치를 취해야할듯?
+            {
+                OutSuccessors.Add(SuccessorNode);
+            }
+            // OutSuccessors.Add(MakeShared<FPathNode>(JumpPoint.GetValue()));
         }
     }
 }
@@ -283,18 +295,18 @@ bool UJPSStrategy::IsMoveFeasible(const FIntVector& From, const FIntVector& To) 
         return bAxisWalkable && bPlaneWalkable;
     }
 
-    // 위에서 처리되지 않은 경우는 없지만, 안전을 위해 true 반환
-    return true;
+    // 위에서 처리되지 않은 경우는 없지만, 안전을 위해 false 반환
+    return false;
 }
 
-void UJPSStrategy::RetracePath(TSharedPtr<FPathNode> EndNode, TArray<FIntVector>& OutGridPath) const
+void UJPSStrategy::RetracePath(FPathNode* EndNode, TArray<FIntVector>& OutGridPath) const
 {
     // 안전한 경로 복원: Bresenham 알고리즘을 이용한 보간
     OutGridPath.Empty();
     TArray<FIntVector> JumpPoints;
     
-    TSharedPtr<FPathNode> Current = EndNode;
-    while (Current.IsValid())
+    FPathNode* Current = EndNode;
+    while (Current)
     {
         JumpPoints.Add(Current->Position);
         Current = Current->Parent;
