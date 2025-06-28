@@ -44,8 +44,7 @@ public:
 	// 이동 속도 (블루프린트에서 수정 가능)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
 	float Radius = 0.f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-	bool bUseFenwickTree;
+	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
 	float MovementSpeed = 500.f;
 

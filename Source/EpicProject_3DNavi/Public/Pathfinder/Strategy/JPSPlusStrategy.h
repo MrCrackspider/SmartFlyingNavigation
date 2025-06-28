@@ -21,7 +21,7 @@ public:
 	virtual bool FindPathWithStrategy(const FIntVector& StartIndex, const FIntVector& EndIndex,
 	                                  int32 AgentRadiusInVoxels, TArray<FIntVector>& OutPath) override;
 	virtual FName GetStrategyName() const override;
-
+	
 protected:
 	EPathfindingResult FindPathInternal(const FIntVector& StartIndex, const FIntVector& EndIndex,
 	                                    TArray<FIntVector>& OutPath, uint32 AgentRadiusInVoxels);
@@ -46,6 +46,7 @@ protected:
 
 	// --- 안전성이 강화된 경로 복원 및 최적화 ---
 
+	void OptimizePathFromJumpPoints(TSharedPtr<FPathNode> EndNode,  TArray<FIntVector>& OutOptimizedPath, uint32 AgentRadiusInVoxels) const;
 	/** @brief 3D Bresenham 알고리즘을 이용, 점프 포인트 체인으로부터 안전한 전체 그리드 경로를 보간하여 복원합니다. */
 	void RetracePath(TSharedPtr<FPathNode> EndNode, TArray<FIntVector>& OutGridPath) const;
 

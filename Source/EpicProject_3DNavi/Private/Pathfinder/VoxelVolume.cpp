@@ -10,6 +10,26 @@
 #include "SceneView.h"
 #include "Kismet/GameplayStatics.h"
 
+bool ProjectWorldToScreen_ThreadSafe(const FVector& WorldLocation, const FMatrix& ViewProjectionMatrix,
+                                     FVector2D& OutScreenLocation)
+{
+	const FVector4 ClipSpacePos = ViewProjectionMatrix.TransformFVector4(FVector4(WorldLocation, 1.0f));
+
+	if (ClipSpacePos.W <= 0.0f)
+	{
+		return false; // 카메라 뒤에 있음
+	}
+
+	const FVector2D NormalizedScreenPos = FVector2D(ClipSpacePos.X / ClipSpacePos.W, ClipSpacePos.Y / ClipSpacePos.W);
+
+	// NDC(-1 to 1) to Screen(0 to 1)
+	OutScreenLocation.X = (NormalizedScreenPos.X / 2.0f) + 0.5f;
+	OutScreenLocation.Y = 1.0f - ((NormalizedScreenPos.Y / 2.0f) + 0.5f);
+
+	return true;
+}
+
+
 // Sets default values
 AVoxelVolume::AVoxelVolume() : MapSize(64, 64, 64), VoxelExtent(100.f)
 {
@@ -486,16 +506,34 @@ bool AVoxelVolume::IsVoxelVisible(const UWorld* World, const FVector& ViewLocati
 
 void AVoxelVolume::StartAsyncCullingTask()
 {
-	// --- 스레드에 안전하게 데이터를 전달하기 위해 필요한 정보들을 복사합니다. ---
 	UWorld* World = GetWorld();
 	if (IsValid(World) == false) return;
 	APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
 	if (!PC) return;
 
-	// 카메라 정보는 게임 스레드에서 미리 가져옵니다.
-	FVector ViewLocation;
-	FRotator ViewRotation;
-	PC->GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	// --- 1. 게임 스레드에서 모든 필요한 데이터를 준비합니다. ---
+	FAsyncCullingTaskParams Params;
+
+	// 카메라의 View-Projection Matrix를 가져옵니다. 이것이 ProjectWorldToScreen의 핵심입니다.
+	FSceneViewProjectionData ProjectionData;
+	if (PC->GetLocalPlayer()->GetProjectionData(PC->GetLocalPlayer()->ViewportClient->Viewport, ProjectionData))
+	{
+		Params.ViewProjectionMatrix = ProjectionData.ComputeViewProjectionMatrix();
+	}
+	else
+	{
+		// 데이터를 가져올 수 없으면 작업을 시작하지 않습니다.
+		return;
+	}
+
+	// 복셀 데이터 복사
+	Params.StaticVoxels = StaticObstacleVoxels;
+	DynamicObstacleVoxelCounts.GetKeys(Params.DynamicVoxels);
+
+	// 액터 및 복셀 정보 복사
+	Params.ActorToWorldTransform = GetActorTransform();
+	Params.VoxelExtent = VoxelExtent;
 
 	int32 ViewportSizeX, ViewportSizeY;
 	PC->GetViewportSize(ViewportSizeX, ViewportSizeY);
@@ -511,70 +549,63 @@ void AVoxelVolume::StartAsyncCullingTask()
 	FCollisionQueryParams OcclusionParams;
 	OcclusionParams.bTraceComplex = false;
 	OcclusionParams.AddIgnoredActor(this);
+	
 	if (PC->GetPawn())
 	{
 		OcclusionParams.AddIgnoredActor(PC->GetPawn());
 	}
-	const float VoxelExtentCopy = VoxelExtent;
 
 	// --- 비동기 작업(Task)을 스레드 풀(ThreadPool)에 보냅니다. ---
-	CullingTaskFuture = Async(EAsyncExecution::ThreadPool, [this, World, VoxelSizeCopy, StaticVoxelsCopy, PC,
-		                          ViewportSizeX, ViewportSizeY, ViewLocation,DynamicVoxelsCopy, OcclusionParams,
-		                          ActorTransformCopy,VoxelExtentCopy
-	                          ]() -> TSharedPtr<FDebugBoxCullingResult>
+	CullingTaskFuture = Async(EAsyncExecution::ThreadPool,
+	                          [Params, ViewportSizeX, ViewportSizeY]() -> TSharedPtr<FDebugBoxCullingResult>
 	                          {
-		                          // 월드가 유효한지 반드시 확인합니다.
-		                          if (IsValid(World) == false)
-		                          {
-			                          return nullptr;
-		                          }
-
-		                          // 스레드에서 사용할 로컬 변수들을 설정합니다.
-
-		                          const FVector VoxelBoxHalfExtent = FVector(VoxelExtentCopy * 0.5f);
 		                          TSharedPtr<FDebugBoxCullingResult> Result = MakeShared<FDebugBoxCullingResult>();
+		                          const FVector VoxelBoxHalfExtent = FVector(Params.VoxelExtent * 0.5f);
 
-		                          // --- 정적 복셀에 대한 무거운 계산 수행 ---
-		                          for (const FIntVector& VoxelIndex : StaticVoxelsCopy)
+		                          // --- 정적 복셀 계산 ---
+		                          for (const FIntVector& VoxelIndex : Params.StaticVoxels)
 		                          {
-			                          const FVector VoxelCenterLocal = FVector(VoxelIndex) * VoxelExtentCopy +
+			                          const FVector VoxelCenterLocal = FVector(VoxelIndex) * Params.VoxelExtent +
 				                          VoxelBoxHalfExtent;
-			                          const FVector VoxelWorldPos = ActorTransformCopy.TransformPosition(
+			                          const FVector VoxelWorldPos = Params.ActorToWorldTransform.TransformPosition(
 				                          VoxelCenterLocal);
 
-			                          FVector2D ScreenLocation;
-			                          if (UGameplayStatics::ProjectWorldToScreen(
-				                          PC, VoxelWorldPos, ScreenLocation, false))
+			                          FVector2D ScreenLocationRatio; // 0~1 사이의 비율 값
+			                          if (ProjectWorldToScreen_ThreadSafe(
+				                          VoxelWorldPos, Params.ViewProjectionMatrix, ScreenLocationRatio))
 			                          {
-				                          if (ScreenLocation.X >= 0 && ScreenLocation.X <= ViewportSizeX &&
-					                          ScreenLocation.Y >= 0 && ScreenLocation.Y <= ViewportSizeY)
+				                          // 화면 비율을 실제 픽셀 좌표로 변환하여 화면 내에 있는지 확인
+				                          const float ScreenX = ScreenLocationRatio.X * ViewportSizeX;
+				                          const float ScreenY = ScreenLocationRatio.Y * ViewportSizeY;
+
+				                          if (ScreenX >= 0 && ScreenX <= ViewportSizeX && ScreenY >= 0 && ScreenY <=
+					                          ViewportSizeY)
 				                          {
-					                          // IsVoxelVisible에 올바른 절반 크기를 전달합니다.
-					                          if (IsVoxelVisible(World, ViewLocation, VoxelWorldPos, VoxelBoxHalfExtent,
-					                                             OcclusionParams))
-					                          {
-						                            Result->VisibleStaticVoxels.Add(VoxelWorldPos);
-					                          }
+					                          // 참고: IsVoxelVisible (라인 트레이스)는 여기서 호출할 수 없습니다.
+					                          // 스레드 안전한 Occlusion Culling은 훨씬 복잡한 기술이 필요합니다.
+					                          // 일단은 Frustum Culling (화면 안에 보이는지)만 수행합니다.
+					                          Result->VisibleStaticVoxels.Add(VoxelWorldPos);
 				                          }
 			                          }
 		                          }
-
-		                          for (const FIntVector& VoxelIndex : DynamicVoxelsCopy)
+		                          for (const FIntVector& VoxelIndex : Params.DynamicVoxels)
 		                          {
-			                          const FVector VoxelWorldPos = VoxelIndexToWorld(VoxelIndex);
-			                          FVector2D ScreenLocation;
+			                          const FVector VoxelCenterLocal = FVector(VoxelIndex) * Params.VoxelExtent +
+				                          VoxelBoxHalfExtent;
+			                          const FVector VoxelWorldPos = Params.ActorToWorldTransform.TransformPosition(
+				                          VoxelCenterLocal);
 
-			                          if (UGameplayStatics::ProjectWorldToScreen(
-				                          PC, VoxelWorldPos, ScreenLocation, false))
+			                          FVector2D ScreenLocationRatio;
+			                          if (ProjectWorldToScreen_ThreadSafe(
+				                          VoxelWorldPos, Params.ViewProjectionMatrix, ScreenLocationRatio))
 			                          {
-				                          if (ScreenLocation.X >= 0 && ScreenLocation.X <= ViewportSizeX &&
-					                          ScreenLocation.Y >= 0 && ScreenLocation.Y <= ViewportSizeY)
+				                          const float ScreenX = ScreenLocationRatio.X * ViewportSizeX;
+				                          const float ScreenY = ScreenLocationRatio.Y * ViewportSizeY;
+
+				                          if (ScreenX >= 0 && ScreenX <= ViewportSizeX && ScreenY >= 0 && ScreenY <=
+					                          ViewportSizeY)
 				                          {
-					                          if (IsVoxelVisible(World, ViewLocation, VoxelWorldPos, VoxelBoxHalfExtent,
-					                                             OcclusionParams))
-					                          {
-						                          Result->VisibleDynamicVoxels.Add(VoxelWorldPos);
-					                          }
+					                          Result->VisibleDynamicVoxels.Add(VoxelWorldPos);
 				                          }
 			                          }
 		                          }

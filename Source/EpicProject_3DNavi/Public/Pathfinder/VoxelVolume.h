@@ -14,7 +14,14 @@ struct FDebugBoxCullingResult
 	TArray<FVector> VisibleDynamicVoxels;
 };
 
-
+struct FAsyncCullingTaskParams
+{
+	TSet<FIntVector> StaticVoxels;
+	TArray<FIntVector> DynamicVoxels;
+	FMatrix ViewProjectionMatrix;
+	FTransform ActorToWorldTransform;
+	float VoxelExtent;
+};
 UCLASS()
 class EPICPROJECT_3DNAVI_API AVoxelVolume : public AActor
 {

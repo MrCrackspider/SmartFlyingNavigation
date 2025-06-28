@@ -28,14 +28,13 @@ void UJPSPlusStrategy::Initialize(AVoxelVolume* InVolume)
 bool UJPSPlusStrategy::FindPathWithStrategy(const FIntVector& StartIndex, const FIntVector& EndIndex,
                                             int32 AgentRadiusInVoxel, TArray<FIntVector>& OutPath)
 {
-
 	if (!Volume.IsValid())
 	{
 		UE_LOG(LogTemp, Error, TEXT("UJPSPlusStrategy: VoxelVolume is not valid. Pathfinding aborted."));
 		OutPath.Empty();
 		return false;
 	}
-	
+
 	const EPathfindingResult Result = FindPathInternal(StartIndex, EndIndex, OutPath, AgentRadiusInVoxel);
 
 	// 실패 원인에 대한 로그 기록 (디버깅 용이성)
@@ -78,7 +77,7 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 		return EPathfindingResult::Failed_InvalidStart;
 	}
 	const bool bIsGoalValid = Volume->IsRegionWalkable(EndIndex, AgentRadiusInVoxels);
-	
+
 
 	OpenSet.Empty();
 	OpenSetLookup.Empty();
@@ -98,16 +97,16 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 	int64 MinHeuristic = MAX_int64;
 
 	int32 ProcessedNodeCount = 0;
-	
+
 	while (OpenSet.Num() > 0)
 	{
 		if (++ProcessedNodeCount > MaxNodesToProcessForPathfinding) break;
-		
+
 		TSharedPtr<FPathNode> CurrentNode;
 		OpenSet.HeapPop(CurrentNode, FPathNodePtrCompare());
 		OpenSetLookup.Remove(CurrentNode->Position);
 		ClosedSet.Add(CurrentNode->Position, CurrentNode);
-		
+
 		if (CurrentNode->HCost < MinHeuristic)
 		{
 			if (CurrentNode->Parent.IsValid())
@@ -160,32 +159,24 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 
 	if (GoalNode.IsValid())
 	{
-		TArray<FIntVector> GridPath;
-		RetracePath(GoalNode, GridPath);
-		OptimizePath_ThetaStarStyle(GridPath, OutPath, AgentRadiusInVoxels);
+		OptimizePathFromJumpPoints(GoalNode, OutPath, AgentRadiusInVoxels);
 		return EPathfindingResult::Success;
 	}
 	else // 길찾기에 실패한 경우 (목표가 무효하거나 도달 불가)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Full path not found. Attempting to find a partial path..."));
-		
+
 		if (BestPartialNode.IsValid())
 		{
 			GoalNode = BestPartialNode;
-			
-			TArray<FIntVector> GridPath;
 
 			// --- 스레드 안전성 강화 ---
 			if (!Volume.IsValid()) return EPathfindingResult::Failed_Unreachable;
-			RetracePath(GoalNode, GridPath);
-
-			if (!Volume.IsValid()) return EPathfindingResult::Failed_Unreachable;
-			OptimizePath_ThetaStarStyle(GridPath, OutPath, AgentRadiusInVoxels);
-		
+			OptimizePathFromJumpPoints(GoalNode, OutPath, AgentRadiusInVoxels);
 			return EPathfindingResult::Success_Partial;
 		}
 	}
-	
+
 	return EPathfindingResult::Failed_Unreachable;
 }
 
@@ -277,7 +268,7 @@ void UJPSPlusStrategy::IdentifySuccessors(const TSharedPtr<FPathNode>& Node, con
 
 		// 각 스레드는 자신에게 할당된 방향에 대해서만 Jump를 수행합니다.
 		TOptional<FIntVector> JumpPoint = Jump(Node->Position, Dir, Goal, AgentRadiusInVoxels);
-		
+
 		if (JumpPoint.IsSet())
 		{
 			// 점프 포인트를 찾았다면, 결과 배열(OutSuccessors)에 추가합니다.
@@ -333,7 +324,7 @@ bool UJPSPlusStrategy::IsAgentMoveFeasible(const FIntVector& From, const FIntVec
 	{
 		return false;
 	}
-	
+
 	if (!Volume->IsRegionWalkable(To, AgentRadiusInVoxels))
 	{
 		return false;
@@ -349,12 +340,14 @@ bool UJPSPlusStrategy::IsAgentMoveFeasible(const FIntVector& From, const FIntVec
 	const FIntVector ToMax = To + FIntVector(AgentRadiusInVoxels);
 
 	// 두 바운딩 박스를 포함하는 최종 Swept Volume의 바운딩 박스
-	const FIntVector SweptMin(FMath::Min(FromMin.X, ToMin.X), FMath::Min(FromMin.Y, ToMin.Y), FMath::Min(FromMin.Z, ToMin.Z));
-	const FIntVector SweptMax(FMath::Max(FromMax.X, ToMax.X), FMath::Max(FromMax.Y, ToMax.Y), FMath::Max(FromMax.Z, ToMax.Z));
+	const FIntVector SweptMin(FMath::Min(FromMin.X, ToMin.X), FMath::Min(FromMin.Y, ToMin.Y),
+	                          FMath::Min(FromMin.Z, ToMin.Z));
+	const FIntVector SweptMax(FMath::Max(FromMax.X, ToMax.X), FMath::Max(FromMax.Y, ToMax.Y),
+	                          FMath::Max(FromMax.Z, ToMax.Z));
 
 	// 3. Swept Volume 전체에 대해 단 한 번의 펜윅 트리 쿼리를 수행합니다.
 	// 이 영역에 장애물이 하나라도 있으면 이동 불가.
-	
+
 	if (Volume.IsValid() && Volume->FenwRangeSum(SweptMin, SweptMax) > 0)
 	{
 		return false;
@@ -366,12 +359,12 @@ bool UJPSPlusStrategy::IsAgentMoveFeasible(const FIntVector& From, const FIntVec
 void UJPSPlusStrategy::RetracePath(TSharedPtr<FPathNode> EndNode, TArray<FIntVector>& OutGridPath) const
 {
 	// 안전한 경로 복원: Bresenham 알고리즘을 이용한 보간
-	if (!Volume.IsValid()) 
+	if (!Volume.IsValid())
 	{
 		OutGridPath.Empty();
 		return;
 	}
-	
+
 	OutGridPath.Empty();
 	TArray<FIntVector> JumpPoints;
 
@@ -471,8 +464,60 @@ void UJPSPlusStrategy::RetracePath(TSharedPtr<FPathNode> EndNode, TArray<FIntVec
 	}
 }
 
+void UJPSPlusStrategy::OptimizePathFromJumpPoints(TSharedPtr<FPathNode> EndNode, TArray<FIntVector>& OutOptimizedPath,
+                                                  uint32 AgentRadiusInVoxels) const
+{
+	OutOptimizedPath.Empty();
+	if (!EndNode.IsValid() || !Volume.IsValid())
+	{
+		return;
+	}
+
+	// 1. EndNode에서 시작하여 부모를 따라가며 Jump Point 목록을 생성합니다.
+	TArray<FIntVector> JumpPoints;
+	TSharedPtr<FPathNode> CurrentNode = EndNode;
+	while (CurrentNode.IsValid())
+	{
+		JumpPoints.Add(CurrentNode->Position);
+		CurrentNode = CurrentNode->Parent;
+	}
+	Algo::Reverse(JumpPoints);
+
+	if (JumpPoints.Num() < 2)
+	{
+		OutOptimizedPath = JumpPoints;
+		return;
+	}
+
+	// 3. Jump Point 목록을 직접 순회하며 Theta* 스타일 최적화를 수행합니다.
+	//    (기존 OptimizePath_ThetaStarStyle 로직을 GridPath가 아닌 JumpPoints에 적용)
+	OutOptimizedPath.Add(JumpPoints[0]);
+	int32 CurrentIndex = 0;
+
+	while (CurrentIndex < JumpPoints.Num() - 1)
+	{
+		int32 LookaheadIndex = JumpPoints.Num() - 1;
+		// 경로의 끝에서부터 거꾸로 오면서 현재 지점(CurrentIndex)과
+		// 시야(LOS)가 확보되는 가장 먼 Jump Point를 찾습니다.
+		while (LookaheadIndex > CurrentIndex + 1)
+		{
+			if (HasLineOfSight(JumpPoints[CurrentIndex], JumpPoints[LookaheadIndex], AgentRadiusInVoxels))
+			{
+				// 시야가 확보되면 더 이상 앞으로 갈 필요가 없습니다.
+				break;
+			}
+			LookaheadIndex--;
+		}
+
+		// 찾은 가장 먼 점을 최종 경로에 추가하고, 그 위치에서 다시 탐색을 시작합니다.
+		OutOptimizedPath.Add(JumpPoints[LookaheadIndex]);
+		CurrentIndex = LookaheadIndex;
+	}
+}
+
 void UJPSPlusStrategy::OptimizePath_ThetaStarStyle(const TArray<FIntVector>& GridPath,
-                                                   TArray<FIntVector>& OutOptimizedPath, uint32 AgentRadiusInVoxels) const
+                                                   TArray<FIntVector>& OutOptimizedPath,
+                                                   uint32 AgentRadiusInVoxels) const
 {
 	OutOptimizedPath.Empty();
 	if (GridPath.Num() < 2)
@@ -507,7 +552,7 @@ bool UJPSPlusStrategy::HasLineOfSight(const FIntVector& From, const FIntVector& 
 	{
 		return false;
 	}
-	
+
 	FIntVector Diff = To - From;
 	FIntVector Step(FMath::Sign(Diff.X), FMath::Sign(Diff.Y), FMath::Sign(Diff.Z));
 	FIntVector AbsDiff(FMath::Abs(Diff.X), FMath::Abs(Diff.Y), FMath::Abs(Diff.Z));
@@ -522,8 +567,10 @@ bool UJPSPlusStrategy::HasLineOfSight(const FIntVector& From, const FIntVector& 
 	const FIntVector ToMax = To + FIntVector(AgentRadiusInVoxels);
 
 	// 두 바운딩 박스를 포함하는 최종 Swept Volume의 바운딩 박스
-	const FIntVector SweptMin(FMath::Min(FromMin.X, ToMin.X), FMath::Min(FromMin.Y, ToMin.Y), FMath::Min(FromMin.Z, ToMin.Z));
-	const FIntVector SweptMax(FMath::Max(FromMax.X, ToMax.X), FMath::Max(FromMax.Y, ToMax.Y), FMath::Max(FromMax.Z, ToMax.Z));
+	const FIntVector SweptMin(FMath::Min(FromMin.X, ToMin.X), FMath::Min(FromMin.Y, ToMin.Y),
+	                          FMath::Min(FromMin.Z, ToMin.Z));
+	const FIntVector SweptMax(FMath::Max(FromMax.X, ToMax.X), FMath::Max(FromMax.Y, ToMax.Y),
+	                          FMath::Max(FromMax.Z, ToMax.Z));
 
 	// 이 거대한 영역에 장애물이 하나라도 있으면 시야가 확보되지 않은 것입니다.
 	if (Volume->FenwRangeSum(SweptMin, SweptMax) > 0)
@@ -547,10 +594,10 @@ int32 UJPSPlusStrategy::GetMoveCost(const FIntVector& A, const FIntVector& B) co
 bool UJPSPlusStrategy::HasForcedNeighbour(const FIntVector& NodePos, const FIntVector& CheckDir,
                                           const FIntVector& ParentDir, uint32 AgentRadiusInVoxels) const
 {
-   if (ParentDir == FIntVector::ZeroValue)
-   {
-   	return false;
-   }
+	if (ParentDir == FIntVector::ZeroValue)
+	{
+		return false;
+	}
 
 	// 1. 코너링 경로(ParentPos -> NodePos + CheckDir)가 가능한지 검사합니다.
 	// ParentPos는 NodePos의 부모 노드 위치입니다.
