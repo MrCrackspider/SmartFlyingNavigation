@@ -294,65 +294,32 @@ int32 AFenwickVoxelVolume::FenwQuery(const FIntVector& Index) const
 	}
 	return Sum;
 }
-
 int32 AFenwickVoxelVolume::FenwRangeSum(const FIntVector& MinCorner, const FIntVector& MaxCorner) const
 {
-	// 펜윅 트리는 1-based index를 사용하므로, 쿼리 좌표도 조정합니다.
-	// MinCorner(x,y,z)는 쿼리 시 x,y,z가 되고, MaxCorner는 x+1, y+1, z+1이 됩니다.
-	const int32 x0 = MinCorner.X;
-	const int32 y0 = MinCorner.Y;
-	const int32 z0 = MinCorner.Z;
-	const int32 x1 = MaxCorner.X + 1;
-	const int32 y1 = MaxCorner.Y + 1;
-	const int32 z1 = MaxCorner.Z + 1;
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_JPS_FenwRangeSum);
 
+	const FIntVector p0(MinCorner.X - 1, MinCorner.Y - 1, MinCorner.Z - 1);
+	const FIntVector p1(MaxCorner.X,     MinCorner.Y - 1, MinCorner.Z - 1);
+	const FIntVector p2(MinCorner.X - 1, MaxCorner.Y,     MinCorner.Z - 1);
+	const FIntVector p3(MinCorner.X - 1, MinCorner.Y - 1, MaxCorner.Z);
+	const FIntVector p4(MaxCorner.X,     MaxCorner.Y,     MinCorner.Z - 1);
+	const FIntVector p5(MaxCorner.X,     MinCorner.Y - 1, MaxCorner.Z);
+	const FIntVector p6(MinCorner.X - 1, MaxCorner.Y,     MaxCorner.Z);
+	const FIntVector p7(MaxCorner.X,     MaxCorner.Y,     MaxCorner.Z);
+	// 각 쿼리 결과에 곱해질 부호 (+1 또는 -1)
+	
+	// Sum = (p7) - (p4+p5+p6) + (p1+p2+p3) - (p0)
 	int32 TotalSum = 0;
-
-	// Z1에 대한 2D Range Sum 계산
-	for (int32 z = z1; z > 0; z -= z & -z)
-	{
-		int32 YSum = 0;
-		// Y1에 대한 1D Range Sum
-		for (int32 y = y1; y > 0; y -= y & -y)
-		{
-			// X1 - X0
-			for (int32 x = x1; x > 0; x -= x & -x) { YSum += FenwickTree[GetFenwickFlatIndex(x, y, z)]; }
-			for (int32 x = x0; x > 0; x -= x & -x) { YSum -= FenwickTree[GetFenwickFlatIndex(x, y, z)]; }
-		}
-		// Y0에 대한 1D Range Sum
-		for (int32 y = y0; y > 0; y -= y & -y)
-		{
-			// -(X1 - X0)
-			for (int32 x = x1; x > 0; x -= x & -x) { YSum -= FenwickTree[GetFenwickFlatIndex(x, y, z)]; }
-			for (int32 x = x0; x > 0; x -= x & -x) { YSum += FenwickTree[GetFenwickFlatIndex(x, y, z)]; }
-		}
-		TotalSum += YSum;
-	}
-
-	// Z0에 대한 2D Range Sum 계산 (전체 부호가 반대)
-	for (int32 z = z0; z > 0; z -= z & -z)
-	{
-		int32 YSum = 0;
-		// Y1에 대한 1D Range Sum
-		for (int32 y = y1; y > 0; y -= y & -y)
-		{
-			// X1 - X0
-			for (int32 x = x1; x > 0; x -= x & -x) { YSum += FenwickTree[GetFenwickFlatIndex(x, y, z)]; }
-			for (int32 x = x0; x > 0; x -= x & -x) { YSum -= FenwickTree[GetFenwickFlatIndex(x, y, z)]; }
-		}
-		// Y0에 대한 1D Range Sum
-		for (int32 y = y0; y > 0; y -= y & -y)
-		{
-			// -(X1 - X0)
-			for (int32 x = x1; x > 0; x -= x & -x) { YSum -= FenwickTree[GetFenwickFlatIndex(x, y, z)]; }
-			for (int32 x = x0; x > 0; x -= x & -x) { YSum += FenwickTree[GetFenwickFlatIndex(x, y, z)]; }
-		}
-		TotalSum -= YSum; // Z0에 대한 결과는 빼줍니다.
-	}
-
+	TotalSum += FenwQuery(p7); // + (x1, y1, z1)
+	TotalSum -= FenwQuery(p6); // - (x0, y1, z1)
+	TotalSum -= FenwQuery(p5); // - (x1, y0, z1)
+	TotalSum -= FenwQuery(p4); // - (x1, y1, z0)
+	TotalSum += FenwQuery(p3); // + (x0, y0, z1)
+	TotalSum += FenwQuery(p2); // + (x0, y1, z0)
+	TotalSum += FenwQuery(p1); // + (x1, y0, z0)
+	TotalSum -= FenwQuery(p0); // - (x0, y0, z0)
 	return TotalSum;
 }
-
 
 int32 AFenwickVoxelVolume::GetFenwickFlatIndex(int32 x, int32 y, int32 z) const
 {
