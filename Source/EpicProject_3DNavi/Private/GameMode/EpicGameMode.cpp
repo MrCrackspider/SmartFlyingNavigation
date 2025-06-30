@@ -9,14 +9,16 @@
 void AEpicGameMode::BeginPlay()
 {
     UGameInstance* GameInstance = GetGameInstance();
+    UWorld* World = GameInstance->GetWorld();
     if (!GameInstance)
     {
-        UE_LOG(LogTemp, Error, TEXT("GameInstance is null!"));
+        UE_LOG(LogTemp, Error, TEXT("World is null!"));
         return;
     }
 
     
-    UPathfindingSubsystem* PathSubsystem = GameInstance->GetSubsystem<UPathfindingSubsystem>();
+    //UPathfindingSubsystem* PathSubsystem = GameInstance->GetSubsystem<UPathfindingSubsystem>();
+	UPathfindingSubsystem* PathSubsystem = World->GetSubsystem<UPathfindingSubsystem>();
     if (!PathSubsystem)
     {
         UE_LOG(LogTemp, Error, TEXT("PathfindingSubsystem is null!"));

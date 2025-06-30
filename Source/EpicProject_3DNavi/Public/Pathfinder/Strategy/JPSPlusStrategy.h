@@ -62,7 +62,7 @@ protected:
 	int32 GetMoveCost(const FIntVector& A, const FIntVector& B) const;
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding|Performance")
-	int32 MaxNodesToProcessForPathfinding = 2000;
+	int32 MaxNodesToProcessForPathfinding = 10000;
 private:
 	TWeakObjectPtr<AFenwickVoxelVolume> Volume;
 

@@ -5,6 +5,9 @@
 #include "CoreMinimal.h"
 #include "StrategyUtils.generated.h"
 
+
+class AFenwickVoxelVolume;
+
 constexpr int32 COST_STRAIGHT = 1000;
 constexpr int32 COST_DIAGONAL_PLANE = 1414;
 constexpr int32 COST_DIAGONAL_SPACE = 1732;
@@ -120,5 +123,63 @@ struct FStrategyUtils
         Dir.Z = (To.Z > From.Z) ? 1 : ((To.Z < From.Z) ? -1 : 0);
 
         return Dir;
+    }
+
+
+    static bool Raycast(AFenwickVoxelVolume* Volume, const FIntVector& StartIndex, const FIntVector& EndIndex, FIntVector& OutHitIndex)
+    {
+        FIntVector CurrentIndex = StartIndex;
+        FVector Direction = FVector(EndIndex - StartIndex);
+        if (Direction.IsNearlyZero()) return false;
+
+        FIntVector Step(
+            (Direction.X > 0) ? 1 : -1,
+            (Direction.Y > 0) ? 1 : -1,
+            (Direction.Z > 0) ? 1 : -1
+        );
+
+        Direction.Normalize();
+        FVector DeltaDist(
+            FMath::Abs(1.0f / Direction.X),
+            FMath::Abs(1.0f / Direction.Y),
+            FMath::Abs(1.0f / Direction.Z)
+        );
+
+        FVector SideDist;
+        if (Direction.X > 0) SideDist.X = (StartIndex.X + 1 - (float)StartIndex.X) * DeltaDist.X;
+        else SideDist.X = ((float)StartIndex.X - StartIndex.X) * DeltaDist.X;
+        if (Direction.Y > 0) SideDist.Y = (StartIndex.Y + 1 - (float)StartIndex.Y) * DeltaDist.Y;
+        else SideDist.Y = ((float)StartIndex.Y - StartIndex.Y) * DeltaDist.Y;
+        if (Direction.Z > 0) SideDist.Z = (StartIndex.Z + 1 - (float)StartIndex.Z) * DeltaDist.Z;
+        else SideDist.Z = ((float)StartIndex.Z - StartIndex.Z) * DeltaDist.Z;
+
+        while (Volume->IsIndexValid(CurrentIndex))
+        {
+            if (!Volume->IsVoxelWalkable(CurrentIndex))
+            {
+                OutHitIndex = CurrentIndex;
+                return true;
+            }
+
+            if (SideDist.X < SideDist.Y && SideDist.X < SideDist.Z)
+            {
+                SideDist.X += DeltaDist.X;
+                CurrentIndex.X += Step.X;
+            }
+            else if (SideDist.Y < SideDist.Z)
+            {
+                SideDist.Y += DeltaDist.Y;
+                CurrentIndex.Y += Step.Y;
+            }
+            else
+            {
+                SideDist.Z += DeltaDist.Z;
+                CurrentIndex.Z += Step.Z;
+            }
+
+            if (CurrentIndex == EndIndex) break;
+        }
+
+        return false;
     }
 };

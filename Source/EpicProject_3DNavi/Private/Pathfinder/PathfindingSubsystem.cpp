@@ -3,9 +3,9 @@
 
 #include "Pathfinder/PathfindingSubsystem.h"
 #include "Pathfinder/VoxelVolume.h"
+#include "Pathfinder/FenwickVoxelVolume.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
-
 void UPathfindingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
@@ -18,7 +18,8 @@ void UPathfindingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	}
 
 	TArray<AActor*> Actors;
-	UGameplayStatics::GetAllActorsOfClass(World, AVoxelVolume::StaticClass(), Actors);
+	//UGameplayStatics::GetAllActorsOfClass(World, AVoxelVolume::StaticClass(), Actors);
+	UGameplayStatics::GetAllActorsOfClass(World, AFenwickVoxelVolume::StaticClass(), Actors);
 	Volumes.Empty();
 
 	for (AActor* Actor : Actors)

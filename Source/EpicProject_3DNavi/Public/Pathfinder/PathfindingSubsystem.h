@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "PathfindingSubsystem.generated.h"
 
 class AVoxelVolume;
@@ -12,7 +12,7 @@ class AVoxelVolume;
  * 
  */
 UCLASS()
-class EPICPROJECT_3DNAVI_API UPathfindingSubsystem : public UGameInstanceSubsystem
+class EPICPROJECT_3DNAVI_API UPathfindingSubsystem : public UWorldSubsystem
 {
 	GENERATED_BODY()
 
