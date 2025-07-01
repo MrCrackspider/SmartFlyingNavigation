@@ -9,7 +9,8 @@
 #include "Pathfinder/Utility/StrategyUtils.h"
 #include "JPSStrategy.generated.h"
 
-class AVoxelVolume;
+
+class AVoxelVolumeBase;
 struct FPathNode;
 
 
@@ -19,7 +20,7 @@ class EPICPROJECT_3DNAVI_API UJPSStrategy final : public UPathfindingStrategy
     GENERATED_BODY()
 
 public:
-    virtual void Initialize(AVoxelVolume* InVolume) override;
+    virtual void Initialize(AVoxelVolumeBase* InVolume) override;
     virtual bool FindPathWithStrategy(const FIntVector& StartIndex, const FIntVector& EndIndex, TArray<FIntVector>& OutPath) override;
     virtual FName GetStrategyName() const override;
 
@@ -58,7 +59,7 @@ protected:
     int32 GetMoveCost(const FIntVector& A, const FIntVector& B) const;
 
 private:
-    TWeakObjectPtr<AVoxelVolume> Volume;
+    TWeakObjectPtr<AUniformGridVolume> Volume;
 
     TUniquePtr<FPathNodeMemoryPool> NodePool;
     

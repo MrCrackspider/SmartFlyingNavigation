@@ -12,13 +12,15 @@ struct FPathNode;
  * 
  */
 class AFenwickVoxelVolume;
+class AVoxelVolumeBase;
+
 UCLASS()
 class EPICPROJECT_3DNAVI_API UJPSPlusStrategy : public UPathfindingStrategy
 {
 	GENERATED_BODY()
 
 public:
-	virtual void Initialize(AVoxelVolume* InVolume) override;
+	virtual void Initialize(AVoxelVolumeBase* InVolume) override;
 	virtual bool FindPathWithStrategy(const FIntVector& StartIndex, const FIntVector& EndIndex,
 	                                  int32 AgentRadiusInVoxels, TArray<FIntVector>& OutPath) override;
 	virtual FName GetStrategyName() const override;

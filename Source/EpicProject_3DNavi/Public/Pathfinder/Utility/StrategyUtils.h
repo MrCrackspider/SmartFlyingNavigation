@@ -3,10 +3,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Pathfinder/FenwickVoxelVolume.h"
 #include "StrategyUtils.generated.h"
 
-
-class AFenwickVoxelVolume;
 
 constexpr int32 COST_STRAIGHT = 1000;
 constexpr int32 COST_DIAGONAL_PLANE = 1414;

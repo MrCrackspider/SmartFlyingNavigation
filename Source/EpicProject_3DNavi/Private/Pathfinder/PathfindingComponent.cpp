@@ -1,8 +1,7 @@
-﻿#include "Kismet/KismetSystemLibrary.h" // SphereTrace, CapsuleTrace를 위해 필요
-
+﻿#include "Pathfinder/PathfindingComponent.h"
+#include "Kismet/KismetSystemLibrary.h" // SphereTrace, CapsuleTrace를 위해 필요
 #include "Components/SplineComponent.h"
 #include "Pathfinder/FenwickVoxelVolume.h"
-#include "Pathfinder/PathfindingComponent.h"
 #include "Pathfinder/PathfindingSubsystem.h"
 #include "Pathfinder/AvoidanceSubsystem.h" // 새로운 회피 서브시스템 헤더
 #include "Pathfinder/Strategy/PathfindingStrategy.h"
@@ -51,7 +50,7 @@ void UPathfindingComponent::BeginPlay()
     }
 
     // TargetVolume 설정 (PathSubsystem을 통해)
-    const TArray<TObjectPtr<AVoxelVolume>>& Volumes = PathSubsystem->GetVoxelVolumes();
+    const TArray<TObjectPtr<AVoxelVolumeBase>>& Volumes = PathSubsystem->GetVoxelVolumes();
     if (Volumes.Num() > 0)
     {
 		// FIX-ME: 현재는 첫 번째 볼륨을 타겟으로 설정합니다.
@@ -113,10 +112,31 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
 {
-    if (CurrentState == EPathfindingState::RequestingPath || !PathfindingStrategy || !TargetVolume)
-    {
-        return false;
-    }
+	// 이미 경로를 요청 중이라면, 새로운 요청 무시.
+	if (CurrentState == EPathfindingState::RequestingPath)
+	{
+		return false;
+	}
+
+	if (!PathfindingStrategy)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FindPathToLocation failed: PathfindingStrategy is not set."));
+		return false;
+	}
+
+	// TargetVolume은 AVoxelVolumeBase* 타입이므로, 먼저 유효성만 확인
+	if (!TargetVolume)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FindPathToLocation failed: TargetVolume is not set."));
+		return false;
+	}
+
+	AUniformGridVolume* GridVolume = Cast<AUniformGridVolume>(TargetVolume);
+	if (!GridVolume)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FindPathToLocation failed: TargetVolume is not a UniformGridVolume, which is required by this pathfinding logic."));
+		return false;
+	}
 
     CurrentTargetLocation = TargetLocation;
     CurrentState = EPathfindingState::RequestingPath;
@@ -125,10 +145,10 @@ bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
     CurrentPathIndex = -1;
 
     TWeakObjectPtr<UPathfindingStrategy> StrategyPtr = PathfindingStrategy;
-    const FIntVector StartIndex = TargetVolume->WorldToVoxelIndex(GetOwner()->GetActorLocation());
-    const FIntVector EndIndex = TargetVolume->WorldToVoxelIndex(TargetLocation);
+    const FIntVector StartIndex = GridVolume->WorldToVoxelIndex(GetOwner()->GetActorLocation());
+    const FIntVector EndIndex = GridVolume->WorldToVoxelIndex(TargetLocation);
     const float AgentRadius = Radius;
-    const int32 AgentRadiusInVoxels = FMath::CeilToInt(AgentRadius / TargetVolume->GetVoxelExtent());
+    const int32 AgentRadiusInVoxels = FMath::CeilToInt(AgentRadius / GridVolume->VoxelExtent);
 
     PathfindingTaskFuture = Async(EAsyncExecution::ThreadPool,
         [StrategyPtr, StartIndex, EndIndex, AgentRadiusInVoxels]() -> TArray<FIntVector>
@@ -365,9 +385,15 @@ void UPathfindingComponent::HandleRequestingPathState()
 
         if (FoundPathIndices.Num() > 0)
         {
+        	AUniformGridVolume* GridVolume = Cast<AUniformGridVolume>(TargetVolume);
+
+        	if (!GridVolume)
+        	{
+        		return;
+        	}
             for (const FIntVector& Index : FoundPathIndices)
             {
-                FoundPath.Add(TargetVolume->VoxelIndexToWorld(Index));
+                FoundPath.Add(GridVolume->VoxelIndexToWorld(Index));
             }
             CurrentPathIndex = 0;
         	//TODO: 바꿔야할수도
@@ -447,12 +473,20 @@ bool UPathfindingComponent::CheckAndHandlePathInvalidation()
 bool UPathfindingComponent::IsPathAheadValid() const
 {
     AFenwickVoxelVolume* FenwickVolume = Cast<AFenwickVoxelVolume>(TargetVolume);
+	
     if (!FenwickVolume || FoundPathIndices.Num() == 0 || CurrentPathIndex < 0)
     {
         return true;
     }
 
-    const int32 AgentRadiusInVoxels = FMath::CeilToInt(Radius / TargetVolume->GetVoxelExtent());
+	AUniformGridVolume* GridVolume = Cast<AUniformGridVolume>(TargetVolume);
+
+	if (!GridVolume)
+	{
+		return false;
+	}
+	
+    const int32 AgentRadiusInVoxels = FMath::CeilToInt(Radius / GridVolume->VoxelExtent);
     if (AgentRadiusInVoxels <= 0) return true;
 
     const int32 LastCheckIndex = FMath::Min(CurrentPathIndex + PathValidationLookAhead, FoundPathIndices.Num() - 1);

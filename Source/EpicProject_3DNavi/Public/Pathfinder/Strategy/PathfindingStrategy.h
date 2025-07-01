@@ -7,7 +7,7 @@
 #include "PathfindingStrategy.generated.h"
 
 class UPathfindingSubsystem;
-class AVoxelVolume;
+class AVoxelVolumeBase;
 
 UENUM(BlueprintType)
 enum class EPathfindingResult : uint8
@@ -29,7 +29,7 @@ class EPICPROJECT_3DNAVI_API UPathfindingStrategy : public UObject
 	GENERATED_BODY()
 
 public:
-    virtual void Initialize(AVoxelVolume* InVolume);
+    virtual void Initialize(AVoxelVolumeBase* InVolume);
 
     virtual bool FindPathWithStrategy(
         const FIntVector& StartIndex,

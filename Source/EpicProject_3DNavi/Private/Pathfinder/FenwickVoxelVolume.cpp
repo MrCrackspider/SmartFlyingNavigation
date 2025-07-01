@@ -25,7 +25,9 @@ void AFenwickVoxelVolume::BeginPlay()
 	FenwickTree.Empty(TotalSize);
 	FenwickTree.AddZeroed(TotalSize);
 
-	BuildStaticObstacles();
+	InitializeMap(MapSize);
+	
+	BuildObstacles();
 }
 
 
@@ -36,7 +38,56 @@ void AFenwickVoxelVolume::Tick(float DeltaTime)
 	
 }
 
-void AFenwickVoxelVolume::BuildStaticObstacles()
+bool AFenwickVoxelVolume::IsVoxelWalkable(const FIntVector& Index) const
+{
+	if (!IsIndexValid(Index)) return false;
+
+	const int32 ChunkX = Index.X / 64;
+	const int32 BitPos = Index.X % 64;
+	const int32 ChunkArrIndex = GetFlatIndex_X(ChunkX, Index.Y, Index.Z);
+
+	return (ObstacleBitmasks_X[ChunkArrIndex] & (1ULL << BitPos)) == 0;
+}
+
+void AFenwickVoxelVolume::SetStaticObstacle(const FIntVector& Index, bool bIsObstacle)
+{
+	if (!IsIndexValid(Index)) return;
+
+	// 1. X축 비트마스크 업데이트
+	{
+		const uint32 ChunkX = Index.X / CHUNK_SIZE;
+		const uint32 BitPos = Index.X % CHUNK_SIZE;
+		const uint32 ChunkArrIndex = GetFlatIndex_X(ChunkX, Index.Y, Index.Z);
+		if (bIsObstacle)
+			ObstacleBitmasks_X[ChunkArrIndex] |= (1ULL << BitPos);
+		else
+			ObstacleBitmasks_X[ChunkArrIndex] &= ~(1ULL << BitPos);
+	}
+
+	// 2. Y축 비트마스크 업데이트
+	{
+		const int32 ChunkY = Index.Y / CHUNK_SIZE;
+		const int32 BitPos = Index.Y % CHUNK_SIZE;
+		const int32 ChunkArrIndex = GetFlatIndex_Y(ChunkY, Index.X, Index.Z);
+		if (bIsObstacle)
+			ObstacleBitmasks_Y[ChunkArrIndex] |= (1ULL << BitPos);
+		else
+			ObstacleBitmasks_Y[ChunkArrIndex] &= ~(1ULL << BitPos);
+	}
+
+	// 3. Z축 비트마스크 업데이트
+	{
+		const int32 ChunkZ = Index.Z / CHUNK_SIZE;
+		const int32 BitPos = Index.Z % CHUNK_SIZE;
+		const int32 ChunkArrIndex = GetFlatIndex_Z(ChunkZ, Index.X, Index.Y);
+		if (bIsObstacle)
+			ObstacleBitmasks_Z[ChunkArrIndex] |= (1ULL << BitPos);
+		else
+			ObstacleBitmasks_Z[ChunkArrIndex] &= ~(1ULL << BitPos);
+	}
+}
+
+void AFenwickVoxelVolume::BuildObstacles()
 {
 	FCollisionObjectQueryParams StaticObjectQueryParams;
 	StaticObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic); // 정적 장애물 검색
@@ -100,8 +151,10 @@ void AFenwickVoxelVolume::BuildStaticObstacles()
 	}
 }
 
-bool AFenwickVoxelVolume::IsRegionWalkable(const FIntVector& VoxelIndex, int32 AgentRadiusInVoxels)
+bool AFenwickVoxelVolume::IsRegionWalkable(const FIntVector& VoxelIndex, int32 AgentRadiusInVoxels) const
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(JPS_IsRegionWalkable);
+	
 	if (!IsVoxelWalkable(VoxelIndex)) return false;
 
 	if (AgentRadiusInVoxels < 0)
@@ -275,6 +328,8 @@ void AFenwickVoxelVolume::FenwUpdate(const FIntVector& Index, int32 Delta)
 // AFenwickVoxelVolume.cpp - 올바른 코드
 int32 AFenwickVoxelVolume::FenwQuery(const FIntVector& Index) const
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(JPS_FenwQuery); // 통계 매크로는 그대로 둡니다.
+	
 	int32 Sum = 0;
 	// Stride 계산은 그대로 유지합니다.
 	const int32 ZStride = FenwickTreeSize.Y * FenwickTreeSize.X;
@@ -294,34 +349,71 @@ int32 AFenwickVoxelVolume::FenwQuery(const FIntVector& Index) const
 	}
 	return Sum;
 }
+
+// FenwickVoxelVolume.cpp
+
 int32 AFenwickVoxelVolume::FenwRangeSum(const FIntVector& MinCorner, const FIntVector& MaxCorner) const
 {
-	QUICK_SCOPE_CYCLE_COUNTER(STAT_JPS_FenwRangeSum);
+    // TRACE_CPUPROFILER_EVENT_SCOPE(JPS_FenwRangeSum); // 또는 QUICK_SCOPE...
+    TRACE_CPUPROFILER_EVENT_SCOPE(JPS_FenwRangeSum); // 통계 매크로는 그대로 둡니다.
 
-	const FIntVector p0(MinCorner.X - 1, MinCorner.Y - 1, MinCorner.Z - 1);
-	const FIntVector p1(MaxCorner.X,     MinCorner.Y - 1, MinCorner.Z - 1);
-	const FIntVector p2(MinCorner.X - 1, MaxCorner.Y,     MinCorner.Z - 1);
-	const FIntVector p3(MinCorner.X - 1, MinCorner.Y - 1, MaxCorner.Z);
-	const FIntVector p4(MaxCorner.X,     MaxCorner.Y,     MinCorner.Z - 1);
-	const FIntVector p5(MaxCorner.X,     MinCorner.Y - 1, MaxCorner.Z);
-	const FIntVector p6(MinCorner.X - 1, MaxCorner.Y,     MaxCorner.Z);
-	const FIntVector p7(MaxCorner.X,     MaxCorner.Y,     MaxCorner.Z);
-	// 각 쿼리 결과에 곱해질 부호 (+1 또는 -1)
-	
-	// Sum = (p7) - (p4+p5+p6) + (p1+p2+p3) - (p0)
-	int32 TotalSum = 0;
-	TotalSum += FenwQuery(p7); // + (x1, y1, z1)
-	TotalSum -= FenwQuery(p6); // - (x0, y1, z1)
-	TotalSum -= FenwQuery(p5); // - (x1, y0, z1)
-	TotalSum -= FenwQuery(p4); // - (x1, y1, z0)
-	TotalSum += FenwQuery(p3); // + (x0, y0, z1)
-	TotalSum += FenwQuery(p2); // + (x0, y1, z0)
-	TotalSum += FenwQuery(p1); // + (x1, y0, z0)
-	TotalSum -= FenwQuery(p0); // - (x0, y0, z0)
-	return TotalSum;
+    // 포함-배제 원리를 사용하기 위해 8개의 꼭짓점에 대한 쿼리를 수행합니다.
+    // p0 = (x0-1, y0-1, z0-1)
+    // p7 = (x1,   y1,   z1)
+    // 와 같이 생각하면 됩니다. 
+    // FenwQuery가 음수 인덱스를 처리하므로, MinCorner가 0일 때도 안전합니다.
+
+    const FIntVector p0(MinCorner.X - 1, MinCorner.Y - 1, MinCorner.Z - 1);
+    const FIntVector p1(MaxCorner.X,     MinCorner.Y - 1, MinCorner.Z - 1);
+    const FIntVector p2(MinCorner.X - 1, MaxCorner.Y,     MinCorner.Z - 1);
+    const FIntVector p3(MinCorner.X - 1, MinCorner.Y - 1, MaxCorner.Z);
+    const FIntVector p4(MaxCorner.X,     MaxCorner.Y,     MinCorner.Z - 1);
+    const FIntVector p5(MaxCorner.X,     MinCorner.Y - 1, MaxCorner.Z);
+    const FIntVector p6(MinCorner.X - 1, MaxCorner.Y,     MaxCorner.Z);
+    const FIntVector p7(MaxCorner.X,     MaxCorner.Y,     MaxCorner.Z);
+
+    // 각 쿼리 결과에 곱해질 부호 (+1 또는 -1)
+    // Sum = (p7) - (p4+p5+p6) + (p1+p2+p3) - (p0)
+    int32 TotalSum = 0;
+    TotalSum += FenwQuery(p7); // + (x1, y1, z1)
+    TotalSum -= FenwQuery(p6); // - (x0, y1, z1)
+    TotalSum -= FenwQuery(p5); // - (x1, y0, z1)
+    TotalSum -= FenwQuery(p4); // - (x1, y1, z0)
+    TotalSum += FenwQuery(p3); // + (x0, y0, z1)
+    TotalSum += FenwQuery(p2); // + (x0, y1, z0)
+    TotalSum += FenwQuery(p1); // + (x1, y0, z0)
+    TotalSum -= FenwQuery(p0); // - (x0, y0, z0)
+    
+    return TotalSum;
 }
+
 
 int32 AFenwickVoxelVolume::GetFenwickFlatIndex(int32 x, int32 y, int32 z) const
 {
 	return (z * FenwickTreeSize.Y * FenwickTreeSize.X) + (y * FenwickTreeSize.X) + x;
+}
+
+void AFenwickVoxelVolume::InitializeMap(const FIntVector& InMapSize)
+{
+	MapSize = InMapSize;
+
+	// 비트마스크 최적화를 위해 모든 축의 크기가 CHUNK_SIZE의 배수여야 함
+	check(MapSize.X % CHUNK_SIZE == 0);
+	check(MapSize.Y % CHUNK_SIZE == 0);
+	check(MapSize.Z % CHUNK_SIZE == 0);
+
+	// X축 우선 배열 초기화
+	const int32 ChunksAlongX = MapSize.X / CHUNK_SIZE;
+	const int32 TotalChunksX = ChunksAlongX * MapSize.Y * MapSize.Z;
+	ObstacleBitmasks_X.Init(0, TotalChunksX);
+
+	// Y축 우선 배열 초기화
+	const int32 ChunksAlongY = MapSize.Y / CHUNK_SIZE;
+	const int32 TotalChunksY = ChunksAlongY * MapSize.X * MapSize.Z;
+	ObstacleBitmasks_Y.Init(0, TotalChunksY);
+
+	// Z축 우선 배열 초기화
+	const int32 ChunksAlongZ = MapSize.Z / CHUNK_SIZE;
+	const int32 TotalChunksZ = ChunksAlongZ * MapSize.X * MapSize.Y;
+	ObstacleBitmasks_Z.Init(0, TotalChunksZ);
 }

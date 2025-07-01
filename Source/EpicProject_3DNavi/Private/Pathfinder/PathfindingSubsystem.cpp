@@ -24,7 +24,7 @@ void UPathfindingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	for (AActor* Actor : Actors)
 	{
-		AVoxelVolume* VoxelVolume = Cast<AVoxelVolume>(Actor);
+		AVoxelVolumeBase* VoxelVolume = Cast<AVoxelVolumeBase>(Actor);
 		if (VoxelVolume)
 		{
 			Volumes.Add(VoxelVolume);
@@ -47,7 +47,7 @@ void UPathfindingSubsystem::Deinitialize()
 }
 
 //// TO-DO: Implement
-AVoxelVolume* UPathfindingSubsystem::CreateVoxelVolume(const FIntVector& InMapSize, const uint32 InVoxelExtent)
+AVoxelVolumeBase* UPathfindingSubsystem::CreateVoxelVolume(const FIntVector& InMapSize, const uint32 InVoxelExtent)
 {
     UWorld* World = GetWorld();
     if (!World)
@@ -64,11 +64,11 @@ AVoxelVolume* UPathfindingSubsystem::CreateVoxelVolume(const FIntVector& InMapSi
     const FVector SpawnLocation = FVector::ZeroVector;
     const FRotator SpawnRotation = FRotator::ZeroRotator;
 
-	AVoxelVolume* SpawnedVolume = World->SpawnActor<AVoxelVolume>();
+	AVoxelVolumeBase* SpawnedVolume = World->SpawnActor<AVoxelVolumeBase>();
     if (SpawnedVolume)
     {
-    	SpawnedVolume->MapSize = InMapSize;
-    	SpawnedVolume->VoxelExtent = InVoxelExtent;
+    	//SpawnedVolume->MapSize = InMapSize;
+    	//SpawnedVolume->VoxelExtent = InVoxelExtent;
         Volumes.Add(SpawnedVolume);
         // Begin Test
         //CreateTestVolume(); // 0번 볼륨을 가져와서 벽을 세움.
@@ -80,7 +80,7 @@ AVoxelVolume* UPathfindingSubsystem::CreateVoxelVolume(const FIntVector& InMapSi
 
 }
 
-void UPathfindingSubsystem::DestroyVoxelVolume(AVoxelVolume* VolumeToDestroy)
+void UPathfindingSubsystem::DestroyVoxelVolume(AVoxelVolumeBase* VolumeToDestroy)
 {
     if (IsValid(VolumeToDestroy))
     {
@@ -91,7 +91,7 @@ void UPathfindingSubsystem::DestroyVoxelVolume(AVoxelVolume* VolumeToDestroy)
 
 void UPathfindingSubsystem::ClearAllVolumes()
 {
-    for (AVoxelVolume* Volume : Volumes)
+    for (AVoxelVolumeBase* Volume : Volumes)
     {
         if (IsValid(Volume))
         {
@@ -112,11 +112,11 @@ bool UPathfindingSubsystem::BuildVoxelVolumes()
 	UE_LOG(LogTemp, Log, TEXT("UPathfindingSubsystem::BuildVoxelVolumes: Requesting rebuild of static obstacles for %d volume(s)."), Volumes.Num());
 
 	bool bAllBuildsSuccessful = true; // 예시: 모든 빌드가 성공했는지 추적
-	for (AVoxelVolume* Volume : Volumes)
+	for (AVoxelVolumeBase* Volume : Volumes)
 	{
 		if (IsValid(Volume))
 		{
-			Volume->BuildStaticObstacles(); 
+			Volume->BuildObstacles(); 
 		}
 		else
 		{
@@ -135,8 +135,8 @@ void UPathfindingSubsystem::RenderVoxelVolume(const FLinearColor& WalkableColor,
     {
         if (!IsValid(VolumeToRender)) continue;
 
-        const FIntVector MapSize = VolumeToRender->GetMapSize();
-        const float VoxelSize = VolumeToRender->GetVoxelExtent();
+        const FIntVector MapSize = FIntVector(0,0,0);//임시데일밴드 = VolumeToRender->GetMapSize();
+        const float VoxelSize =1;//임시 데일밴드= VolumeToRender->GetVoxelExtent();
 
         const FVector HalfBoxExtent(VoxelSize / 2.0f);
 
@@ -153,7 +153,7 @@ void UPathfindingSubsystem::RenderVoxelVolume(const FLinearColor& WalkableColor,
                     const FVector VoxelLocalCenter = FVector(CurrentIndex) * VoxelSize + HalfBoxExtent;
                     //const FVector VoxelWorldCenter = VolumeTransform.TransformPosition(VoxelLocalCenter);
                     const FVector VoxelWorldCenter = VolumeToRender->GetActorLocation() + VoxelLocalCenter;
-                    const bool bIsWalkable = VolumeToRender->IsVoxelWalkable(CurrentIndex);
+                    const bool bIsWalkable=true ;//임시 데일밴드= VolumeToRender->IsVoxelWalkable(CurrentIndex);
                     const FColor DebugColor = (bIsWalkable ? WalkableColor : ObstacleColor).ToFColor(true);
                     const float Thickness = (bIsWalkable ? 1.f : 10.f);
 
@@ -185,8 +185,8 @@ void UPathfindingSubsystem::CreateTestVolume()
 		return;
 	}
 
-	AVoxelVolume* Vol = Volumes[0];
-	const FIntVector MapSize = Vol->GetMapSize();
+	AVoxelVolumeBase* Vol = Volumes[0];
+	const FIntVector MapSize = FIntVector(0,0,0);//임시 데일밴드Vol->Mapsize();
 
 	// --- Helper 람다 함수: 맵을 특정 상태로 초기화 ---
 	auto InitializeVolume = [&](bool bFillWithObstacles)
@@ -198,7 +198,7 @@ void UPathfindingSubsystem::CreateTestVolume()
 				{
 					for (int32 x = 0; x < MapSize.X; ++x)
 					{
-						Vol->SetStaticObstacle(FIntVector(x, y, z), bFillWithObstacles);
+						//Vol->SetStaticObstacle(FIntVector(x, y, z), bFillWithObstacles);
 					}
 				}
 			}
@@ -297,18 +297,18 @@ void UPathfindingSubsystem::CreateTestVolume()
 
 	{
 		InitializeVolume(false); // 맵을 빈 공간으로 초기화
-		UE_LOG(LogTemp, Log, TEXT("Creating Map 3: Diagonal Test Map"));
-		// XY 평면 대각선 이동을 유도하는 톱니 모양 벽
-		for (int32 i = 10; i < MapSize.X - 10; ++i)
-		{
-			Vol->SetStaticObstacle({i, i + 1, 10}, true);
-			Vol->SetStaticObstacle({i + 1, i, 10}, true);
-		}
-		// 공간 대각선 이동을 유도하는 코너 장애물
-		Vol->SetStaticObstacle({50, 51, 51}, true);
-		Vol->SetStaticObstacle({51, 50, 51}, true);
-		Vol->SetStaticObstacle({51, 51, 50}, true);
-		Vol->SetStaticObstacle({51, 51, 51}, true);
+	//	UE_LOG(LogTemp, Log, TEXT("Creating Map 3: Diagonal Test Map"));
+	//	// XY 평면 대각선 이동을 유도하는 톱니 모양 벽
+	//	for (int32 i = 10; i < MapSize.X - 10; ++i)
+	//	{
+	//		Vol->SetStaticObstacle({i, i + 1, 10}, true);
+	//		Vol->SetStaticObstacle({i + 1, i, 10}, true);
+	//	}
+	//	// 공간 대각선 이동을 유도하는 코너 장애물
+	//	Vol->SetStaticObstacle({50, 51, 51}, true);
+	//	Vol->SetStaticObstacle({51, 50, 51}, true);
+	//	Vol->SetStaticObstacle({51, 51, 50}, true);
+	//	Vol->SetStaticObstacle({51, 51, 51}, true);
 	}
 	
 

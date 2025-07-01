@@ -2,23 +2,31 @@
 #include "Pathfinder/Strategy/JPSStrategy.h"
 #include "Pathfinder/VoxelVolume.h"
 #include "Pathfinder/Utility/StrategyUtils.h"
-
 #include "Pathfinder/PathfindingSubsystem.h"
 #include "Containers/BinaryHeap.h"
 #include "Algo/Reverse.h"
 #include "DrawDebugHelpers.h"
+#include "UniformGridVolume.h"
 #include "Pathfinder/Utility/StrategyUtils.h"
 
-void UJPSStrategy::Initialize(AVoxelVolume* InVolume)
+void UJPSStrategy::Initialize(AVoxelVolumeBase* InVolume)
 {
+    Volume = Cast<AUniformGridVolume>(InVolume);
+    if (Volume.IsValid() == false)
+    {
+        UE_LOG(LogTemp, Error, TEXT("UJPSPlusStrategy: The volume is invalid, Need AUniformGridVolume!! "));
+        
+        return;
+    }
+    
     if (!NodePool.IsValid())
     {
-        int64 VolumeNodeCount = InVolume->MapSize.X * InVolume->MapSize.Y * InVolume->MapSize.Z;
+        AUniformGridVolume* GridVolume = Volume.Get();
+        int64 VolumeNodeCount = (int64)GridVolume->MapSize.X * GridVolume->MapSize.Y * GridVolume->MapSize.Z;
     
         NodePool = MakeUnique<FPathNodeMemoryPool>(VolumeNodeCount); //일단 16384개 노드만
     }
     
-    Volume = InVolume;
     if (AllDirections.Num() == 0)
     {
         for (int32 x = -1; x <= 1; ++x)

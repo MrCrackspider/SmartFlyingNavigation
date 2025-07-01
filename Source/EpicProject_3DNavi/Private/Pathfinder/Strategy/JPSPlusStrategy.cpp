@@ -8,20 +8,21 @@
 
 #include "Pathfinder/Utility/StrategyUtils.h"
 
-void UJPSPlusStrategy::Initialize(AVoxelVolume* InVolume)
+void UJPSPlusStrategy::Initialize(AVoxelVolumeBase* InVolume)
 {
+	Volume = Cast<AFenwickVoxelVolume>(InVolume);
+	if (Volume.IsValid() == false)
+	{
+		UE_LOG(LogTemp, Error, TEXT("UJPSPlusStrategy: The volume is invalid, Need AUniformGridVolume!! "));
+	}
+	
 	if (!NodePool.IsValid())
 	{
-		int64 VolumeNodeCount = InVolume->MapSize.X * InVolume->MapSize.Y * InVolume->MapSize.Z;
+		int64 VolumeNodeCount = Volume->MapSize.X * Volume->MapSize.Y * Volume->MapSize.Z;
     
 		NodePool = MakeUnique<FPathNodeMemoryPool>(VolumeNodeCount); //일단 16384개 노드만
 	}
 	
-	Volume = Cast<AFenwickVoxelVolume>(InVolume);
-	if (Volume.IsValid() == false)
-	{
-		UE_LOG(LogTemp, Error, TEXT("UJPSPlusStrategy: The volume is invalid, Need AFenwickVoxelVolume!! "));
-	}
 	if (AllDirections.Num() == 0)
 	{
 		for (int32 x = -1; x <= 1; ++x)

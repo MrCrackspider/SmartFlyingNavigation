@@ -9,7 +9,7 @@ class USplineComponent;
 class UPathfindingStrategy;
 class UPathfindingSubsystem;
 class UAvoidanceSubsystem; // UAgentAvoidanceSubsystem에서 이름 변경
-class AVoxelVolume;
+class AVoxelVolumeBase;
 
 UENUM(BlueprintType)
 enum class EPathfindingState : uint8
@@ -85,7 +85,7 @@ public:
 
     //UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding", meta = (AllowPrivateAccess = "true"))
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Pathfinding", meta = (AllowPrivateAccess = "true"))
-    TObjectPtr<AVoxelVolume> TargetVolume;
+    TObjectPtr<AVoxelVolumeBase> TargetVolume;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spline Safety")
 	bool bEnableSplineSafetyCheck = true; //안정성 검사 활성화 여부

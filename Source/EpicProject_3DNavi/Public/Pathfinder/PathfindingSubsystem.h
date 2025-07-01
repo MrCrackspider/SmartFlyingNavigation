@@ -6,7 +6,7 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "PathfindingSubsystem.generated.h"
 
-class AVoxelVolume;
+class AVoxelVolumeBase;
 
 /**
  * 
@@ -20,8 +20,8 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
-	AVoxelVolume* CreateVoxelVolume(const FIntVector& InMapSize, const uint32 Extent);
-	void DestroyVoxelVolume(AVoxelVolume* VolumeToDestroy);
+	AVoxelVolumeBase* CreateVoxelVolume(const FIntVector& InMapSize, const uint32 Extent);
+	void DestroyVoxelVolume(AVoxelVolumeBase* VolumeToDestroy);
 	void ClearAllVolumes();
 
 	bool BuildVoxelVolumes();
@@ -34,10 +34,10 @@ public:
 	// End Test
 private:
 	UPROPERTY(BlueprintReadWrite, Category = "Pathfinding", meta = (AllowPrivateAccess))
-	TArray<TObjectPtr<AVoxelVolume>> Volumes;
+	TArray<TObjectPtr<AVoxelVolumeBase>> Volumes;
 
 public:
-	const TArray<TObjectPtr<AVoxelVolume>>& GetVoxelVolumes() const { return Volumes; }
+	const TArray<TObjectPtr<AVoxelVolumeBase>>& GetVoxelVolumes() const { return Volumes; }
 
 
 };
