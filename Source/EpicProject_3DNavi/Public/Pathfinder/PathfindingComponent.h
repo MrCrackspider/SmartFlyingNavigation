@@ -9,6 +9,7 @@ class USplineComponent;
 class UPathfindingStrategy;
 class UPathfindingSubsystem;
 class UAvoidanceSubsystem; // UAgentAvoidanceSubsystem에서 이름 변경
+class APathActor;
 class AVoxelVolumeBase;
 
 UENUM(BlueprintType)
@@ -60,9 +61,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
     float MovementSpeed;
 	//Tick에서 호출될 이동 함수
-	void FollowSplinePath(float DeltaTime);
+	void UpdateSplinePreferredLocation(float DeltaTime);
 
-	void FollowLinearPath(float DeltTime);
+	void UpdateLinearPreferredLocation(float DeltTime);
 
 	//길찾기 성공 후 호출되어 스플라인을 생성/업데이트하는 함수
 	void CreateSplineFromPath();
@@ -71,7 +72,12 @@ public:
 	
 	// 재탐색 타이머가 만료되었을 때 호출될 함수
 	void OnRepathTimerFired();
+	
+    void UpdateNextLocation(float DeltaTime);
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Pathfinding|Dynamic")
+	FVector NextPreferredLocation;
+	
     /** 이 에이전트가 현재 가지고 있는 실제 속도 벡터입니다. */
     FVector CurrentVelocity;
 
@@ -119,7 +125,7 @@ private:
     // 재탐색을 위해 목표 위치를 저장
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding|State", meta = (AllowPrivateAccess = "true"))
     FVector CurrentTargetLocation;
-
+	
     // 현재 이동 목표인 경로상의 인덱스 (-1은 이동 중이 아님을 의미)
     int32 CurrentPathIndex;
 
@@ -143,9 +149,6 @@ private:
 
     UPROPERTY()
     TObjectPtr<UPathfindingStrategy> PathfindingStrategy;
-	
-private:
-	void HandleMovingState(float DeltaTime);
 
 protected:
     UPROPERTY()
@@ -155,7 +158,11 @@ protected:
     TObjectPtr<UAvoidanceSubsystem> AvoidanceSubsystem;
 
 	UPROPERTY()
-	USplineComponent* PathSpline = nullptr;
+	APathActor* CurrentPathActor = nullptr; // 스플라인을 소유한 액터에 대한 포인터
+
+	// USplineComponent* PathSpline; // 직접 소유하는 대신 포인터만 가짐
+	UPROPERTY()
+	TWeakObjectPtr<USplineComponent> PathSplinePtr = nullptr;
 	
 	//스플라인을 따라 이동한 총 거리
 	float DistanceAlongSpline;

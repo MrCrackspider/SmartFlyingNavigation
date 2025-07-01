@@ -8,6 +8,7 @@
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
 #include "DrawDebugHelpers.h"
+#include "Pathfinder/PathActor.h"
 
 UPathfindingComponent::UPathfindingComponent()
 {
@@ -19,11 +20,6 @@ UPathfindingComponent::UPathfindingComponent()
     Radius = 50.f;
     CurrentState = EPathfindingState::Idle;
 	DistanceAlongSpline = 0.f;
-
-	if (PathSpline == nullptr)
-	{
-		PathSpline = CreateDefaultSubobject<USplineComponent>(TEXT("PathSpline"));
-	}
 }
 
 void UPathfindingComponent::BeginPlay()
@@ -37,6 +33,12 @@ void UPathfindingComponent::BeginPlay()
     PathSubsystem = World->GetSubsystem<UPathfindingSubsystem>();
     AvoidanceSubsystem = World->GetSubsystem<UAvoidanceSubsystem>();
 
+	if (!CurrentPathActor)
+	{
+		CurrentPathActor = GetWorld()->SpawnActor<APathActor>(GetOwner()->GetActorLocation(), GetOwner()->GetActorRotation());
+		PathSplinePtr = CurrentPathActor->Spline;
+	}
+	
     // 회피 서브시스템에 자신을 등록합니다.
     if (AvoidanceSubsystem)
     {
@@ -85,6 +87,18 @@ void UPathfindingComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
     Super::EndPlay(EndPlayReason);
 }
 
+void UPathfindingComponent::UpdateNextLocation(float DeltaTime)
+{
+	if (CurrentState == EPathfindingState::FollowLinear)
+	{
+		UpdateLinearPreferredLocation(DeltaTime);
+	}
+	else if (CurrentState == EPathfindingState::FollowSpline)
+	{
+		UpdateSplinePreferredLocation(DeltaTime);
+	}
+}
+
 void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -94,8 +108,10 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	case EPathfindingState::FollowSpline:
 	case EPathfindingState::FollowLinear:
 		// 이동 중일 때, 경로가 막히지 않았는지 계속 확인합니다.
-		CheckAndHandlePathInvalidation();
-		// HandleMovingState(DeltaTime);
+		if (!CheckAndHandlePathInvalidation()) //정상일때
+		{
+			UpdateNextLocation(DeltaTime);
+		}
 		break;
 		
 	case EPathfindingState::RequestingPath:
@@ -164,48 +180,9 @@ bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
     return true;
 }
 
-void UPathfindingComponent::FollowSplinePath(float DeltaTime)
-{
-	AActor* MyActor = GetOwner();
-
-	//따라갈 스플라인이 없거나 점이 부족하거나 주인이 없으면 이동 중지
-	if (!MyActor || !PathSpline || PathSpline->GetNumberOfSplinePoints() < 2)
-	{
-		CurrentState = EPathfindingState::Idle;
-		return;
-	}
-
-	// 1. 이번 프레임에 이동할 거리를 누적합니다.
-	DistanceAlongSpline += MovementSpeed * DeltaTime;
-
-	// 2. 스플라인의 총 길이를 가져옵니다.
-	const float SplineLength = PathSpline->GetSplineLength();
-
-	// 3. 스플라인의 총 길이를 가져옵니다.
-	if (DistanceAlongSpline >= SplineLength)
-	{
-		// 도착 완료: 캐릭터를 경로의 마지막 지점에 위치시킵니다.
-		const FVector FinalDestination = FoundPath.Last();
-		MyActor->SetActorLocation(FinalDestination);
-
-		CurrentState = EPathfindingState::Idle; //상태를 대기로 변경
-		UE_LOG(LogTemp, Log, TEXT("MovemnetFinished"));
-		return;
-	}
-
-	// 4. 아직 이동중이라면, 스플라인 상의 새로운 위치와 회전값을 계산
-	const FVector NewLocation = PathSpline->GetLocationAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::World);
-	const FRotator NewRotation = PathSpline->GetRotationAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::World);
-
-	// 5. 캐릭터의 위치와 회전을 부드럽게 업데이트합니다.
-	// RInterpTo를 사용하면 더 부드러워짐
-	const FRotator SmoothedRotation = FMath::RInterpTo(MyActor->GetActorRotation(), NewRotation, DeltaTime, 10.0f);
-	MyActor->SetActorLocationAndRotation(NewLocation, SmoothedRotation);
-}
-
 void UPathfindingComponent::CreateSplineFromPath()
 {
-	if (!PathSpline || FoundPath.Num() < 2)
+	if (!PathSplinePtr.IsValid() || FoundPath.Num() < 2)
 	{
 		//경로가 유효하지 않으면 이동을 중지?
 		CurrentState = EPathfindingState::Idle;
@@ -213,16 +190,16 @@ void UPathfindingComponent::CreateSplineFromPath()
 	}
 
 	// 1. 기존 스플라인 정보를 모두 지웁니다.
-	PathSpline->ClearSplinePoints();
+	PathSplinePtr->ClearSplinePoints();
 
 	// 2. FoundPath의 각 점의 스플라인 포인트로 추가합니다.
 	for (const FVector& Point: FoundPath)
 	{
-		PathSpline->AddSplinePoint(Point, ESplineCoordinateSpace::World, true);
+		PathSplinePtr->AddSplinePoint(Point, ESplineCoordinateSpace::World, true);
 	}
 
 	// 3. 스플라인 내부 데이터를 강제로 업데이트합니다. (길이 계산 등)
-	PathSpline->UpdateSpline();
+	PathSplinePtr->UpdateSpline();
 
 	if (bEnableSplineSafetyCheck && !IsSplinePathSafe())
 	{
@@ -244,12 +221,12 @@ void UPathfindingComponent::CreateSplineFromPath()
 
 bool UPathfindingComponent::IsSplinePathSafe()
 {
-	if (!PathSpline || !GetWorld())
+	if (!PathSplinePtr.IsValid() || !GetWorld())
 	{
 		return false;
 	}  
 
-	const float SplineLength = PathSpline->GetSplineLength();
+	const float SplineLength = PathSplinePtr->GetSplineLength();
 	
 	if (SplineLength < SafetyCheckStepSize)
 	{
@@ -260,8 +237,8 @@ bool UPathfindingComponent::IsSplinePathSafe()
 	//스플라인을 따라 일정한 간격으로 샘플링
 	for (float Distance = 0; Distance<SplineLength; Distance+=SafetyCheckStepSize)
 	{
-		FVector StartPoint = PathSpline->GetLocationAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World);
-		FVector EndPoint = PathSpline->GetLocationAtDistanceAlongSpline(FMath::Min(Distance + SafetyCheckStepSize, SplineLength), ESplineCoordinateSpace::World);
+		FVector StartPoint = PathSplinePtr->GetLocationAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World);
+		FVector EndPoint = PathSplinePtr->GetLocationAtDistanceAlongSpline(FMath::Min(Distance + SafetyCheckStepSize, SplineLength), ESplineCoordinateSpace::World);
 
 		// 시작점과 끝점이 거의 같다면 검사 생략
 		if (FVector::DistSquared(StartPoint, EndPoint) < 1.0f)
@@ -308,6 +285,85 @@ bool UPathfindingComponent::IsSplinePathSafe()
 	return true;
 }
 
+void UPathfindingComponent::UpdateSplinePreferredLocation(float DeltaTime)
+{
+	AActor* MyActor = GetOwner();
+
+	//따라갈 스플라인이 없거나 점이 부족하거나 주인이 없으면 이동 중지
+	if (!MyActor || !PathSplinePtr.IsValid() || PathSplinePtr->GetNumberOfSplinePoints() < 2)
+	{
+		CurrentState = EPathfindingState::Idle;
+		return;
+	}
+
+	// 1. 이번 프레임에 이동할 거리를 누적합니다.
+	DistanceAlongSpline += MovementSpeed * DeltaTime;
+
+	// 2. 스플라인의 총 길이를 가져옵니다.
+	const float SplineLength = PathSplinePtr->GetSplineLength();
+
+	// 3. 스플라인의 총 길이를 가져옵니다.
+	if (DistanceAlongSpline >= SplineLength)
+	{
+		// 도착 완료: 캐릭터를 경로의 마지막 지점에 위치시킵니다.
+		const FVector FinalDestination = FoundPath.Last();
+		MyActor->SetActorLocation(FinalDestination);
+
+		CurrentState = EPathfindingState::Idle; //상태를 대기로 변경
+		UE_LOG(LogTemp, Log, TEXT("MovemnetFinished"));
+		return;
+	}
+
+	// 4. 아직 이동중이라면, 스플라인 상의 새로운 위치와 회전값을 계산
+	const FVector NewLocation = PathSplinePtr->GetLocationAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::World);
+
+	NextPreferredLocation = NewLocation;
+
+	// Location으로 Velocity구해서 Rotation까지 구하기에 일단 Rotation안구함
+	// const FRotator NewRotation = PathSpline->GetRotationAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::World);
+	// const FRotator SmoothedRotation = FMath::RInterpTo(MyActor->GetActorRotation(), NewRotation, DeltaTime, 10.0f);
+	// NextPreferredRotation = SmoothedRotation;
+}
+
+void UPathfindingComponent::UpdateLinearPreferredLocation(float DeltaTime)
+{
+	AActor* Actor = GetOwner();
+	if (!Actor || CurrentPathIndex < 0 || FoundPath.Num() == 0)
+	{
+		CurrentState = EPathfindingState::Idle;
+		return;
+	}
+
+	// 목표 지점에 도착했는지 확인하고 다음 지점으로 넘어가는 로직
+	const FVector CurrentLocation = Actor->GetActorLocation();
+	const FVector TargetPoint = FoundPath[CurrentPathIndex];
+	
+	if (FVector::DistSquared(CurrentLocation, TargetPoint) < FMath::Square(100.f))
+	{
+		CurrentPathIndex++;
+		if (CurrentPathIndex >= FoundPath.Num())
+		{
+			CurrentState = EPathfindingState::Idle; // 이동 완료
+			CurrentPathIndex = -1;
+			UE_LOG(LogTemp, Log, TEXT("Movement Finished."));
+			return;
+		}
+	}
+
+	// 실제 이동 로직
+	if (CurrentPathIndex >= 0 && CurrentPathIndex < FoundPath.Num())
+	{
+		const FVector Direction = (FoundPath[CurrentPathIndex] - CurrentLocation).GetSafeNormal();
+		NextPreferredLocation = CurrentLocation + Direction * MovementSpeed * DeltaTime;
+
+		// Location으로 Velocity구해서 Rotation까지 구하기에 일단 Rotation안구함
+		// 회전도 추가하여 더 자연스럽게 만듭니다.
+		// const FRotator TargetRotation = Direction.Rotation();
+		// const FRotator SmoothedRotation = FMath::RInterpTo(Actor->GetActorRotation(), TargetRotation, DeltaTime, 5.0f);
+		// NextPreferredRotation = SmoothedRotation;
+	}
+}
+
 FVector UPathfindingComponent::GetPreferredVelocity() const{
     AActor* Owner = GetOwner();
     // 이동 중이 아니거나, 경로가 없거나, 주인이 없으면 멈춥니다.
@@ -317,8 +373,7 @@ FVector UPathfindingComponent::GetPreferredVelocity() const{
     }
     // 다음 목표 지점을 향하는 방향과 속도를 계산하여 반환합니다.
     const FVector CurrentLocation = Owner->GetActorLocation();
-    const FVector TargetPoint = FoundPath[CurrentPathIndex];
-    const FVector Direction = (TargetPoint - CurrentLocation).GetSafeNormal();
+    const FVector Direction = (NextPreferredLocation - CurrentLocation).GetSafeNormal();
 
     return Direction * MovementSpeed;
 }
@@ -355,25 +410,6 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
             }
         }
     }
-}
-
-void UPathfindingComponent::HandleMovingState(float DeltaTime)
-{
-	// 1. 먼저 경로가 막혔는지 확인하고 처리
-	if (CheckAndHandlePathInvalidation())
-	{
-		return;
-	}
-
-	// 2. 경로가 유효하면 계속해서 경로를 따라 이동
-	if (CurrentState == EPathfindingState::FollowLinear)
-	{
-		FollowLinearPath(DeltaTime);
-	}
-	else if (CurrentState == EPathfindingState::FollowSpline)
-	{
-		FollowSplinePath(DeltaTime);
-	}
 }
 
 void UPathfindingComponent::HandleRequestingPathState()
@@ -416,43 +452,6 @@ void UPathfindingComponent::HandleRequestingPathState()
         }
         PathfindingTaskFuture.Reset();
     }
-}
-
-void UPathfindingComponent::FollowLinearPath(float DeltaTime)
-{
-	AActor* Actor = GetOwner();
-	if (!Actor || CurrentPathIndex < 0 || FoundPath.Num() == 0)
-	{
-		CurrentState = EPathfindingState::Idle;
-		return;
-	}
-
-	// 목표 지점에 도착했는지 확인하고 다음 지점으로 넘어가는 로직
-	const FVector CurrentLocation = Actor->GetActorLocation();
-	const FVector TargetPoint = FoundPath[CurrentPathIndex];
-	
-	if (FVector::DistSquared(CurrentLocation, TargetPoint) < FMath::Square(100.f))
-	{
-		CurrentPathIndex++;
-		if (CurrentPathIndex >= FoundPath.Num())
-		{
-			CurrentState = EPathfindingState::Idle; // 이동 완료
-			CurrentPathIndex = -1;
-			UE_LOG(LogTemp, Log, TEXT("Movement Finished."));
-			return;
-		}
-	}
-
-	// 실제 이동 로직
-	if (CurrentPathIndex >= 0 && CurrentPathIndex < FoundPath.Num())
-	{
-		const FVector Direction = (FoundPath[CurrentPathIndex] - CurrentLocation).GetSafeNormal();
-		// 회전도 추가하여 더 자연스럽게 만듭니다.
-		const FRotator TargetRotation = Direction.Rotation();
-		const FRotator SmoothedRotation = FMath::RInterpTo(Actor->GetActorRotation(), TargetRotation, DeltaTime, 5.0f);
-		Actor->SetActorRotation(SmoothedRotation);
-		Actor->SetActorLocation(CurrentLocation + Direction * MovementSpeed * DeltaTime); // 원래 방식
-	}
 }
 
 bool UPathfindingComponent::CheckAndHandlePathInvalidation()

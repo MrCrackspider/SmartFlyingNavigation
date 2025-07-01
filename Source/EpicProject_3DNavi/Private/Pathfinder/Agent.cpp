@@ -2,11 +2,14 @@
 
 
 #include "Pathfinder/Agent.h"
+
+#include "Components/SplineComponent.h"
 #include "Pathfinder/PathfindingComponent.h"
 
 AAgent::AAgent()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("Root")));
     PathfindingComponent = CreateDefaultSubobject<UPathfindingComponent>(TEXT("PathfindingComponent"));
 }
 
