@@ -14,6 +14,18 @@ struct FPathNode;
 class AFenwickVoxelVolume;
 class AVoxelVolumeBase;
 
+USTRUCT()
+struct FNeighborWalkability
+{
+	GENERATED_BODY()
+	uint32 WalkableMask = 0;
+
+	bool IsWalkable(int32 DirIndex) const
+	{
+		return (WalkableMask & (1 << DirIndex)) != 0;
+	}
+};
+
 UCLASS()
 class EPICPROJECT_3DNAVI_API UJPSPlusStrategy : public UPathfindingStrategy
 {
@@ -43,6 +55,7 @@ protected:
 	                           int32 AgentRadiusInVoxels);
 
 	bool HasForcedNeighbour(const FIntVector& NodePos, const FIntVector& CheckDir, const FIntVector& ParentDir, uint32 AgentRadiusInVoxels) const;
+	bool HasForcedNeighbourBitMask(const FNeighborWalkability& Neighbors, int32 CheckDirIndex, int32 ParentDirIndex) const;
 
 	/** @brief 두 지점 간 이동 시, 인접 공간의 장애물 분포를 직접 검사하여 코너 컷팅 발생 여부를 엄밀하게 판단합니다. */
 	bool IsAgentMoveFeasible(const FIntVector& From, const FIntVector& To, int32 AgentRadiusInVoxels) const;
@@ -77,4 +90,7 @@ private:
 
 	// 미리 계산된 26개 방향 벡터
 	TArray<FIntVector> AllDirections;
+	TMap<FIntVector, int32> DirectionToIndexMap;
+	mutable FCriticalSection CacheMutex;
+	mutable TMap<uint64, bool> MoveFeasibilityCache;
 };

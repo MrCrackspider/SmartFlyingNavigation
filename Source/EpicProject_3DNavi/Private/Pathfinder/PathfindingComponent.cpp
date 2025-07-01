@@ -271,7 +271,7 @@ bool UPathfindingComponent::IsSplinePathSafe()
 			CollisionParams
 		);
 
-		DrawDebugBox(GetWorld(), HitResult.bBlockingHit ? HitResult.Location : EndPoint, Extents, FQuat::Identity, bHit ? FColor::Red : FColor::Green, false, 2.f, 0, 1.f);
+		//DrawDebugBox(GetWorld(), HitResult.bBlockingHit ? HitResult.Location : EndPoint, Extents, FQuat::Identity, bHit ? FColor::Red : FColor::Green, false, 2.f, 0, 1.f);
 
 		if (bHit)
 		{
