@@ -138,6 +138,12 @@ bool AUniformGridVolume::CheckVoxelOverlap(const FIntVector& VoxelIndex, UPrimit
 	);
 }
 
+bool AUniformGridVolume::IsPathSegmentWalkable(const FIntVector& FromStartIndex, const FIntVector& ToStartIndex,
+	int32 AgentRadiusInVoxels) const
+{
+	return false;
+}
+
 void AUniformGridVolume::UpdateDebugObstacleVisualization()
 {
 	if (!bDrawDebugObstacles || !DebugObstaclesComponent || !DebugObstaclesComponent->GetStaticMesh())

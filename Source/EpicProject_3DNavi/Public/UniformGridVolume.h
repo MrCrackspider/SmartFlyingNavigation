@@ -52,6 +52,7 @@ public:
 	{
 		return IsVoxelWalkable(GetIndexFromLocation(WorldPosition));
 	}
+	virtual bool IsPathSegmentWalkable(const FIntVector& FromStartIndex, const FIntVector& ToStartIndex, int32 AgentRadiusInVoxels) const;
 
 	virtual void UpdateDebugObstacleVisualization() override;
 	// 균일 격자 자식들이 구현해야 할 새로운 순수 가상 함수

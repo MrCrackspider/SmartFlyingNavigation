@@ -87,7 +87,19 @@ void AFenwickVoxelVolume::SetStaticObstacle(const FIntVector& Index, bool bIsObs
 			ObstacleBitmasks_Z[ChunkArrIndex] &= ~(1ULL << BitPos);
 	}
 }
+void AFenwickVoxelVolume::GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const
+{
+	OutObstacleIndices.Empty();
 
+	OutObstacleIndices.Reserve(StaticObstacleVoxels.Num() + DynamicObstacleVoxelCounts.Num());
+
+	OutObstacleIndices.Append(StaticObstacleVoxels.Array());
+
+	for (const TPair<FIntVector, int32>& ObstaclePair : DynamicObstacleVoxelCounts)
+	{
+		OutObstacleIndices.Add(ObstaclePair.Key);
+	}
+}
 void AFenwickVoxelVolume::BuildObstacles()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(FenwickVolume_BuildObstacles); // 전체 함수 실행 시간 측정

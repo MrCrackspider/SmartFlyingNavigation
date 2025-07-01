@@ -29,7 +29,7 @@ public:
 	virtual void UpdateDynamicObstacles();
 	virtual bool IsRegionWalkable(const FIntVector& VoxelIndex, int32 AgentRadiusInVoxels) const override;
 	virtual void GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const override;
-	bool IsPathSegmentWalkable(const FIntVector& FromStartIndex, const FIntVector& ToStartIndex, int32 AgentRadiusInVoxels) const;
+	virtual bool IsPathSegmentWalkable(const FIntVector& FromStartIndex, const FIntVector& ToStartIndex, int32 AgentRadiusInVoxels) const override;
 
 	void FenwUpdate(const FIntVector& Index, int32 Delta);
 	int32 FenwQuery(const FIntVector& Index) const;
