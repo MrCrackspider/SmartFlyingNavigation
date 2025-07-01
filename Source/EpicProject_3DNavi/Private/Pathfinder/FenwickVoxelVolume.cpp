@@ -36,6 +36,7 @@ void AFenwickVoxelVolume::BeginPlay()
 void AFenwickVoxelVolume::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	UpdateDynamicObstacles();
 	
 }
 
