@@ -6,7 +6,7 @@
 #include "GameFramework/Actor.h"
 #include "TestActor.generated.h"
 
-struct FPathNode;
+class USplineComponent;
 
 UCLASS()
 class EPICPROJECT_3DNAVI_API ATestActor : public AActor
@@ -21,18 +21,13 @@ protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	USplineComponent* PathSpline;
+    
+	// 경로 포인트를 받아 스플라인을 설정하는 함수
+	void UpdateSpline(const TArray<FVector>& PathPoints);
+	
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
-    TArray<int> OpenSet;
-};
-
-struct FCmp
-{
-	FORCEINLINE bool operator()(const int A, const int B) const
-	{
-		return A < B;
-		// FIX-ME: Minheap�̶� A->FCost > B->FCost�� �Ǵ°� ������, �޸���ƽ�Լ��� �� �� ���� ������ �����Ǿ�� �������� ��ΰ� ����.
-		//return A->FCost > B->FCost;
-	}
 };

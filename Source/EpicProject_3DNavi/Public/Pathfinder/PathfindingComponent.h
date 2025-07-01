@@ -4,6 +4,7 @@
 #include "Components/ActorComponent.h"
 #include "PathfindingComponent.generated.h"
 
+class USplineComponent;
 // 순환 종속성 방지를 위한 전방 선언
 class UPathfindingStrategy;
 class UPathfindingSubsystem;
@@ -13,10 +14,11 @@ class AVoxelVolume;
 UENUM(BlueprintType)
 enum class EPathfindingState : uint8
 {
-    Idle,           // 대기 중
-    Moving,         // 경로 따라 이동 중
-    RequestingPath, // 백그라운드 스레드에 경로를 요청하고 결과를 기다리는 중
-    PathInvalidated // 경로가 막혀 재탐색 대기 중
+	Idle,			// 대기 중
+	FollowSpline,			// 경로 따라 이동 중
+	FollowLinear,
+	RequestingPath, // 백그라운드 스레드에 경로를 요청하고 결과를 기다리는 중
+	PathInvalidated	// 경로가 막혀 재탐색 대기 중
 };
 
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
@@ -57,6 +59,18 @@ public:
     // 에이전트의 최대 이동 속도
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
     float MovementSpeed;
+	//Tick에서 호출될 이동 함수
+	void FollowSplinePath(float DeltaTime);
+
+	void FollowLinearPath(float DeltTime);
+
+	//길찾기 성공 후 호출되어 스플라인을 생성/업데이트하는 함수
+	void CreateSplineFromPath();
+
+	bool IsSplinePathSafe(); //Spline 안정성 검사 함수
+	
+	// 재탐색 타이머가 만료되었을 때 호출될 함수
+	void OnRepathTimerFired();
 
     /** 이 에이전트가 현재 가지고 있는 실제 속도 벡터입니다. */
     FVector CurrentVelocity;
@@ -73,6 +87,12 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Pathfinding", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<AVoxelVolume> TargetVolume;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spline Safety")
+	bool bEnableSplineSafetyCheck = true; //안정성 검사 활성화 여부
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spline Safety")
+	float SafetyCheckStepSize = 50.f; //샘플링 간격
+	
     // 디버깅용
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding|Debug")
     bool bDrawDebugPath = true;
@@ -90,9 +110,6 @@ private:
 
     // 전방 경로가 실제로 유효한지 검사하는 함수
     bool IsPathAheadValid() const;
-
-    // 재탐색 타이머가 만료되었을 때 호출될 함수
-    void OnRepathTimerFired();
 
     // --- 내부 상태 및 데이터 ---
 
@@ -126,10 +143,20 @@ private:
 
     UPROPERTY()
     TObjectPtr<UPathfindingStrategy> PathfindingStrategy;
+	
+private:
+	void HandleMovingState(float DeltaTime);
 
+protected:
     UPROPERTY()
     TObjectPtr<UPathfindingSubsystem> PathSubsystem;
 
     UPROPERTY()
     TObjectPtr<UAvoidanceSubsystem> AvoidanceSubsystem;
+
+	UPROPERTY()
+	USplineComponent* PathSpline = nullptr;
+	
+	//스플라인을 따라 이동한 총 거리
+	float DistanceAlongSpline;
 };

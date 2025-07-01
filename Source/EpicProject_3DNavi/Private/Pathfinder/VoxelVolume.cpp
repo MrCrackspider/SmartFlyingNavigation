@@ -624,13 +624,13 @@ void AVoxelVolume::DrawDebugVoxelObstacles() const
 		// 계산된 정적 복셀 그리기
 		for (const FVector& WorldPos : LastCompletedCullingResult->VisibleStaticVoxels)
 		{
-			DrawDebugBox(World, WorldPos, VoxelBoxExtent, FColor::Red, false, -1.f, 0, 1.0f);
+			// DrawDebugBox(World, WorldPos, VoxelBoxExtent, FColor::Red, false, -1.f, 0, 1.0f);
 		}
 
 		// 계산된 동적 복셀 그리기
 		for (const FVector& WorldPos : LastCompletedCullingResult->VisibleDynamicVoxels)
 		{
-			DrawDebugBox(World, WorldPos, VoxelBoxExtent, FColor::Yellow, false, -1.f, 0, 2.0f);
+			// DrawDebugBox(World, WorldPos, VoxelBoxExtent, FColor::Yellow, false, -1.f, 0, 2.0f);
 		}
 	}
 }
