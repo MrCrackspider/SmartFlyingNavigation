@@ -33,8 +33,7 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Pathfinding")
     bool FindPathToLocation(const FVector& TargetLocation);
-
-    // --- UAvoidanceSubsystem과의 연동을 위한 새로운 인터페이스 함수들 ---
+  // --- UAvoidanceSubsystem과의 연동을 위한 새로운 인터페이스 함수들 ---
 
     /** 에이전트가 방해받지 않을 때 가고 싶어하는 이상적인 속도를 반환합니다. */
     UFUNCTION(BlueprintPure, Category = "Pathfinding|Avoidance")

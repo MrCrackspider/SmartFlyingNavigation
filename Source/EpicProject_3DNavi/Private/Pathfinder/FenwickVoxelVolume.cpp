@@ -237,7 +237,6 @@ void AFenwickVoxelVolume::UpdateDynamicObstacles()
 
 	// 물리 쿼리를 위한 파라미터 설정
 	FCollisionObjectQueryParams DynamicObjectQueryParams;
-	DynamicObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
 	DynamicObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
 	DynamicObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
 

@@ -288,7 +288,7 @@ void UJPSPlusStrategy::IdentifySuccessors(FPathNode*& Node, const FIntVector& Go
 }
 
 TOptional<FIntVector> UJPSPlusStrategy::Jump(const FIntVector& CurrentPos, const FIntVector& Direction,
-                                             const FIntVector& Goal, int32 AgentRadiusInVoxels)
+											 const FIntVector& Goal, int32 AgentRadiusInVoxels)
 {
 	const FIntVector NextPos = CurrentPos + Direction;
 	const FIntVector ParentDir = Direction; // 점프 시에는 현재 방향이 부모 방향이 됨
@@ -296,6 +296,7 @@ TOptional<FIntVector> UJPSPlusStrategy::Jump(const FIntVector& CurrentPos, const
 	if (!IsAgentMoveFeasible(CurrentPos, NextPos, AgentRadiusInVoxels)) return TOptional<FIntVector>();
 	if (NextPos == Goal) return NextPos;
 
+	
 	// 다음 노드(NextPos)를 기준으로 강제 이웃 검사
 	for (const auto& Dir : AllDirections)
 	{
@@ -320,7 +321,23 @@ TOptional<FIntVector> UJPSPlusStrategy::Jump(const FIntVector& CurrentPos, const
 			return
 				NextPos;
 	}
+	
+	const FIntVector DirToGoal = Goal - CurrentPos;
+	const int64 DistSqToGoal = (int64)DirToGoal.X * DirToGoal.X + (int64)DirToGoal.Y * DirToGoal.Y + (int64)DirToGoal.Z * DirToGoal.Z;
 
+	// 현재 위치에서 다음 스텝까지의 거리 제곱을 직접 계산합니다. (Direction 벡터의 길이 제곱)
+	const int64 DistSqToNext = (int64)Direction.X * Direction.X + (int64)Direction.Y * Direction.Y + (int64)Direction.Z * Direction.Z;
+
+	if (DistSqToNext > DistSqToGoal)
+	{
+		// 다음 스텝이 목표보다 멀리 있다면, 목표를 지나친 것입니다.
+		// 이 경우, 현재 위치에서 목표까지 직접 갈 수 있는지 최종 확인합니다.
+		if (IsAgentMoveFeasible(CurrentPos, Goal, AgentRadiusInVoxels))
+		{
+			return Goal;
+		}
+	}
+	
 	// 같은 방향으로 계속 점프
 	return Jump(NextPos, Direction, Goal, AgentRadiusInVoxels);
 }

@@ -456,52 +456,78 @@ void UPathfindingComponent::HandleRequestingPathState()
 
 bool UPathfindingComponent::CheckAndHandlePathInvalidation()
 {
-    if (!IsPathAheadValid())
-    {
-        CurrentState = EPathfindingState::PathInvalidated;
-        FoundPath.Empty();
-        CurrentPathIndex = -1;
-        UE_LOG(LogTemp, Warning, TEXT("Path Invalidated! Stopping movement and waiting to repath..."));
+	bool bIsPathInvalid = false;
 
-        GetWorld()->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::OnRepathTimerFired, RepathCooldown, false);
-        return true;
-    }
-    return false;
+	// --- LOGIC ROUTER ---
+	// Decide which validation method to use based on the current movement state.
+	if (CurrentState == EPathfindingState::FollowSpline)
+	{
+		// For spline movement, we must use the spline-based physics check.
+		if (bEnableSplineSafetyCheck && !IsSplinePathSafe())
+		{
+			bIsPathInvalid = true;
+		}
+	}
+	else if (CurrentState == EPathfindingState::FollowLinear)
+	{
+		// For linear movement, the voxel-based check (from the actor's current position) is correct.
+		if (!IsPathAheadValid())
+		{
+			bIsPathInvalid = true;
+		}
+	}
+
+	// If any check found the path to be invalid, handle it.
+	if (bIsPathInvalid)
+	{
+		CurrentState = EPathfindingState::PathInvalidated;
+		FoundPath.Empty();
+		CurrentPathIndex = -1;
+		UE_LOG(LogTemp, Warning, TEXT("Path Invalidated! Stopping movement and waiting to repath..."));
+
+		GetWorld()->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::OnRepathTimerFired, RepathCooldown, false);
+		return true; // Return true to indicate the path was handled (by invalidating it).
+	}
+
+	return false; // Return false to indicate the path is still valid and movement can continue.
 }
-
 bool UPathfindingComponent::IsPathAheadValid() const
 {
-    AFenwickVoxelVolume* FenwickVolume = Cast<AFenwickVoxelVolume>(TargetVolume);
-	
-    if (!FenwickVolume || FoundPathIndices.Num() == 0 || CurrentPathIndex < 0)
-    {
-        return true;
-    }
+	AFenwickVoxelVolume* FenwickVolume = Cast<AFenwickVoxelVolume>(TargetVolume);
+    
+	// If there's no volume or path, it's trivially valid.
+	if (!FenwickVolume || FoundPathIndices.Num() < 2 || CurrentPathIndex < 0 || CurrentPathIndex >= FoundPathIndices.Num() - 1)
+	{
+		return true;
+	}
 
 	AUniformGridVolume* GridVolume = Cast<AUniformGridVolume>(TargetVolume);
-
 	if (!GridVolume)
 	{
 		return false;
 	}
-	
-    const int32 AgentRadiusInVoxels = FMath::CeilToInt(Radius / GridVolume->VoxelExtent);
-    if (AgentRadiusInVoxels <= 0) return true;
+    
+	const int32 AgentRadiusInVoxels = FMath::CeilToInt(Radius / GridVolume->VoxelExtent);
+	if (AgentRadiusInVoxels <= 0)
+	{
+		return true;
+	}
+    
+	// --- ROBUST CHECK FOR LINEAR MOVEMENT ---
+	const int32 LastCheckIndex = FMath::Min(CurrentPathIndex + PathValidationLookAhead, FoundPathIndices.Num() - 2);
+	for (int32 i = CurrentPathIndex; i <= LastCheckIndex; ++i)
+	{
+		const FIntVector StartSegmentIndex = FoundPathIndices[i];
+		const FIntVector EndSegmentIndex = FoundPathIndices[i + 1];
 
-    const int32 LastCheckIndex = FMath::Min(CurrentPathIndex + PathValidationLookAhead, FoundPathIndices.Num() - 1);
+		if (!FenwickVolume->IsPathSegmentWalkable(StartSegmentIndex, EndSegmentIndex, AgentRadiusInVoxels))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Path Invalidated: A future path segment (from waypoint %d to %d) is blocked!"), i, i+1);
+			return false;
+		}
+	}
 
-    // 현재 위치에서 다음 점프 포인트까지만 검사해도 충분할 수 있습니다.
-    if (CurrentPathIndex + 1 <= LastCheckIndex)
-    {
-        const FIntVector FromIndex = FoundPathIndices[CurrentPathIndex];
-        const FIntVector ToIndex = FoundPathIndices[CurrentPathIndex + 1];
-        if (!FenwickVolume->IsPathSegmentWalkable(FromIndex, ToIndex, AgentRadiusInVoxels))
-        {
-            return false;
-        }
-    }
-
-    return true;
+	return true;
 }
 
 void UPathfindingComponent::OnRepathTimerFired()
