@@ -17,7 +17,8 @@ AFenwickVoxelVolume::AFenwickVoxelVolume()
 void AFenwickVoxelVolume::BeginPlay()
 {
 	Super::BeginPlay();
-
+	TRACE_CPUPROFILER_EVENT_SCOPE(FenwickVolume_BeginPlay);
+	
 	FenwickTreeSize = MapSize + FIntVector(1, 1, 1);
 
 	const int32 TotalSize = FenwickTreeSize.X * FenwickTreeSize.Y * FenwickTreeSize.Z;
@@ -89,6 +90,8 @@ void AFenwickVoxelVolume::SetStaticObstacle(const FIntVector& Index, bool bIsObs
 
 void AFenwickVoxelVolume::BuildObstacles()
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(FenwickVolume_BuildObstacles); // 전체 함수 실행 시간 측정
+	
 	FCollisionObjectQueryParams StaticObjectQueryParams;
 	StaticObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic); // 정적 장애물 검색
 	StaticObstacleVoxels.Empty();
@@ -181,6 +184,7 @@ bool AFenwickVoxelVolume::IsRegionWalkable(const FIntVector& VoxelIndex, int32 A
 bool AFenwickVoxelVolume::IsPathSegmentWalkable(const FIntVector& FromStartIndex, const FIntVector& ToStartIndex,
 	int32 AgentRadiusInVoxels) const
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(JPS_IsPathSegmentWalkable);
 	// 에이전트가 From에서 To로 이동할 때 쓸고 지나가는 전체 영역(Swept Volume)의 바운딩 박스를 계산합니다.
 	
 	// From 지점의 에이전트 바운딩 박스
@@ -207,6 +211,8 @@ bool AFenwickVoxelVolume::IsPathSegmentWalkable(const FIntVector& FromStartIndex
 
 void AFenwickVoxelVolume::UpdateDynamicObstacles()
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(FenwickVolume_UpdateDynamicObstacles);
+	
 	if (GetWorld() == nullptr)
 	{
 		return;
@@ -354,7 +360,6 @@ int32 AFenwickVoxelVolume::FenwQuery(const FIntVector& Index) const
 
 int32 AFenwickVoxelVolume::FenwRangeSum(const FIntVector& MinCorner, const FIntVector& MaxCorner) const
 {
-    // TRACE_CPUPROFILER_EVENT_SCOPE(JPS_FenwRangeSum); // 또는 QUICK_SCOPE...
     TRACE_CPUPROFILER_EVENT_SCOPE(JPS_FenwRangeSum); // 통계 매크로는 그대로 둡니다.
 
     // 포함-배제 원리를 사용하기 위해 8개의 꼭짓점에 대한 쿼리를 수행합니다.
@@ -395,6 +400,8 @@ int32 AFenwickVoxelVolume::GetFenwickFlatIndex(int32 x, int32 y, int32 z) const
 
 void AFenwickVoxelVolume::InitializeMap(const FIntVector& InMapSize)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(FenwickVolume_InitializeMap);
+	
 	MapSize = InMapSize;
 
 	// 비트마스크 최적화를 위해 모든 축의 크기가 CHUNK_SIZE의 배수여야 함
