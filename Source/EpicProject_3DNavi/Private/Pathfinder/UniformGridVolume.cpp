@@ -3,6 +3,8 @@
 
 #include "UniformGridVolume.h"
 
+#include "Components/InstancedStaticMeshComponent.h"
+
 // Sets default values
 AUniformGridVolume::AUniformGridVolume()
 {
@@ -134,6 +136,37 @@ bool AUniformGridVolume::CheckVoxelOverlap(const FIntVector& VoxelIndex, UPrimit
 		FQuat::Identity,
 		FCollisionShape::MakeBox(VoxelHalfExtent)
 	);
+}
+
+void AUniformGridVolume::UpdateDebugObstacleVisualization()
+{
+	if (!bDrawDebugObstacles || !DebugObstaclesComponent || !DebugObstaclesComponent->GetStaticMesh())
+	{
+		DebugObstaclesComponent->ClearInstances();
+		return;
+	}
+
+	// 1. Get the list of obstacles from the child class implementation
+	TArray<FIntVector> ObstacleIndices;
+	GetDebugObstacleVoxelIndices(ObstacleIndices); // This calls the overridden version!
+
+	// 2. Create the transforms for the instanced meshes
+	TArray<FTransform> InstanceTransforms;
+	InstanceTransforms.Reserve(ObstacleIndices.Num());
+	const FVector Scale = FVector(VoxelExtent / 100.0f); // Assuming the debug mesh is a 100-unit cube
+
+	for (const FIntVector& GlobalIndex : ObstacleIndices)
+	{
+		const FVector VoxelWorldCenter = VoxelIndexToWorld(GlobalIndex);
+		InstanceTransforms.Emplace(FRotator::ZeroRotator, VoxelWorldCenter, Scale);
+	}
+
+	// 3. Update the component with the new set of transforms
+	DebugObstaclesComponent->ClearInstances();
+	if (InstanceTransforms.Num() > 0)
+	{
+		DebugObstaclesComponent->AddInstances(InstanceTransforms, false);
+	}
 }
 
 

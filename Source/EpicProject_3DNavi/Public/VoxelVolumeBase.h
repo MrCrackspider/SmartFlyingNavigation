@@ -16,7 +16,8 @@ enum class EVolumeDataStructure : uint8
 };
 
 
-UCLASS(Abstract)
+
+UCLASS(Abstract, HideCategories = (Rendering, Replication, Collision, Input, Actor, LOD, Cooking))
 class EPICPROJECT_3DNAVI_API AVoxelVolumeBase : public AActor
 {
 	GENERATED_BODY()
@@ -46,4 +47,17 @@ public:
 	virtual bool IsLocationWalkable(const FVector& WorldPosition) const PURE_VIRTUAL(AVoxelVolumeBase::IsLocationWalkable, return false;);
 
 	virtual void BuildObstacles() PURE_VIRTUAL(AVoxelVolumeBase::BuildObstacles,);
+	
+	virtual void GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const;
+	
+	virtual void UpdateDebugObstacleVisualization();
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VoxelVolume")
+	bool bDrawDebugObstacles;
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VoxelVolume")
+	TObjectPtr<UInstancedStaticMeshComponent> DebugObstaclesComponent;
+
+	FTimerHandle DebugUpdateTimer;
+
 };

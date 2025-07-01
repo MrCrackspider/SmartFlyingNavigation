@@ -19,6 +19,7 @@ public:
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+
 public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
@@ -27,16 +28,17 @@ public:
 	virtual void BuildObstacles() override;
 	virtual void UpdateDynamicObstacles();
 	virtual bool IsRegionWalkable(const FIntVector& VoxelIndex, int32 AgentRadiusInVoxels) const override;
+	virtual void GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const override;
 	bool IsPathSegmentWalkable(const FIntVector& FromStartIndex, const FIntVector& ToStartIndex, int32 AgentRadiusInVoxels) const;
-	
+
 	void FenwUpdate(const FIntVector& Index, int32 Delta);
 	int32 FenwQuery(const FIntVector& Index) const;
 	int32 FenwRangeSum(const FIntVector& Min, const FIntVector& Max) const;
 	FORCEINLINE int32 GetFenwickFlatIndex(int32 x, int32 y, int32 z) const;
 	void InitializeMap(const FIntVector& InMapSize);
 
-	bool IsVoxelWalkable(const FIntVector& Index) const override;
-	
+	virtual bool IsVoxelWalkable(const FIntVector& Index) const override;
+
 	uint32 GetFlatIndex_X(uint32 ChunkX, uint32 Y, uint32 Z) const
 	{
 		const uint32 ChunksAlongX = MapSize.X / CHUNK_SIZE;
@@ -58,7 +60,7 @@ public:
 		const uint32 ChunksAlongZ = MapSize.Z / CHUNK_SIZE;
 		return (Y * MapSize.X + X) * ChunksAlongZ + ChunkZ;
 	}
-	
+
 private:
 	FIntVector FenwickTreeSize;
 	TArray<int32> FenwickTree;

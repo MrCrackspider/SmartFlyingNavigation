@@ -52,7 +52,8 @@ public:
 	{
 		return IsVoxelWalkable(GetIndexFromLocation(WorldPosition));
 	}
-	
+
+	virtual void UpdateDebugObstacleVisualization() override;
 	// 균일 격자 자식들이 구현해야 할 새로운 순수 가상 함수
 	virtual bool IsVoxelWalkable(const FIntVector& VoxelIndex) const PURE_VIRTUAL
 	(AUniformGridVolume::IsVoxelWalkable,return false;);
