@@ -93,4 +93,5 @@ private:
 	TMap<FIntVector, int32> DirectionToIndexMap;
 	mutable FCriticalSection CacheMutex;
 	mutable TMap<uint64, bool> MoveFeasibilityCache;
+	TArray<TArray<int32>> BlockerDirectionTable;
 };

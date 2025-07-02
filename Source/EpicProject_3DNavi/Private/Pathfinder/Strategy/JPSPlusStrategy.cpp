@@ -37,6 +37,42 @@ void UJPSPlusStrategy::Initialize(AVoxelVolumeBase* InVolume)
 	{
 		DirectionToIndexMap.Add(AllDirections[i], i);
 	}
+
+	if (BlockerDirectionTable.Num() == 0)
+	{
+		const int32 NumDirs = AllDirections.Num();
+		BlockerDirectionTable.Init(TArray<int32>(), NumDirs);
+		for (int32 i = 0; i < NumDirs; ++i)
+		{
+			BlockerDirectionTable[i].Init(-1, NumDirs);
+		}
+
+		for (int32 ParentDirIndex = 0; ParentDirIndex < NumDirs; ++ParentDirIndex)
+		{
+			for (int32 CheckDirIndex = 0; CheckDirIndex < NumDirs; ++CheckDirIndex)
+			{
+				const FIntVector& ParentDir = AllDirections[ParentDirIndex];
+				const FIntVector& CheckDir = AllDirections[CheckDirIndex];
+
+				// 직선/축 방향 이동에서는 강제 이웃이 거의 발생하지 않음 (JPS+ 규칙)
+				if (ParentDir.X * CheckDir.X < 0 || ParentDir.Y * CheckDir.Y < 0 || ParentDir.Z * CheckDir.Z < 0) continue; // 역방향 체크는 무의미
+				if (ParentDir == CheckDir) continue;
+
+				// 코너링을 막는 장애물의 상대 위치 계산
+				// 예: ParentDir=(1,0,0), CheckDir=(0,1,0) -> Blocker=(-1,1,0)
+				// 이 장애물은 현재 노드 기준 (-ParentDir.X, CheckDir.Y, CheckDir.Z) 등에 위치함
+				FIntVector BlockerDir = (ParentDir * -1) + CheckDir;
+                
+				// 정규화된 방향이 아니면 무시 (대각선 코너링 등)
+				if (FMath::Abs(BlockerDir.X) > 1 || FMath::Abs(BlockerDir.Y) > 1 || FMath::Abs(BlockerDir.Z) > 1) continue;
+
+				if (const int32* BlockerIndexPtr = DirectionToIndexMap.Find(BlockerDir))
+				{
+					BlockerDirectionTable[ParentDirIndex][CheckDirIndex] = *BlockerIndexPtr;
+				}
+			}
+		}
+	}
 }
 
 bool UJPSPlusStrategy::FindPathWithStrategy(const FIntVector& StartIndex, const FIntVector& EndIndex,
@@ -52,7 +88,7 @@ bool UJPSPlusStrategy::FindPathWithStrategy(const FIntVector& StartIndex, const 
 	const EPathfindingResult Result = FindPathInternal(StartIndex, EndIndex, OutPath, AgentRadiusInVoxel);
 
 	// 실패 원인에 대한 로그 기록 (디버깅 용이성)
-	if (Result != EPathfindingResult::Success)
+	if (Result != EPathfindingResult::Success && Result != EPathfindingResult::Success_Partial )
 	{
 		FString ErrorMessage;
 		switch (Result)
@@ -375,8 +411,7 @@ TOptional<FIntVector> UJPSPlusStrategy::Jump(const FIntVector& StartPos, const F
 			DirToGoal.Z * DirToGoal.Z;
 
 		// 현재 위치에서 다음 스텝까지의 거리 제곱을 직접 계산합니다. (Direction 벡터의 길이 제곱)
-		const int64 DistSqToNext = (int64)Direction.X * Direction.X + (int64)Direction.Y * Direction.Y + (int64)
-			Direction.Z * Direction.Z;
+		const int64 DistSqToNext = (int64)Direction.X * Direction.X + (int64)Direction.Y * Direction.Y + (int64) Direction.Z * Direction.Z;
 
 		if (DistSqToNext > DistSqToGoal)
 		{
@@ -652,39 +687,33 @@ void UJPSPlusStrategy::OptimizePath_ThetaStarStyle(const TArray<FIntVector>& Gri
 
 bool UJPSPlusStrategy::HasLineOfSight(const FIntVector& From, const FIntVector& To, int32 AgentRadiusInVoxels) const
 {
-	if (Volume.IsValid() == false)
+	if (!Volume.IsValid())
 	{
 		return false;
 	}
 
-	FIntVector Diff = To - From;
-	FIntVector Step(FMath::Sign(Diff.X), FMath::Sign(Diff.Y), FMath::Sign(Diff.Z));
-	FIntVector AbsDiff(FMath::Abs(Diff.X), FMath::Abs(Diff.Y), FMath::Abs(Diff.Z));
-	FIntVector Current = From;
+	// 1. From에서 To까지 중심선을 따라 복셀 목록을 생성
+	TArray<FIntVector> CenterlineVoxels;
+	FStrategyUtils::GenerateBresenhamLine(From, To, CenterlineVoxels);
 
-	// From 지점의 에이전트 바운딩 박스
-	const FIntVector FromMin = From - FIntVector(AgentRadiusInVoxels);
-	const FIntVector FromMax = From + FIntVector(AgentRadiusInVoxels);
-
-	// To 지점의 에이전트 바운딩 박스
-	const FIntVector ToMin = To - FIntVector(AgentRadiusInVoxels);
-	const FIntVector ToMax = To + FIntVector(AgentRadiusInVoxels);
-
-	// 두 바운딩 박스를 포함하는 최종 Swept Volume의 바운딩 박스
-	const FIntVector SweptMin(FMath::Min(FromMin.X, ToMin.X), FMath::Min(FromMin.Y, ToMin.Y),
-	                          FMath::Min(FromMin.Z, ToMin.Z));
-	const FIntVector SweptMax(FMath::Max(FromMax.X, ToMax.X), FMath::Max(FromMax.Y, ToMax.Y),
-	                          FMath::Max(FromMax.Z, ToMax.Z));
-
-	// 이 거대한 영역에 장애물이 하나라도 있으면 시야가 확보되지 않은 것입니다.
-	if (Volume->FenwRangeSum(SweptMin, SweptMax) > 0)
+	// 2. 중심선의 각 복셀을 순회하며 국소 검사 수행
+	for (const FIntVector& VoxelOnLine : CenterlineVoxels)
 	{
-		return false;
+		// 3. 현재 복셀을 중심으로 에이전트 반경만큼의 작은 바운딩 박스를 계산
+		const FIntVector LocalMin = VoxelOnLine - FIntVector(AgentRadiusInVoxels);
+		const FIntVector LocalMax = VoxelOnLine + FIntVector(AgentRadiusInVoxels);
+
+		// 4. 이 '작은 영역'에 대해서만 Fenwick Tree 합계 검사를 수행
+		if (Volume->FenwRangeSum(LocalMin, LocalMax) > 0)
+		{
+			// 경로 상의 한 지점에서 장애물이 발견되면 즉시 실패 반환
+			return false;
+		}
 	}
 
+	// 모든 검사를 통과했다면 시야가 확보된 것임
 	return true;
 }
-
 int32 UJPSPlusStrategy::CalculateHeuristic(const FIntVector& A, const FIntVector& B) const
 {
 	return FStrategyUtils::Heuristic_Octile(A, B);
@@ -726,6 +755,25 @@ bool UJPSPlusStrategy::HasForcedNeighbour(const FIntVector& NodePos, const FIntV
 bool UJPSPlusStrategy::HasForcedNeighbourBitMask(const FNeighborWalkability& Neighbors, int32 CheckDirIndex,
                                                  int32 ParentDirIndex) const
 {
+
+	// 1. 목표 방향(CheckDir)으로 이동할 수 없다면 강제 이웃이 될 수 없음.
+	if (!Neighbors.IsWalkable(CheckDirIndex))
+	{
+		return false;
+	}
+
+	// 2. 조회 테이블에서 코너링을 막는 장애물의 방향 인덱스를 가져옴.
+	const int32 BlockerDirIndex = BlockerDirectionTable[ParentDirIndex][CheckDirIndex];
+
+	// 3. 장애물 방향이 유효하고(-1이 아니고), 그 방향이 실제로 막혀있다면(비트가 0),
+	//    이것이 바로 강제 이웃임.
+	if (BlockerDirIndex != -1 && !Neighbors.IsWalkable(BlockerDirIndex))
+	{
+		return true;
+	}
+
+	return false;
+	
 	// A forced neighbor exists if:
 	// 1. The path straight into the neighbor (CheckDir) is walkable.
 	if (!Neighbors.IsWalkable(CheckDirIndex))
@@ -736,7 +784,7 @@ bool UJPSPlusStrategy::HasForcedNeighbourBitMask(const FNeighborWalkability& Nei
 	// 2. The path around the corner obstacle is BLOCKED.
 	const FIntVector& ParentDir = AllDirections[ParentDirIndex];
 	const FIntVector& CheckDir = AllDirections[CheckDirIndex];
-
+	
 	// Decompose the parent direction (e.g., {1,1,0} -> dx=1, dy=1, dz=0)
 	const int32 pdx = ParentDir.X, pdy = ParentDir.Y, pdz = ParentDir.Z;
 	// Decompose the neighbor direction
