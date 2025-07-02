@@ -37,42 +37,6 @@ void UJPSPlusStrategy::Initialize(AVoxelVolumeBase* InVolume)
 	{
 		DirectionToIndexMap.Add(AllDirections[i], i);
 	}
-
-	if (BlockerDirectionTable.Num() == 0)
-	{
-		const int32 NumDirs = AllDirections.Num();
-		BlockerDirectionTable.Init(TArray<int32>(), NumDirs);
-		for (int32 i = 0; i < NumDirs; ++i)
-		{
-			BlockerDirectionTable[i].Init(-1, NumDirs);
-		}
-
-		for (int32 ParentDirIndex = 0; ParentDirIndex < NumDirs; ++ParentDirIndex)
-		{
-			for (int32 CheckDirIndex = 0; CheckDirIndex < NumDirs; ++CheckDirIndex)
-			{
-				const FIntVector& ParentDir = AllDirections[ParentDirIndex];
-				const FIntVector& CheckDir = AllDirections[CheckDirIndex];
-
-				// 직선/축 방향 이동에서는 강제 이웃이 거의 발생하지 않음 (JPS+ 규칙)
-				if (ParentDir.X * CheckDir.X < 0 || ParentDir.Y * CheckDir.Y < 0 || ParentDir.Z * CheckDir.Z < 0) continue; // 역방향 체크는 무의미
-				if (ParentDir == CheckDir) continue;
-
-				// 코너링을 막는 장애물의 상대 위치 계산
-				// 예: ParentDir=(1,0,0), CheckDir=(0,1,0) -> Blocker=(-1,1,0)
-				// 이 장애물은 현재 노드 기준 (-ParentDir.X, CheckDir.Y, CheckDir.Z) 등에 위치함
-				FIntVector BlockerDir = (ParentDir * -1) + CheckDir;
-                
-				// 정규화된 방향이 아니면 무시 (대각선 코너링 등)
-				if (FMath::Abs(BlockerDir.X) > 1 || FMath::Abs(BlockerDir.Y) > 1 || FMath::Abs(BlockerDir.Z) > 1) continue;
-
-				if (const int32* BlockerIndexPtr = DirectionToIndexMap.Find(BlockerDir))
-				{
-					BlockerDirectionTable[ParentDirIndex][CheckDirIndex] = *BlockerIndexPtr;
-				}
-			}
-		}
-	}
 }
 
 bool UJPSPlusStrategy::FindPathWithStrategy(const FIntVector& StartIndex, const FIntVector& EndIndex,
@@ -755,25 +719,6 @@ bool UJPSPlusStrategy::HasForcedNeighbour(const FIntVector& NodePos, const FIntV
 bool UJPSPlusStrategy::HasForcedNeighbourBitMask(const FNeighborWalkability& Neighbors, int32 CheckDirIndex,
                                                  int32 ParentDirIndex) const
 {
-
-	// 1. 목표 방향(CheckDir)으로 이동할 수 없다면 강제 이웃이 될 수 없음.
-	if (!Neighbors.IsWalkable(CheckDirIndex))
-	{
-		return false;
-	}
-
-	// 2. 조회 테이블에서 코너링을 막는 장애물의 방향 인덱스를 가져옴.
-	const int32 BlockerDirIndex = BlockerDirectionTable[ParentDirIndex][CheckDirIndex];
-
-	// 3. 장애물 방향이 유효하고(-1이 아니고), 그 방향이 실제로 막혀있다면(비트가 0),
-	//    이것이 바로 강제 이웃임.
-	if (BlockerDirIndex != -1 && !Neighbors.IsWalkable(BlockerDirIndex))
-	{
-		return true;
-	}
-
-	return false;
-	
 	// A forced neighbor exists if:
 	// 1. The path straight into the neighbor (CheckDir) is walkable.
 	if (!Neighbors.IsWalkable(CheckDirIndex))
