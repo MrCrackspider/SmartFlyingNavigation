@@ -37,13 +37,13 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Avoidance|Tuning")
     int32 SolverIterations;
 
-    //// 대칭성 파괴 시 측면 힘의 강도 (0.0 ~ 1.0f)
-    //UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Avoidance|Tuning")
-    //float SideBiasMagnitude;
+    // 대칭성 파괴 시 측면 힘의 강도 (0.0 ~ 1.0f)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Avoidance|Tuning")
+    float SideBiasMagnitude;
 
-    //// 최적 속도 보간 속도
-    //UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Avoidance|Tuning")
-    //float InterpSpeed = 10.0f;
+    // 최적 속도 보간 속도
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Avoidance|Tuning")
+    float InterpSpeed = 10.0f;
 
 private:
     UPROPERTY()

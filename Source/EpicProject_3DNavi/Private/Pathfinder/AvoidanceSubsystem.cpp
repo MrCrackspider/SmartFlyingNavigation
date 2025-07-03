@@ -13,13 +13,13 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
 
-    TimeHorizon = 0.3f;
+    TimeHorizon = 1.f;
     MaxNeighbors = 4;
     GridCellSize = 200.f; // VolumeExtent의 배수이자 (64의 약수)*100로 하는게 좋음
-    SymmetryBreakingRangeMultiplier = 3.f;
+    SymmetryBreakingRangeMultiplier = 4.f;
     SolverIterations = 5;
-    //SideBiasMagnitude = 0.3f;
-    //InterpSpeed = 10.f;
+    SideBiasMagnitude = 0.8f;
+    InterpSpeed = 10.f;
 }
 
 void UAvoidanceSubsystem::Deinitialize()
@@ -59,14 +59,20 @@ TArray<UPathfindingComponent*> UAvoidanceSubsystem::GetNearbyAgents(UPathfinding
 {
     TArray<UPathfindingComponent*> NearbyAgents;
     if (!Agent || !Agent->GetOwner() || GridCellSize <= 0) return NearbyAgents;
+
     const FVector Location = Agent->GetOwner()->GetActorLocation();
+    const float Radius = Agent->GetAgentRadius();
+
+    const int32 SearchRange = FMath::Max(1, FMath::CeilToInt(Radius / GridCellSize));
+
     const FIntVector CenterGridPosition(FMath::FloorToInt(Location.X / GridCellSize), FMath::FloorToInt(Location.Y / GridCellSize), FMath::FloorToInt(Location.Z / GridCellSize));
 
-    for (int32 z = -1; z <= 1; ++z)
+    // 고정된 -1~1 대신 계산된 SearchRange를 사용합니다.
+    for (int32 z = -SearchRange; z <= SearchRange; ++z)
     {
-        for (int32 y = -1; y <= 1; ++y)
+        for (int32 y = -SearchRange; y <= SearchRange; ++y)
         {
-            for (int32 x = -1; x <= 1; ++x)
+            for (int32 x = -SearchRange; x <= SearchRange; ++x)
             {
                 FIntVector GridPosition = CenterGridPosition + FIntVector(x, y, z);
                 if (const TArray<UPathfindingComponent*>* CellAgents = AgentGrid.Find(GridPosition))
@@ -191,8 +197,10 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
             }
             else // 에이전트가 이미 겹쳤을 때
             {
-                const float invDeltaTime = 1.0f / DeltaTime;
-                u = (RelativePosition.GetSafeNormal() * (CombinedRadius - RelativePosition.Size()) * invDeltaTime) - RelativeVelocity;
+                // TO-DO: 아래 코드를 주석 처리해서 Reciprocal Dancing현상을 제거했지만, 겹침 해소를 할 수 없음.
+                // @minseokbae
+                //    const float invDeltaTime = 1.0f / DeltaTime;
+                //    u = (RelativePosition.GetSafeNormal() * (CombinedRadius - RelativePosition.Size()) * invDeltaTime) - RelativeVelocity;
             }
 
             if (!u.IsNearlyZero(KINDA_SMALL_NUMBER)) // u 벡터가 0이 아니면 제약 조건 추가
@@ -206,6 +214,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
                 }
             }
         }
+
         // 대칭성 파괴 로직 (목표 속도를 옆으로 완전히 트는 방식)
         FVector ActualPreferredVelocity = PreferredVelocityA;
         if (!NearbyAgents.IsEmpty() && !PreferredVelocityA.IsNearlyZero())
@@ -250,10 +259,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
                     }
                     SideVector.Normalize();
 
-                    ActualPreferredVelocity = SideVector * AgentA->MovementSpeed;
-                    // 아래 방법으로 수정을 하면 자연스럽지만, 매직넘버를 찾기 매우 까다로움.
-                    // MovementSpeed, Radius, GridCellSize 등을 고려해야 함.
-                    //ActualPreferredVelocity += SideVector * AgentA->MovementSpeed;
+                    ActualPreferredVelocity += SideVector * AgentA->MovementSpeed * SideBiasMagnitude;
                 }
             }
         }
@@ -371,9 +377,11 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
     {
         if (Agent)
         {
-            // VInterpTo 사용시 기존 보간 로직과 충돌 가능성 + 매직 넘버 탐색
-            FVector FinalVelocity = OptimalVelocity;
-            Agent->ApplyMovement(FinalVelocity.GetClampedToMaxSize(Agent->MovementSpeed), DeltaTime);
+            const FVector CurrentVelocity = Agent->GetCurrentVelocity();
+            const FVector InterpolatedVelocity = FMath::VInterpTo(CurrentVelocity, OptimalVelocity, DeltaTime, InterpSpeed);
+            const FVector FinalVelocity = InterpolatedVelocity.GetClampedToMaxSize(Agent->MovementSpeed);
+
+            Agent->ApplyMovement(FinalVelocity, DeltaTime);
         }
     }
 }
