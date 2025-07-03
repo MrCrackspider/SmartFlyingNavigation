@@ -299,30 +299,25 @@ void UPathfindingComponent::UpdateSplinePreferredLocation(float DeltaTime)
 	// 1. 이번 프레임에 이동할 거리를 누적합니다.
 	DistanceAlongSpline += MovementSpeed * DeltaTime;
 
-	// 2. 스플라인의 총 길이를 가져옵니다.
-	const float SplineLength = PathSplinePtr->GetSplineLength();
+	const FVector CurrentLocation = MyActor->GetActorLocation();
+	const FVector TargetPoint = FoundPath[CurrentPathIndex];
 
-	// 3. 스플라인의 총 길이를 가져옵니다.
-	if (DistanceAlongSpline >= SplineLength)
+	if (FVector::DistSquared(CurrentLocation, TargetPoint) < FMath::Square(100.f))
 	{
-		// 도착 완료: 캐릭터를 경로의 마지막 지점에 위치시킵니다.
-		const FVector FinalDestination = FoundPath.Last();
-		MyActor->SetActorLocation(FinalDestination);
-
-		CurrentState = EPathfindingState::Idle; //상태를 대기로 변경
-		UE_LOG(LogTemp, Log, TEXT("MovemnetFinished"));
-		return;
+		CurrentPathIndex++;
+		if (CurrentPathIndex >= FoundPath.Num())
+		{
+			CurrentState = EPathfindingState::Idle; // 이동 완료
+			CurrentPathIndex = -1;
+			UE_LOG(LogTemp, Log, TEXT("Movement Finished."));
+			return;
+		}
 	}
 
 	// 4. 아직 이동중이라면, 스플라인 상의 새로운 위치와 회전값을 계산
 	const FVector NewLocation = PathSplinePtr->GetLocationAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::World);
 
 	NextPreferredLocation = NewLocation;
-
-	// Location으로 Velocity구해서 Rotation까지 구하기에 일단 Rotation안구함
-	// const FRotator NewRotation = PathSpline->GetRotationAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::World);
-	// const FRotator SmoothedRotation = FMath::RInterpTo(MyActor->GetActorRotation(), NewRotation, DeltaTime, 10.0f);
-	// NextPreferredRotation = SmoothedRotation;
 }
 
 void UPathfindingComponent::UpdateLinearPreferredLocation(float DeltaTime)
@@ -355,12 +350,6 @@ void UPathfindingComponent::UpdateLinearPreferredLocation(float DeltaTime)
 	{
 		const FVector Direction = (FoundPath[CurrentPathIndex] - CurrentLocation).GetSafeNormal();
 		NextPreferredLocation = CurrentLocation + Direction * MovementSpeed * DeltaTime;
-
-		// Location으로 Velocity구해서 Rotation까지 구하기에 일단 Rotation안구함
-		// 회전도 추가하여 더 자연스럽게 만듭니다.
-		// const FRotator TargetRotation = Direction.Rotation();
-		// const FRotator SmoothedRotation = FMath::RInterpTo(Actor->GetActorRotation(), TargetRotation, DeltaTime, 5.0f);
-		// NextPreferredRotation = SmoothedRotation;
 	}
 }
 
