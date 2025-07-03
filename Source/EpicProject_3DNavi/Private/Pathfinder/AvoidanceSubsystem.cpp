@@ -63,11 +63,11 @@ TArray<UPathfindingComponent*> UAvoidanceSubsystem::GetNearbyAgents(UPathfinding
     const FVector Location = Agent->GetOwner()->GetActorLocation();
     const float Radius = Agent->GetAgentRadius();
 
+    // 에이전트의 반지름이 그리드 셀 크기를 초과할 경우를 대비해 탐색 범위를 동적으로 계산
     const int32 SearchRange = FMath::Max(1, FMath::CeilToInt(Radius / GridCellSize));
 
     const FIntVector CenterGridPosition(FMath::FloorToInt(Location.X / GridCellSize), FMath::FloorToInt(Location.Y / GridCellSize), FMath::FloorToInt(Location.Z / GridCellSize));
 
-    // 고정된 -1~1 대신 계산된 SearchRange를 사용합니다.
     for (int32 z = -SearchRange; z <= SearchRange; ++z)
     {
         for (int32 y = -SearchRange; y <= SearchRange; ++y)
@@ -96,6 +96,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
     Super::Tick(DeltaTime);
     SCOPE_CYCLE_COUNTER(STAT_AvoidanceSubsystem_Tick);
 
+    // --- 1. 초기 조건 검사 ---
     if (RegisteredAgents.Num() < 2)
     {
         if (RegisteredAgents.Num() == 1 && RegisteredAgents[0])
@@ -104,275 +105,50 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
         }
         return;
     }
-
     if (DeltaTime < KINDA_SMALL_NUMBER) return;
 
+    // --- 2. 공간 분할 그리드 업데이트 ---
     UpdateAgentGrid();
 
     TMap<UPathfindingComponent*, FVector> NewOptimalVelocities;
 
-    for (UPathfindingComponent* AgentA : RegisteredAgents)
+    // --- 3. 각 에이전트에 대한 최적 속도 계산 ---
+    for (UPathfindingComponent* Agent : RegisteredAgents)
     {
-        if (!AgentA || !AgentA->GetOwner()) continue;
+        if (!Agent || !Agent->GetOwner()) continue;
 
-        const FVector PositionA = AgentA->GetOwner()->GetActorLocation();
-        const float RadiusA = AgentA->GetAgentRadius();
-        const FVector CurrentVelocityA = AgentA->GetCurrentVelocity();
-        const FVector PreferredVelocityA = AgentA->GetPreferredVelocity();
-
-        TArray<FPlane> OrcaConstraints;
-
-        TArray<UPathfindingComponent*> NearbyAgents = GetNearbyAgents(AgentA);
+        // 주변 에이전트 탐색 및 필터링
+        TArray<UPathfindingComponent*> NearbyAgents = GetNearbyAgents(Agent);
         if (NearbyAgents.Num() > MaxNeighbors)
         {
-            NearbyAgents.Sort([PositionA](const UPathfindingComponent& Lhs, const UPathfindingComponent& Rhs) {
-                return FVector::DistSquared(PositionA, Lhs.GetOwner()->GetActorLocation()) < FVector::DistSquared(PositionA, Rhs.GetOwner()->GetActorLocation());
+            NearbyAgents.Sort([AgentPos = Agent->GetOwner()->GetActorLocation()](const UPathfindingComponent& Lhs, const UPathfindingComponent& Rhs) {
+                return FVector::DistSquared(AgentPos, Lhs.GetOwner()->GetActorLocation()) < FVector::DistSquared(AgentPos, Rhs.GetOwner()->GetActorLocation());
                 });
             NearbyAgents.SetNum(MaxNeighbors);
         }
 
-        // 유령 제약 방지를 위한 TTC 로직 및 제약 조건
-        for (UPathfindingComponent* AgentB : NearbyAgents)
-        {
-            const FVector PositionB = AgentB->GetOwner()->GetActorLocation();
-            const float RadiusB = AgentB->GetAgentRadius();
-            const FVector VelocityB = AgentB->GetCurrentVelocity();
+        TArray<FPlane> OrcaConstraints;
 
-            const FVector RelativePosition = PositionB - PositionA;
-            const FVector RelativeVelocity = CurrentVelocityA - VelocityB;
-            const float DistSq = RelativePosition.SizeSquared();
-            const float CombinedRadius = RadiusA + RadiusB;
-            const float CombinedRadiusSq = FMath::Square(CombinedRadius);
+        // Step 3a: 다른 에이전트와의 제약 조건 생성
+        GenerateAgentConstraints(Agent, NearbyAgents, OrcaConstraints);
 
-            float EffectiveTimeHorizon = TimeHorizon;
+        // Step 3b: 정적 복셀 장애물과의 제약 조건 생성
+        GenerateVoxelConstraints(Agent, OrcaConstraints);
 
-            const float RelativeVelSq = RelativeVelocity.SizeSquared();
-            bool bIsCollidingOrApproaching = false;
+        // Step 3c: 대칭성 파괴를 위한 선호 속도 조정
+        const FVector PreferredVelocity = Agent->GetPreferredVelocity();
+        const FVector ActualPreferredVelocity = CalculateSymmetryBreakingVelocity(Agent, PreferredVelocity, NearbyAgents);
 
-            if (RelativeVelSq > KINDA_SMALL_NUMBER)
-            {
-                const float DotProduct_RelPos_RelVel = FVector::DotProduct(RelativePosition, RelativeVelocity);
-                const float Discriminant = FMath::Square(DotProduct_RelPos_RelVel) - RelativeVelSq * (DistSq - CombinedRadiusSq);
+        // Step 3d: 제약 조건들을 기반으로 최적 속도 해결
+        const FVector OptimalVelocity = SolveOptimalVelocity(OrcaConstraints, ActualPreferredVelocity);
 
-                if (Discriminant >= 0.f && DotProduct_RelPos_RelVel < 0.f)
-                {
-                    const float TTC = (-DotProduct_RelPos_RelVel - FMath::Sqrt(Discriminant)) / RelativeVelSq;
+        // Step 3e: 디버그 시각화
+        DebugVisualizeVelocities(Agent, PreferredVelocity, ActualPreferredVelocity, OptimalVelocity);
 
-                    if (TTC > 0.f)
-                    {
-                        EffectiveTimeHorizon = FMath::Min(TimeHorizon, TTC);
-                        bIsCollidingOrApproaching = true;
-                    }
-                }
-            }
-
-            // 에이전트가 아직 겹치지 않았고 (DistSq > CombinedRadiusSq),
-            // 동시에 충돌 경로에 있지 않다면 (bIsCollidingOrApproaching가 false)
-            if (DistSq > CombinedRadiusSq && !bIsCollidingOrApproaching)
-            {
-                continue;
-            }
-
-            FVector u;
-            const float InverseEffectiveTimeHorizon = 1.0f / EffectiveTimeHorizon;
-
-            // 에이전트가 아직 겹치지 않았을 때 (단, 이제는 충돌 위협이 있는 경우만 여기에 도달)
-            if (DistSq > CombinedRadiusSq) 
-            {
-                const FVector w = RelativeVelocity - RelativePosition * InverseEffectiveTimeHorizon;
-                const float w_sq = w.SizeSquared();
-                const float VOptRadius = CombinedRadius * InverseEffectiveTimeHorizon;
-                const float VOptRadiusSq = FMath::Square(VOptRadius);
-
-                if (FVector::DotProduct(w, RelativePosition) < 0.0f && FMath::Square(FVector::DotProduct(w, RelativePosition)) > w_sq * VOptRadiusSq)
-                {
-                    const float w_len = FMath::Sqrt(w_sq);
-                    const FVector n_w = w / w_len;
-                    u = (n_w * VOptRadius - w);
-                }
-                else
-                {
-                    u = FVector::ZeroVector;
-                }
-            }
-            else // 에이전트가 이미 겹쳤을 때
-            {
-                // TO-DO: 아래 코드를 주석 처리해서 Reciprocal Dancing현상을 제거했지만, 겹침 해소를 할 수 없음.
-                // @minseokbae
-                //    const float invDeltaTime = 1.0f / DeltaTime;
-                //    u = (RelativePosition.GetSafeNormal() * (CombinedRadius - RelativePosition.Size()) * invDeltaTime) - RelativeVelocity;
-            }
-
-            if (!u.IsNearlyZero(KINDA_SMALL_NUMBER)) // u 벡터가 0이 아니면 제약 조건 추가
-            {
-                const FVector w_correction = u * 0.5f;
-                const FVector n_correction = u.GetSafeNormal();
-
-                if (!n_correction.IsNearlyZero(KINDA_SMALL_NUMBER))
-                {
-                    OrcaConstraints.Emplace(CurrentVelocityA + w_correction, n_correction);
-                }
-            }
-        }
-
-        // 대칭성 파괴 로직 (목표 속도를 옆으로 완전히 트는 방식)
-        FVector ActualPreferredVelocity = PreferredVelocityA;
-        if (!NearbyAgents.IsEmpty() && !PreferredVelocityA.IsNearlyZero())
-        {
-            UPathfindingComponent* ObstacleAgent = nullptr;
-            float MinThreatDistSq = TNumericLimits<float>::Max();
-
-            // 현재 A를 향해오거나 충돌 위험이 있는 에이전트
-            for (UPathfindingComponent* AgentB : NearbyAgents)
-            {
-                const FVector ToAgentB = AgentB->GetOwner()->GetActorLocation() - PositionA;
-                const float DistToAgentBSq = ToAgentB.SizeSquared();
-                const float CombinedRadius = RadiusA + AgentB->GetAgentRadius();
-
-                // 일정 거리 이내이고, PreferredVelocityA가 AgentB를 향하고 있을 때
-                if (DistToAgentBSq < FMath::Square(CombinedRadius * SymmetryBreakingRangeMultiplier) && FVector::DotProduct(PreferredVelocityA, ToAgentB) > 0)
-                {
-                    if (DistToAgentBSq < MinThreatDistSq)
-                    {
-                        MinThreatDistSq = DistToAgentBSq;
-                        ObstacleAgent = AgentB;
-                    }
-                }
-            }
-
-            if (ObstacleAgent)
-            {
-                // 고유 ID를 비교하여 한쪽만 행동을 결정
-                if (AgentA->GetUniqueID() > ObstacleAgent->GetUniqueID())
-                {
-                    FVector ForwardVec = PreferredVelocityA.GetSafeNormal();
-                    FVector SideVector;
-
-                    // 수직 충돌 엣지 케이스 처리
-                    if (FMath::Abs(FVector::DotProduct(ForwardVec, FVector::UpVector)) > 0.99f)
-                    {
-                        SideVector = FVector::CrossProduct(ForwardVec, FVector::RightVector);
-                    }
-                    else
-                    {
-                        SideVector = FVector::CrossProduct(ForwardVec, FVector::UpVector);
-                    }
-                    SideVector.Normalize();
-
-                    ActualPreferredVelocity += SideVector * AgentA->MovementSpeed * SideBiasMagnitude;
-                }
-            }
-        }
-
-        FVector OptimalVelocity = SolveOptimalVelocity_Final(OrcaConstraints, ActualPreferredVelocity);
-
-        AFenwickVoxelVolume* VoxelVolume = Cast<AFenwickVoxelVolume>(AgentA->TargetVolume);
-        if (VoxelVolume)
-        {
-            // 가성비의 16
-            const int32 NumSamples = 16; 
-            const float LookaheadDist = RadiusA * 2.0f;
-
-            for (int32 i = 0; i < NumSamples; ++i)
-            {
-                // Fibonacci Sphere
-                const float Y = 1.0f - (i / (float)(NumSamples - 1)) * 2.0f;
-                const float RadiusAtY = FMath::Sqrt(1.0f - Y * Y);
-
-                const float GoldenAngle = PI * (3.0f - FMath::Sqrt(5.0f));
-                const float Theta = GoldenAngle * i;
-
-                const float X = FMath::Cos(Theta) * RadiusAtY;
-                const float Z = FMath::Sin(Theta) * RadiusAtY;
-
-                const FVector SampleDir(X, Y, Z);
-
-                const FIntVector VoxelIndexStart = VoxelVolume->WorldToVoxelIndex(PositionA);
-                const FIntVector VoxelIndexEnd = VoxelVolume->WorldToVoxelIndex(PositionA + SampleDir * LookaheadDist);
-
-                // 복셀 단위로 레이캐스트를 수행하여 가장 가까운 장애물 복셀을 탐색
-                FIntVector HitVoxelIndex;
-                if (FStrategyUtils::Raycast(VoxelVolume, VoxelIndexStart, VoxelIndexEnd, HitVoxelIndex))
-                {
-                    // 감지된 장애물 복셀을 "움직이지 않는 에이전트"로 간주
-                    const FVector ObstaclePos = VoxelVolume->VoxelIndexToWorld(HitVoxelIndex);
-                    const FVector ObstacleVel = FVector::ZeroVector;
-
-                    const FVector RelativePos = ObstaclePos - PositionA;
-                    const FVector RelativeVel = CurrentVelocityA - ObstacleVel;
-
-                    // 정적 장애물에 대한 u 벡터 계산
-                    const float InverseTimeHorizon = 1.0f / TimeHorizon;
-                    const FVector w = RelativeVel - RelativePos * InverseTimeHorizon;
-                    const float w_len = w.Size();
-                    FVector u = FVector::ZeroVector;
-                    if (w_len > KINDA_SMALL_NUMBER)
-                    {
-                        // 정적 장애물은 반지름이 없다고 가정하고 계산을 단순화
-                        // 이 부분은 에이전트가 장애물에 너무 가까이 붙지 않도록 하는 역할
-                        const float DotProduct = FVector::DotProduct(RelativePos, w);
-                        if (DotProduct < 0.0f && FMath::Square(DotProduct) > w_len * w_len * FMath::Square(RadiusA))
-                        {
-                            u = (w / w_len) * (RadiusA * InverseTimeHorizon - w_len);
-                        }
-                    }
-
-                    if (!u.IsNearlyZero())
-                    {
-                        // 정적 장애물은 회피 책임이 0%이므로, 에이전트가 100% 책임
-                        const FVector w_correction = u;
-                        const FVector n_correction = u.GetSafeNormal();
-                        if (!n_correction.IsNearlyZero())
-                        {
-                            OrcaConstraints.Emplace(CurrentVelocityA + w_correction, n_correction);
-                        }
-                    }
-                }
-            }
-        }
-
-		// Begin Debug Visualization
-        if (GEngine)
-        {
-            UWorld* World = GetWorld();
-            if (World)
-            {
-                const FVector LineStart = PositionA + FVector(0, 0, 10.f);
-                const float LineLengthMultiplier = 0.2f;
-
-                // 1. 선호 속도 (Preferred Velocity) - 파란색
-                DrawDebugLine(
-                    World,
-                    LineStart,
-                    LineStart + PreferredVelocityA * LineLengthMultiplier,
-                    FColor::Blue,
-                    false, -1, 0, 2.f
-                );
-
-                // 2. 수정된 선호 속도 (Actual Preferred Velocity) - 노란색
-                DrawDebugLine(
-                    World,
-                    LineStart,
-                    LineStart + ActualPreferredVelocity * LineLengthMultiplier,
-                    FColor::Yellow,
-                    false, -1, 0, 3.f
-                );
-
-                // 3. 최종 최적 속도 (Optimal Velocity) - 초록색
-                DrawDebugLine(
-                    World,
-                    LineStart,
-                    LineStart + OptimalVelocity * LineLengthMultiplier,
-                    FColor::Green,
-                    false, -1, 0, 4.f
-                );
-            }
-        }
-		// End Debug Visualization
-
-        NewOptimalVelocities.Add(AgentA, OptimalVelocity);
+        NewOptimalVelocities.Add(Agent, OptimalVelocity);
     }
 
+    // --- 4. 계산된 속도를 모든 에이전트에 적용 ---
     for (auto const& [Agent, OptimalVelocity] : NewOptimalVelocities)
     {
         if (Agent)
@@ -386,7 +162,207 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
     }
 }
 
-FVector UAvoidanceSubsystem::SolveOptimalVelocity_Final(const TArray<FPlane>& Constraints, const FVector& PreferredVelocity) const
+void UAvoidanceSubsystem::GenerateAgentConstraints(UPathfindingComponent* CurrentAgent, const TArray<UPathfindingComponent*>& NearbyAgents, TArray<FPlane>& OutConstraints)
+{
+    const FVector PositionA = CurrentAgent->GetOwner()->GetActorLocation();
+    const float RadiusA = CurrentAgent->GetAgentRadius();
+    const FVector CurrentVelocityA = CurrentAgent->GetCurrentVelocity();
+
+    for (UPathfindingComponent* AgentB : NearbyAgents)
+    {
+        const FVector PositionB = AgentB->GetOwner()->GetActorLocation();
+        const float RadiusB = AgentB->GetAgentRadius();
+        const FVector VelocityB = AgentB->GetCurrentVelocity();
+
+        const FVector RelativePosition = PositionB - PositionA;
+        const FVector RelativeVelocity = CurrentVelocityA - VelocityB;
+        const float DistSq = RelativePosition.SizeSquared();
+        const float CombinedRadius = RadiusA + RadiusB;
+        const float CombinedRadiusSq = FMath::Square(CombinedRadius);
+
+        float EffectiveTimeHorizon = TimeHorizon;
+        bool bIsCollidingOrApproaching = false;
+
+        // TTC (Time to Collision) 계산
+        const float RelativeVelSq = RelativeVelocity.SizeSquared();
+        if (RelativeVelSq > KINDA_SMALL_NUMBER)
+        {
+            const float DotProduct_RelPos_RelVel = FVector::DotProduct(RelativePosition, RelativeVelocity);
+            const float Discriminant = FMath::Square(DotProduct_RelPos_RelVel) - RelativeVelSq * (DistSq - CombinedRadiusSq);
+
+            if (Discriminant >= 0.f && DotProduct_RelPos_RelVel < 0.f)
+            {
+                const float TTC = (-DotProduct_RelPos_RelVel - FMath::Sqrt(Discriminant)) / RelativeVelSq;
+                if (TTC > 0.f)
+                {
+                    EffectiveTimeHorizon = FMath::Min(TimeHorizon, TTC);
+                    bIsCollidingOrApproaching = true;
+                }
+            }
+        }
+
+        if (DistSq > CombinedRadiusSq && !bIsCollidingOrApproaching)
+        {
+            continue;
+        }
+
+        const float InverseEffectiveTimeHorizon = 1.0f / EffectiveTimeHorizon;
+        FVector u;
+
+        if (DistSq > CombinedRadiusSq)
+        {
+            const FVector w = RelativeVelocity - RelativePosition * InverseEffectiveTimeHorizon;
+            const float w_sq = w.SizeSquared();
+            const float VOptRadius = CombinedRadius * InverseEffectiveTimeHorizon;
+            const float VOptRadiusSq = FMath::Square(VOptRadius);
+
+            if (FVector::DotProduct(w, RelativePosition) < 0.0f && FMath::Square(FVector::DotProduct(w, RelativePosition)) > w_sq * VOptRadiusSq)
+            {
+                const float w_len = FMath::Sqrt(w_sq);
+                const FVector n_w = w / w_len;
+                u = (n_w * VOptRadius - w);
+            }
+            else
+            {
+                u = FVector::ZeroVector;
+            }
+        }
+        else // 에이전트가 이미 겹쳤을 때
+        {
+            // TO-DO: 아래 코드를 주석 처리해서 Reciprocal Dancing 현상을 제거했지만, 겹침 해소를 할 수 없음.
+            // @minseokbae
+            // const float invDeltaTime = 1.0f / GetWorld()->GetDeltaSeconds();
+            // u = (RelativePosition.GetSafeNormal() * (CombinedRadius - RelativePosition.Size()) * invDeltaTime) - RelativeVelocity;
+        }
+
+        if (!u.IsNearlyZero(KINDA_SMALL_NUMBER))
+        {
+            const FVector w_correction = u * 0.5f;
+            const FVector n_correction = u.GetSafeNormal();
+            if (!n_correction.IsNearlyZero(KINDA_SMALL_NUMBER))
+            {
+                OutConstraints.Emplace(CurrentVelocityA + w_correction, n_correction);
+            }
+        }
+    }
+}
+
+void UAvoidanceSubsystem::GenerateVoxelConstraints(UPathfindingComponent* CurrentAgent, TArray<FPlane>& OutConstraints)
+{
+    AFenwickVoxelVolume* VoxelVolume = Cast<AFenwickVoxelVolume>(CurrentAgent->TargetVolume);
+    if (!VoxelVolume) return;
+
+    const FVector PositionA = CurrentAgent->GetOwner()->GetActorLocation();
+    const float RadiusA = CurrentAgent->GetAgentRadius();
+    const FVector CurrentVelocityA = CurrentAgent->GetCurrentVelocity();
+
+    const int32 NumSamples = 16;
+    const float LookaheadDist = RadiusA * 2.0f;
+
+    for (int32 i = 0; i < NumSamples; ++i)
+    {
+        // Fibonacci Sphere 샘플링
+        const float Y = 1.0f - (i / (float)(NumSamples - 1)) * 2.0f;
+        const float RadiusAtY = FMath::Sqrt(1.0f - Y * Y);
+        const float GoldenAngle = PI * (3.0f - FMath::Sqrt(5.0f));
+        const float Theta = GoldenAngle * i;
+        const FVector SampleDir(FMath::Cos(Theta) * RadiusAtY, Y, FMath::Sin(Theta) * RadiusAtY);
+
+        const FIntVector VoxelIndexStart = VoxelVolume->WorldToVoxelIndex(PositionA);
+        const FIntVector VoxelIndexEnd = VoxelVolume->WorldToVoxelIndex(PositionA + SampleDir * LookaheadDist);
+
+        FIntVector HitVoxelIndex;
+        if (FStrategyUtils::Raycast(VoxelVolume, VoxelIndexStart, VoxelIndexEnd, HitVoxelIndex))
+        {
+            // 정적 장애물은 점이 아닌 부피로 계산
+            const FVector VoxelWorldPos = VoxelVolume->VoxelIndexToWorld(HitVoxelIndex);
+            // VoxelVolume->VoxelExtent가 복셀 한 변 길이의 절반(half extent)이라고 가정
+            const FBox VoxelBounds(VoxelWorldPos - VoxelVolume->VoxelExtent, VoxelWorldPos + VoxelVolume->VoxelExtent);
+            const FVector ObstaclePos = VoxelBounds.GetClosestPointTo(PositionA);
+
+            const FVector RelativePos = ObstaclePos - PositionA;
+            const FVector RelativeVel = CurrentVelocityA; // ObstacleVel is Zero
+
+            const float InverseTimeHorizon = 1.0f / TimeHorizon;
+            const FVector w = RelativeVel - RelativePos * InverseTimeHorizon;
+            const float w_len_sq = w.SizeSquared();
+            FVector u = FVector::ZeroVector;
+
+            if (w_len_sq > KINDA_SMALL_NUMBER)
+            {
+                const float DotProduct = FVector::DotProduct(RelativePos, w);
+                if (DotProduct < 0.0f && FMath::Square(DotProduct) > w_len_sq * FMath::Square(RadiusA))
+                {
+                    const float w_len = FMath::Sqrt(w_len_sq);
+                    u = (w / w_len) * (RadiusA * InverseTimeHorizon - w_len);
+                }
+            }
+
+            if (!u.IsNearlyZero())
+            {
+                const FVector w_correction = u; // 정적 장애물은 100% 책임
+                const FVector n_correction = u.GetSafeNormal();
+                if (!n_correction.IsNearlyZero())
+                {
+                    OutConstraints.Emplace(CurrentVelocityA + w_correction, n_correction);
+                }
+            }
+        }
+    }
+}
+
+FVector UAvoidanceSubsystem::CalculateSymmetryBreakingVelocity(UPathfindingComponent* CurrentAgent, const FVector& PreferredVelocity, const TArray<UPathfindingComponent*>& NearbyAgents)
+{
+    if (NearbyAgents.IsEmpty() || PreferredVelocity.IsNearlyZero())
+    {
+        return PreferredVelocity;
+    }
+
+    const FVector PositionA = CurrentAgent->GetOwner()->GetActorLocation();
+    const float RadiusA = CurrentAgent->GetAgentRadius();
+
+    UPathfindingComponent* ObstacleAgent = nullptr;
+    float MinThreatDistSq = TNumericLimits<float>::Max();
+
+    for (UPathfindingComponent* AgentB : NearbyAgents)
+    {
+        const FVector ToAgentB = AgentB->GetOwner()->GetActorLocation() - PositionA;
+        const float DistToAgentBSq = ToAgentB.SizeSquared();
+        const float CombinedRadius = RadiusA + AgentB->GetAgentRadius();
+
+        if (DistToAgentBSq < FMath::Square(CombinedRadius * SymmetryBreakingRangeMultiplier) && FVector::DotProduct(PreferredVelocity, ToAgentB) > 0)
+        {
+            if (DistToAgentBSq < MinThreatDistSq)
+            {
+                MinThreatDistSq = DistToAgentBSq;
+                ObstacleAgent = AgentB;
+            }
+        }
+    }
+
+    if (ObstacleAgent && CurrentAgent->GetUniqueID() > ObstacleAgent->GetUniqueID())
+    {
+        FVector ForwardVec = PreferredVelocity.GetSafeNormal();
+        FVector SideVector;
+
+        if (FMath::Abs(FVector::DotProduct(ForwardVec, FVector::UpVector)) > 0.99f)
+        {
+            SideVector = FVector::CrossProduct(ForwardVec, FVector::RightVector);
+        }
+        else
+        {
+            SideVector = FVector::CrossProduct(ForwardVec, FVector::UpVector);
+        }
+        SideVector.Normalize();
+
+        FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent->MovementSpeed * SideBiasMagnitude;
+        return ActualPreferredVelocity.GetSafeNormal() * CurrentAgent->MovementSpeed;
+    }
+
+    return PreferredVelocity;
+}
+
+FVector UAvoidanceSubsystem::SolveOptimalVelocity(const TArray<FPlane>& Constraints, const FVector& PreferredVelocity) const
 {
     FVector NewVelocity = PreferredVelocity;
 
@@ -396,11 +372,8 @@ FVector UAvoidanceSubsystem::SolveOptimalVelocity_Final(const TArray<FPlane>& Co
         for (const FPlane& Constraint : Constraints)
         {
             const float ViolationDepth = Constraint.PlaneDot(NewVelocity);
-
             if (ViolationDepth < 0.0f)
             {
-                // 위반한 깊이만큼 노말 방향으로 밀어냄
-                // 보정 강도로 1.01f를 사용할 수 있음.
                 NewVelocity -= (FVector)Constraint * ViolationDepth;
                 bViolated = true;
             }
@@ -410,6 +383,23 @@ FVector UAvoidanceSubsystem::SolveOptimalVelocity_Final(const TArray<FPlane>& Co
             break;
         }
     }
-
     return NewVelocity;
+}
+
+void UAvoidanceSubsystem::DebugVisualizeVelocities(const UPathfindingComponent* Agent, const FVector& PreferredVelocity, const FVector& ActualPreferredVelocity, const FVector& OptimalVelocity) const
+{
+    if (!GEngine) return;
+
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    const FVector LineStart = Agent->GetOwner()->GetActorLocation() + FVector(0, 0, 10.f);
+    const float LineLengthMultiplier = 0.2f;
+
+    // 1. 선호 속도 (Preferred Velocity) - 파란색
+    DrawDebugLine(World, LineStart, LineStart + PreferredVelocity * LineLengthMultiplier, FColor::Blue, false, -1, 0, 2.f);
+    // 2. 수정된 선호 속도 (Actual Preferred Velocity) - 노란색
+    DrawDebugLine(World, LineStart, LineStart + ActualPreferredVelocity * LineLengthMultiplier, FColor::Yellow, false, -1, 0, 3.f);
+    // 3. 최종 최적 속도 (Optimal Velocity) - 초록색
+    DrawDebugLine(World, LineStart, LineStart + OptimalVelocity * LineLengthMultiplier, FColor::Green, false, -1, 0, 4.f);
 }
