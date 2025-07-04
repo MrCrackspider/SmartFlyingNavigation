@@ -88,7 +88,7 @@ bool UJPSPlusStrategy::ShouldRepathForOptimization(const FVector& CurrentAgentLo
 	}
 
 	// --- Line of Sight 기반 지름길 검사 ---
-	const int32 AgentRadiusInVoxels = FMath::CeilToInt(AgentRadius / Volume->VoxelExtent);
+	const int32 AgentRadiusInVoxels = FMath::RoundToInt(AgentRadius / Volume->VoxelExtent);
 
 
 	const FIntVector StartIndex = Volume->WorldToVoxelIndex(CurrentAgentLocation);

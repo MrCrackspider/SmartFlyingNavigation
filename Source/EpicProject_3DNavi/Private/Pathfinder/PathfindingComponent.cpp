@@ -44,7 +44,7 @@ bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
 	TWeakObjectPtr<UPathfindingStrategy> StrategyPtr = PathfindingStrategy;
 	const FIntVector StartIndex = GridVolume->WorldToVoxelIndex(GetOwner()->GetActorLocation());
 	const FIntVector EndIndex = GridVolume->WorldToVoxelIndex(TargetLocation);
-	const int32 AgentRadiusInVoxels = FMath::CeilToInt(AgentRadius / GridVolume->VoxelExtent);
+	const int32 AgentRadiusInVoxels = FMath::RoundToInt(AgentRadius / GridVolume->VoxelExtent);
 
 	PathfindingTaskFuture = Async(EAsyncExecution::ThreadPool,
 	                              [StrategyPtr, StartIndex, EndIndex, AgentRadiusInVoxels]() -> TArray<FIntVector>
