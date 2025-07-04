@@ -133,7 +133,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
         GenerateAgentConstraints(Agent, NearbyAgents, OrcaConstraints);
 
         // Step 3b: 정적 복셀 장애물과의 제약 조건 생성
-        GenerateVoxelConstraints(Agent, OrcaConstraints);
+        //GenerateVoxelConstraints(Agent, OrcaConstraints);
 
         // Step 3c: 대칭성 파괴를 위한 선호 속도 조정
         const FVector PreferredVelocity = Agent->GetPreferredVelocity();
@@ -155,7 +155,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
         {
             const FVector CurrentVelocity = Agent->GetCurrentVelocity();
             const FVector InterpolatedVelocity = FMath::VInterpTo(CurrentVelocity, OptimalVelocity, DeltaTime, InterpSpeed);
-            const FVector FinalVelocity = InterpolatedVelocity.GetClampedToMaxSize(Agent->MovementSpeed);
+            const FVector FinalVelocity = InterpolatedVelocity.GetClampedToMaxSize(Agent->GetMovementSpeed());
 
             Agent->ApplyMovement(FinalVelocity, DeltaTime);
         }
@@ -249,7 +249,8 @@ void UAvoidanceSubsystem::GenerateAgentConstraints(UPathfindingComponent* Curren
 
 void UAvoidanceSubsystem::GenerateVoxelConstraints(UPathfindingComponent* CurrentAgent, TArray<FPlane>& OutConstraints)
 {
-    AFenwickVoxelVolume* VoxelVolume = Cast<AFenwickVoxelVolume>(CurrentAgent->TargetVolume);
+    return;
+    AFenwickVoxelVolume* VoxelVolume = Cast<AFenwickVoxelVolume>(CurrentAgent->GetTargetVolume());
     if (!VoxelVolume) return;
 
     const FVector PositionA = CurrentAgent->GetOwner()->GetActorLocation();
@@ -355,8 +356,8 @@ FVector UAvoidanceSubsystem::CalculateSymmetryBreakingVelocity(UPathfindingCompo
         }
         SideVector.Normalize();
 
-        FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent->MovementSpeed * SideBiasMagnitude;
-        return ActualPreferredVelocity.GetSafeNormal() * CurrentAgent->MovementSpeed;
+        FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent->GetMovementSpeed() * SideBiasMagnitude;
+        return ActualPreferredVelocity.GetSafeNormal() * CurrentAgent->GetMovementSpeed();
     }
 
     return PreferredVelocity;

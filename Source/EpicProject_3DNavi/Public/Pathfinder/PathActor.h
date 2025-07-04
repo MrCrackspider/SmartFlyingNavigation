@@ -12,20 +12,21 @@ UCLASS()
 class EPICPROJECT_3DNAVI_API APathActor : public AActor
 {
 	GENERATED_BODY()
-	
-public:	
+
+public:
 	// Sets default values for this actor's properties
 	APathActor();
-	
-	UPROPERTY(VisibleAnywhere)
-	USplineComponent* Spline;
-	
+
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 
-public:	
+public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
+	USplineComponent* GetSplineComponent();
 
+private:
+	UPROPERTY(VisibleAnywhere)
+	USplineComponent* Spline;
 };

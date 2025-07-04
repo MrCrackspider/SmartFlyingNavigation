@@ -28,3 +28,8 @@ void APathActor::Tick(float DeltaTime)
 
 }
 
+USplineComponent* APathActor::GetSplineComponent()
+{
+	return Spline;
+}
+

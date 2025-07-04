@@ -16,7 +16,7 @@ AAgent::AAgent()
 void AAgent::BeginPlay()
 {
 	Super::BeginPlay();
-	
+	ExecuteFindPath();
 }
 
 void AAgent::Tick(float DeltaTime)

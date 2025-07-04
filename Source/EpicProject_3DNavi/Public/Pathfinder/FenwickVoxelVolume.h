@@ -13,65 +13,95 @@ class EPICPROJECT_3DNAVI_API AFenwickVoxelVolume : public AUniformGridVolume
 	GENERATED_BODY()
 
 public:
-	// Sets default values for this actor's properties
 	AFenwickVoxelVolume();
 
+	/** Checks if the volume has been fully initialized and is safe to query for pathfinding. Thread-safe. */
+	bool IsReadyForPathfinding() const { return bIsReady.Load(); }
+
 protected:
-	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaTime) override;
 
 public:
-	// Called every frame
-	virtual void Tick(float DeltaTime) override;
-	void SetStaticObstacle(const FIntVector& Index, bool bIsObstacle);
-
+	//~ Begin AUniformGridVolume Interface
 	virtual void BuildObstacles() override;
-	virtual void UpdateDynamicObstacles();
 	virtual bool IsRegionWalkable(const FIntVector& VoxelIndex, int32 AgentRadiusInVoxels) const override;
-	virtual void GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const override;
 	virtual bool IsPathSegmentWalkable(const FIntVector& FromStartIndex, const FIntVector& ToStartIndex, int32 AgentRadiusInVoxels) const override;
-
-	void FenwUpdate(const FIntVector& Index, int32 Delta);
-	int32 FenwQuery(const FIntVector& Index) const;
-	int32 FenwRangeSum(const FIntVector& Min, const FIntVector& Max) const;
-	FORCEINLINE int32 GetFenwickFlatIndex(int32 x, int32 y, int32 z) const;
-	void InitializeMap(const FIntVector& InMapSize);
-
 	virtual bool IsVoxelWalkable(const FIntVector& Index) const override;
+	virtual void GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const override;
+	//~ End AUniformGridVolume Interface
 
-	uint32 GetFlatIndex_X(uint32 ChunkX, uint32 Y, uint32 Z) const
-	{
-		const uint32 ChunksAlongX = MapSize.X / CHUNK_SIZE;
-		return (Z * MapSize.Y + Y) * ChunksAlongX + ChunkX;
-	}
-
-	// Y축 우선으로 정렬된 청크 배열의 인덱스를 계산
-	// 메모리 레이아웃: [ (Z=0, X=0, Y=0..n), (Z=0, X=1, Y=0..n), ... ]
-	uint32 GetFlatIndex_Y(uint32 ChunkY, uint32 X, uint32 Z) const
-	{
-		const uint32 ChunksAlongY = MapSize.Y / CHUNK_SIZE;
-		return (Z * MapSize.X + X) * ChunksAlongY + ChunkY;
-	}
-
-	// Z축 우선으로 정렬된 청크 배열의 인덱스를 계산
-	// 메모리 레이아웃: [ (Y=0, X=0, Z=0..n), (Y=0, X=1, Z=0..n), ... ]
-	uint32 GetFlatIndex_Z(uint32 ChunkZ, uint32 X, uint32 Y) const
-	{
-		const uint32 ChunksAlongZ = MapSize.Z / CHUNK_SIZE;
-		return (Y * MapSize.X + X) * ChunksAlongZ + ChunkZ;
-	}
+	/** Calculates the total number of obstacles within a rectangular region using the Fenwick Tree. */
+	int32 FenwRangeSum(const FIntVector& Min, const FIntVector& Max) const;
 
 private:
-	FIntVector FenwickTreeSize;
-	TArray<int32> FenwickTree;
-	bool bIsObstacleUpdateInProgress;
+	/** Initializes the core data structures like the Fenwick Tree and Bitmasks. */
+	void InitializeDataStructures();
 
-	// --- 비트마스크 데이터 (SetStaticObstacle에 필요) ---
+	/** Scans the world for dynamic obstacles and updates the Fenwick Tree with any changes. */
+	void UpdateDynamicObstacles();
+
+	/** Gathers all voxels currently occupied by dynamic obstacles. */
+	void GatherCurrentObstacleVoxels(TMap<FIntVector, int32>& OutVoxelCounts) const;
+
+	/** Compares previous and current obstacle maps to find voxels that are no longer occupied or have a changed count. */
+	void ProcessRemovedAndChangedObstacles(const TMap<FIntVector, int32>& CurrentCounts);
+
+	/** Compares previous and current obstacle maps to find newly occupied voxels. */
+	void ProcessNewObstacles(const TMap<FIntVector, int32>& CurrentCounts);
+	
+	/**
+	 * Updates the bitmasks to mark a voxel as an obstacle or empty.
+	 * @param Index The voxel index to update.
+	 * @param bIsObstacle True to mark as an obstacle, false to mark as empty.
+	 */
+	void UpdateVoxelObstacleState(const FIntVector& Index, bool bIsObstacle);
+
+	/**
+	 * Uses bitmasks to perform a very fast check if a region contains any obstacles.
+	 * This is a broad-phase check; a `false` return means the region *might* have an obstacle,
+	 * while `true` guarantees it is empty.
+	 */
+	bool IsRegionEmpty_Bitmask(const FIntVector& MinCorner, const FIntVector& MaxCorner) const;
+
+	/** Adds a value (delta) to a voxel's count in the Fenwick Tree. */
+	void FenwUpdate(const FIntVector& Index, int32 Delta);
+
+	/** Queries the Fenwick Tree for the cumulative sum from the origin to the given index. */
+	int32 FenwQuery(const FIntVector& Index) const;
+
+	
+	/** Calculates the flattened 1D index for a 3D coordinate in the Fenwick Tree array. */
+	FORCEINLINE int32 GetFenwickFlatIndex(int32 x, int32 y, int32 z) const;
+
+	/** Calculates the flattened index for the X-axis-major bitmask array. */
+	FORCEINLINE uint32 GetFlatIndex_X(uint32 ChunkX, uint32 Y, uint32 Z) const;
+	/** Calculates the flattened index for the Y-axis-major bitmask array. */
+	FORCEINLINE uint32 GetFlatIndex_Y(uint32 ChunkY, uint32 X, uint32 Z) const;
+	/** Calculates the flattened index for the Z-axis-major bitmask array. */
+	FORCEINLINE uint32 GetFlatIndex_Z(uint32 ChunkZ, uint32 X, uint32 Y) const;
+
+private:
+	/** The size of the Fenwick Tree, which is MapSize + 1 on each axis. */
+	FIntVector FenwickTreeSize;
+
+	/** The core Fenwick Tree data structure. Stores cumulative obstacle counts. */
+	TArray<int32> FenwickTree;
+
+	/** Thread-safe flag indicating that BeginPlay has completed and the volume is ready for queries. */
+	TAtomic<bool> bIsReady;
+
+	/** Size of a bitmask chunk along one axis. Must be 64. */
+	static constexpr uint32 CHUNK_SIZE = 64;
+
+	/** Bitmasks for fast obstacle checks, organized with X-axis as the inner loop. */
 	TArray<uint64> ObstacleBitmasks_X;
 	TArray<uint64> ObstacleBitmasks_Y;
 	TArray<uint64> ObstacleBitmasks_Z;
 
-	// --- 기타 장애물 관리 데이터 ---
+	/** Set of voxels occupied by static geometry. */
 	TSet<FIntVector> StaticObstacleVoxels;
+
+	/** Map of voxels occupied by dynamic obstacles and the number of obstacles in each. Used to track changes frame-to-frame. */
 	TMap<FIntVector, int32> DynamicObstacleVoxelCounts;
 };

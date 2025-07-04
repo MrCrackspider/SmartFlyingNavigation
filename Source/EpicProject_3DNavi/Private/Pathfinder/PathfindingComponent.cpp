@@ -1,5 +1,4 @@
 ﻿#include "Pathfinder/PathfindingComponent.h"
-#include "Kismet/KismetSystemLibrary.h" // SphereTrace, CapsuleTrace를 위해 필요
 #include "Components/SplineComponent.h"
 #include "Pathfinder/FenwickVoxelVolume.h"
 #include "Pathfinder/PathfindingSubsystem.h"
@@ -12,506 +11,443 @@
 
 UPathfindingComponent::UPathfindingComponent()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-
-    // 변수 초기화
-    CurrentPathIndex = -1;
-    MovementSpeed = 500.f;
-    Radius = 50.f;
-    CurrentState = EPathfindingState::Idle;
-	DistanceAlongSpline = 0.f;
-}
-
-void UPathfindingComponent::BeginPlay()
-{
-    Super::BeginPlay();
-
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    // 길찾기 및 회피 서브시스템을 찾아서 저장합니다.
-    PathSubsystem = World->GetSubsystem<UPathfindingSubsystem>();
-    AvoidanceSubsystem = World->GetSubsystem<UAvoidanceSubsystem>();
-
-	if (!CurrentPathActor)
-	{
-		CurrentPathActor = GetWorld()->SpawnActor<APathActor>(GetOwner()->GetActorLocation(), GetOwner()->GetActorRotation());
-		PathSplinePtr = CurrentPathActor->Spline;
-	}
-	
-    // 회피 서브시스템에 자신을 등록합니다.
-    if (AvoidanceSubsystem)
-    {
-        AvoidanceSubsystem->RegisterAgent(this);
-    }
-
-    if (!PathSubsystem)
-    {
-        UE_LOG(LogTemp, Error, TEXT("PathfindingComponent: PathfindingSubsystem not found!"));
-        return;
-    }
-
-    // TargetVolume 설정 (PathSubsystem을 통해)
-    const TArray<TObjectPtr<AVoxelVolumeBase>>& Volumes = PathSubsystem->GetVoxelVolumes();
-    if (Volumes.Num() > 0)
-    {
-		// FIX-ME: 현재는 첫 번째 볼륨을 타겟으로 설정합니다.
-        // 지금 현재 0번째 볼륨을 타겟으로 설정하지만, 추후 볼륨의 위치를 사용해서 적용하도록 변경 예정
-        TargetVolume = Volumes[0];
-    }
-
-    // 길찾기 전략 초기화
-    if (PathfindingStrategyClass)
-    {
-        PathfindingStrategy = NewObject<UPathfindingStrategy>(this, PathfindingStrategyClass);
-        if (PathfindingStrategy)
-        {
-            PathfindingStrategy->Initialize(TargetVolume);
-        }
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("PathfindingComponent on Actor '%s': PathfindingStrategyClass is not set!"), *GetOwner()->GetName());
-    }
-}
-
-void UPathfindingComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
-{
-    // 회피 서브시스템에서 자신을 등록 해제합니다.
-    if (AvoidanceSubsystem)
-    {
-        AvoidanceSubsystem->UnregisterAgent(this);
-    }
-
-    GetWorld()->GetTimerManager().ClearTimer(RepathCooldownTimer);
-    Super::EndPlay(EndPlayReason);
-}
-
-void UPathfindingComponent::UpdateNextLocation(float DeltaTime)
-{
-	if (CurrentState == EPathfindingState::FollowLinear)
-	{
-		UpdateLinearPreferredLocation(DeltaTime);
-	}
-	else if (CurrentState == EPathfindingState::FollowSpline)
-	{
-		UpdateSplinePreferredLocation(DeltaTime);
-	}
-}
-
-void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-	switch (CurrentState)
-	{
-	case EPathfindingState::FollowSpline:
-	case EPathfindingState::FollowLinear:
-		// 이동 중일 때, 경로가 막히지 않았는지 계속 확인합니다.
-		if (!CheckAndHandlePathInvalidation()) //정상일때
-		{
-			UpdateNextLocation(DeltaTime);
-		}
-		break;
-		
-	case EPathfindingState::RequestingPath:
-		HandleRequestingPathState();
-		break;
-		
-	case EPathfindingState::PathInvalidated:
-	case EPathfindingState::Idle:
-	default:
-		// 이동 중이 아니거나 재탐색 대기 중일 때는 아무것도 하지 않음
-		break;
-	}
+	PrimaryComponentTick.bCanEverTick = true;
 }
 
 bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
 {
-	// 이미 경로를 요청 중이라면, 새로운 요청 무시.
 	if (CurrentState == EPathfindingState::RequestingPath)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("FindPathToLocation: Already requesting a path. New request ignored."));
 		return false;
 	}
 
-	if (!PathfindingStrategy)
+	if (!PathfindingStrategy || !TargetVolume)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FindPathToLocation failed: PathfindingStrategy is not set."));
-		return false;
-	}
-
-	// TargetVolume은 AVoxelVolumeBase* 타입이므로, 먼저 유효성만 확인
-	if (!TargetVolume)
-	{
-		UE_LOG(LogTemp, Error, TEXT("FindPathToLocation failed: TargetVolume is not set."));
+		UE_LOG(LogTemp, Error, TEXT("FindPathToLocation failed: Strategy or TargetVolume is not set."));
 		return false;
 	}
 
 	AUniformGridVolume* GridVolume = Cast<AUniformGridVolume>(TargetVolume);
 	if (!GridVolume)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FindPathToLocation failed: TargetVolume is not a UniformGridVolume, which is required by this pathfinding logic."));
+		UE_LOG(LogTemp, Error, TEXT("FindPathToLocation failed: TargetVolume is not a UniformGridVolume."));
 		return false;
 	}
 
-    CurrentTargetLocation = TargetLocation;
-    CurrentState = EPathfindingState::RequestingPath;
-    FoundPath.Empty();
-    FoundPathIndices.Empty();
-    CurrentPathIndex = -1;
+	CurrentState = EPathfindingState::RequestingPath;
+	CurrentTargetLocation = TargetLocation;
+	FoundPath.Empty();
+	FoundPathIndices.Empty();
+	CurrentPathIndex = -1;
 
-    TWeakObjectPtr<UPathfindingStrategy> StrategyPtr = PathfindingStrategy;
-    const FIntVector StartIndex = GridVolume->WorldToVoxelIndex(GetOwner()->GetActorLocation());
-    const FIntVector EndIndex = GridVolume->WorldToVoxelIndex(TargetLocation);
-    const float AgentRadius = Radius;
-    const int32 AgentRadiusInVoxels = FMath::CeilToInt(AgentRadius / GridVolume->VoxelExtent);
+	TWeakObjectPtr<UPathfindingStrategy> StrategyPtr = PathfindingStrategy;
+	const FIntVector StartIndex = GridVolume->WorldToVoxelIndex(GetOwner()->GetActorLocation());
+	const FIntVector EndIndex = GridVolume->WorldToVoxelIndex(TargetLocation);
+	const int32 AgentRadiusInVoxels = FMath::CeilToInt(AgentRadius / GridVolume->VoxelExtent);
 
-    PathfindingTaskFuture = Async(EAsyncExecution::ThreadPool,
-        [StrategyPtr, StartIndex, EndIndex, AgentRadiusInVoxels]() -> TArray<FIntVector>
-        {
-            TArray<FIntVector> PathIndices;
-            if (StrategyPtr.IsValid())
-            {
-                StrategyPtr->FindPathWithStrategy(StartIndex, EndIndex, AgentRadiusInVoxels, PathIndices);
-            }
-            return PathIndices;
-        });
+	PathfindingTaskFuture = Async(EAsyncExecution::ThreadPool,
+	                              [StrategyPtr, StartIndex, EndIndex, AgentRadiusInVoxels]() -> TArray<FIntVector>
+	                              {
+		                              TArray<FIntVector> PathIndices;
+		                              if (StrategyPtr.IsValid())
+		                              {
+			                              StrategyPtr->FindPathWithStrategy(
+				                              StartIndex, EndIndex, AgentRadiusInVoxels, PathIndices);
+		                              }
+		                              return PathIndices;
+	                              });
 
-    return true;
+	return true;
 }
 
-void UPathfindingComponent::CreateSplineFromPath()
+void UPathfindingComponent::UpdateTargetLocation(const FVector& NewTargetLocation)
 {
-	if (!PathSplinePtr.IsValid() || FoundPath.Num() < 2)
+	if (CurrentState != EPathfindingState::FollowPath)
 	{
-		//경로가 유효하지 않으면 이동을 중지?
+		return;
+	}
+	if (FVector::DistSquared(CurrentTargetLocation, NewTargetLocation) < FMath::Square(GoalUpdateThreshold))
+	{
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("Target has moved significantly. Requesting new path."));
+
+	FindPathToLocation(NewTargetLocation);
+}
+
+//======================================================================================
+// Avoidance Interface
+//======================================================================================
+
+FVector UPathfindingComponent::GetPreferredVelocity() const
+{
+	if (CurrentState != EPathfindingState::FollowPath || !GetOwner())
+	{
+		return FVector::ZeroVector;
+	}
+
+	const FVector CurrentLocation = GetOwner()->GetActorLocation();
+	const FVector Direction = (NextPreferredLocation - CurrentLocation).GetSafeNormal();
+	return Direction * MovementSpeed;
+}
+
+void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float DeltaTime)
+{
+	AActor* Owner = GetOwner();
+	if (!Owner) return;
+
+	CurrentVelocity = FinalVelocity;
+	const FVector CurrentLocation = Owner->GetActorLocation();
+	Owner->SetActorLocation(CurrentLocation + FinalVelocity * DeltaTime);
+
+	if (!FinalVelocity.IsNearlyZero())
+	{
+		Owner->SetActorRotation(FinalVelocity.GetSafeNormal().ToOrientationQuat());
+	}
+}
+
+
+void UPathfindingComponent::CheckForPathOptimization()
+{
+	if (CurrentState != EPathfindingState::FollowPath || !PathfindingStrategy)
+	{
+		return;
+	}
+	if (PathfindingStrategy->ShouldRepathForOptimization(GetOwner()->GetActorLocation(),
+														 FoundPath,
+														 CurrentPathIndex,
+														 CurrentTargetLocation, AgentRadius))
+	{
+		UE_LOG(LogTemp, Log, TEXT("Strategy suggests a shorter path is available. Requesting repath."));
+
+		// 전략이 재탐색이 필요하다고 판단했으므로, 재탐색을 요청합니다.
+		FindPathToLocation(CurrentTargetLocation);
+	}
+}
+
+//======================================================================================
+// Engine Overrides
+//======================================================================================
+
+void UPathfindingComponent::BeginPlay()
+{
+	Super::BeginPlay();
+
+	UWorld* World = GetWorld();
+	if (!ensure(World)) return;
+
+	PathSubsystem = World->GetSubsystem<UPathfindingSubsystem>();
+	AvoidanceSubsystem = World->GetSubsystem<UAvoidanceSubsystem>();
+
+	if (!ensure(PathSubsystem))
+	{
+		UE_LOG(LogTemp, Error, TEXT("PathfindingComponent: PathfindingSubsystem not found!"));
+		return;
+	}
+
+	if (AvoidanceSubsystem)
+	{
+		AvoidanceSubsystem->RegisterAgent(this);
+	}
+
+	if (!CurrentPathActor)
+	{
+		CurrentPathActor = World->SpawnActor<
+			APathActor>(GetOwner()->GetActorLocation(), GetOwner()->GetActorRotation());
+		if (CurrentPathActor)
+		{
+			PathSplinePtr = CurrentPathActor->GetSplineComponent();
+		}
+	}
+
+	const TArray<TObjectPtr<AVoxelVolumeBase>>& Volumes = PathSubsystem->GetVoxelVolumes();
+	if (Volumes.Num() > 0)
+	{
+		TargetVolume = Volumes[0]; // FIX-ME: 현재는 첫 번째 볼륨을 사용
+	}
+
+	if (PathfindingStrategyClass)
+	{
+		PathfindingStrategy = NewObject<UPathfindingStrategy>(this, PathfindingStrategyClass);
+		if (PathfindingStrategy)
+		{
+			PathfindingStrategy->Initialize(TargetVolume);
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("PathfindingComponent on Actor '%s': PathfindingStrategyClass is not set!"),
+		       *GetOwner()->GetName());
+	}
+
+	//경로 최적화 타이머를 시작합니다.
+	// 반복 실행되지만, 실제 검사는 FollowPath 상태일 때만 수행됩니다.
+	GetWorld()->GetTimerManager().SetTimer(PathOptimizationTimer,
+	                                       this,
+	                                       &UPathfindingComponent::CheckForPathOptimization,
+	                                       PathOptimizationCheckInterval,
+	                                       true);
+}
+
+void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
+                                          FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	switch (CurrentState)
+	{
+	case EPathfindingState::FollowPath:
+		if (IsCurrentPathValid())
+		{
+			UpdateNextLocation(DeltaTime);
+		}
+		else
+		{
+			InvalidatePathAndRequestRepath();
+		}
+		break;
+
+	case EPathfindingState::RequestingPath:
+		HandlePathfindingResult();
+		break;
+
+	case EPathfindingState::PathInvalidated:
+	case EPathfindingState::Idle:
+	default:
+		break;
+	}
+}
+
+void UPathfindingComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (AvoidanceSubsystem)
+	{
+		AvoidanceSubsystem->UnregisterAgent(this);
+	}
+
+	if (GetWorld())
+	{
+		GetWorld()->GetTimerManager().ClearAllTimersForObject(this);
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
+//======================================================================================
+// Internal Logic
+//======================================================================================
+
+void UPathfindingComponent::HandlePathfindingResult()
+{
+	if (PathfindingTaskFuture.IsValid() && PathfindingTaskFuture.IsReady())
+	{
+		TArray<FIntVector> PathIndices = PathfindingTaskFuture.Get();
+		PathfindingTaskFuture.Reset();
+		ProcessNewPath(PathIndices);
+	}
+}
+
+void UPathfindingComponent::ProcessNewPath(const TArray<FIntVector>& PathIndices)
+{
+	if (PathIndices.Num() < 2)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ProcessNewPath: Path not found or too short. Returning to Idle."));
+		CurrentState = EPathfindingState::Idle;
+		GetWorld()->GetTimerManager().PauseTimer(PathOptimizationTimer);
+		return;
+	}
+
+	FoundPathIndices = PathIndices;
+	FoundPath.Empty();
+
+	AUniformGridVolume* GridVolume = Cast<AUniformGridVolume>(TargetVolume);
+	if (!ensure(GridVolume))
+	{
 		CurrentState = EPathfindingState::Idle;
 		return;
 	}
 
-	// 1. 기존 스플라인 정보를 모두 지웁니다.
-	PathSplinePtr->ClearSplinePoints();
-
-	// 2. FoundPath의 각 점의 스플라인 포인트로 추가합니다.
-	for (const FVector& Point: FoundPath)
+	for (const FIntVector& Index : FoundPathIndices)
 	{
-		PathSplinePtr->AddSplinePoint(Point, ESplineCoordinateSpace::World, true);
+		FoundPath.Add(GridVolume->VoxelIndexToWorld(Index));
 	}
 
-	// 3. 스플라인 내부 데이터를 강제로 업데이트합니다. (길이 계산 등)
-	PathSplinePtr->UpdateSpline();
+	CurrentPathIndex = 0;
+	CurrentState = EPathfindingState::FollowPath;
+	GetWorld()->GetTimerManager().UnPauseTimer(PathOptimizationTimer);
 
-	if (bEnableSplineSafetyCheck && !IsSplinePathSafe())
+	bool bUseLinearFallback = false;
+	if (MovementMode == EPathMovementMode::Spline)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Spline Path is unsafe! Falling back to linear movement"));
-		CurrentState = EPathfindingState::FollowLinear;
-		CurrentPathIndex = 0;
-	}else //안전할 경우 spline사용
-	{
-		UE_LOG(LogTemp, Log, TEXT("Spline path is safe, Starting spline movement"));
-		DistanceAlongSpline = 0.f;
-		CurrentState = EPathfindingState::FollowSpline;
+		if (PathSplinePtr.IsValid())
+		{
+			PathSplinePtr->ClearSplinePoints();
+			for (const FVector& Point : FoundPath)
+			{
+				PathSplinePtr->AddSplinePoint(Point, ESplineCoordinateSpace::World, false);
+			}
+			PathSplinePtr->UpdateSpline();
+
+			if (!bEnableSplineSafetyCheck || IsSplinePathSafe())
+			{
+				UE_LOG(LogTemp, Log, TEXT("Spline path is safe. Starting spline movement."));
+				DistanceAlongSpline = 0.f;
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Spline path is unsafe! Falling back to linear movement for this path."));
+				bUseLinearFallback = true;
+			}
+		}
+		else
+		{
+			bUseLinearFallback = true;
+		}
 	}
-	
-	// 4. 이동을 시작할 준비를 합니다.
-	DistanceAlongSpline = 0.0f; //이동거리 초기화
 
-	UE_LOG(LogTemp, Log, TEXT("Spline created with %d points. Starting Movement"), FoundPath.Num());
+	if (bDrawDebugPath)
+	{
+		for (int32 i = 0; i < FoundPath.Num() - 1; ++i)
+		{
+			DrawDebugLine(GetWorld(), FoundPath[i], FoundPath[i + 1], FColor::Green, false, 10.f, 0, 2.f);
+		}
+	}
 }
 
-bool UPathfindingComponent::IsSplinePathSafe()
+bool UPathfindingComponent::IsCurrentPathValid() const
 {
-	if (!PathSplinePtr.IsValid() || !GetWorld())
+	if (MovementMode == EPathMovementMode::Spline)
 	{
-		return false;
-	}  
+		return IsSplinePathSafe();
+	}
+	return IsPathAheadValid();
+}
 
-	const float SplineLength = PathSplinePtr->GetSplineLength();
-	
-	if (SplineLength < SafetyCheckStepSize)
+void UPathfindingComponent::InvalidatePathAndRequestRepath()
+{
+	if (CurrentState == EPathfindingState::PathInvalidated) return;
+
+	UE_LOG(LogTemp, Warning, TEXT("Path Invalidated! Stopping movement and scheduling a repath..."));
+
+	CurrentState = EPathfindingState::PathInvalidated;
+	FoundPath.Empty();
+	FoundPathIndices.Empty();
+	CurrentPathIndex = -1;
+	GetWorld()->GetTimerManager().PauseTimer(PathOptimizationTimer);
+	if (PathSplinePtr.IsValid())
 	{
-		//경로가 너무 짧으면 그냥 안전하다고 판단
-		return true;
+		PathSplinePtr->ClearSplinePoints();
 	}
 
-	//스플라인을 따라 일정한 간격으로 샘플링
-	for (float Distance = 0; Distance<SplineLength; Distance+=SafetyCheckStepSize)
+	if (UWorld* World = GetWorld())
 	{
-		FVector StartPoint = PathSplinePtr->GetLocationAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World);
-		FVector EndPoint = PathSplinePtr->GetLocationAtDistanceAlongSpline(FMath::Min(Distance + SafetyCheckStepSize, SplineLength), ESplineCoordinateSpace::World);
+		World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::OnRepathTimerFired,
+		                                  RepathCooldown, false);
+	}
+}
 
-		// 시작점과 끝점이 거의 같다면 검사 생략
-		if (FVector::DistSquared(StartPoint, EndPoint) < 1.0f)
+void UPathfindingComponent::OnRepathTimerFired()
+{
+	FindPathToLocation(CurrentTargetLocation);
+}
+
+void UPathfindingComponent::UpdateNextLocation(float DeltaTime)
+{
+	// ProcessNewPath에서 결정된 임시 폴백을 고려할 수 있지만, 여기서는 MovementMode를 기준으로 단순하게 처리합니다.
+	if (MovementMode == EPathMovementMode::Spline)
+	{
+		UpdateSplinePreferredLocation(DeltaTime);
+	}
+	else
+	{
+		UpdateLinearPreferredLocation(DeltaTime);
+	}
+}
+
+void UPathfindingComponent::UpdateLinearPreferredLocation(float DeltaTime)
+{
+	AActor* Actor = GetOwner();
+	if (!Actor || CurrentPathIndex < 0 || CurrentPathIndex >= FoundPath.Num())
+	{
+		CurrentState = EPathfindingState::Idle;
+		return;
+	}
+
+	const FVector CurrentLocation = Actor->GetActorLocation();
+	const FVector TargetPoint = FoundPath[CurrentPathIndex];
+
+	const float ArrivalThresholdSq = FMath::Square(100.f);
+	if (FVector::DistSquared(CurrentLocation, TargetPoint) < ArrivalThresholdSq)
+	{
+		CurrentPathIndex++;
+		if (CurrentPathIndex >= FoundPath.Num())
 		{
-			continue;
-		}
-		
-		FHitResult HitResult;
-		// 물리 쿼리를 위한 파라미터 설정
-		FCollisionObjectQueryParams DynamicObjectQueryParams;
-		DynamicObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
-		DynamicObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
-		DynamicObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
-
-		FCollisionQueryParams CollisionParams;
-		CollisionParams.AddIgnoredActor(GetOwner()); //자기는 무시
-
-		TArray<AActor*> IgnoredActors;
-		IgnoredActors.Add(GetOwner());
-
-		FVector Extents = FVector(Radius);
-		
-		bool bHit = GetWorld()->SweepSingleByObjectType(
-			HitResult,
-			StartPoint,
-			EndPoint,
-			FQuat::Identity, // Sweep 함수는 FQuat 타입을 받습니다.
-			DynamicObjectQueryParams,
-			FCollisionShape::MakeBox(Extents), // 박스의 크기를 지정
-			CollisionParams
-		);
-
-		//DrawDebugBox(GetWorld(), HitResult.bBlockingHit ? HitResult.Location : EndPoint, Extents, FQuat::Identity, bHit ? FColor::Red : FColor::Green, false, 2.f, 0, 1.f);
-
-		if (bHit)
-		{
-			//장애물이 감지되면 즉시 안전하지 않음을 반환
-			UE_LOG(LogTemp, Warning, TEXT("Obstacle detected on spline path at location: %s"), *HitResult.Location.ToString());
-			return false;
+			CurrentState = EPathfindingState::Idle;
+			UE_LOG(LogTemp, Log, TEXT("Linear movement finished."));
+			return;
 		}
 	}
 
-	//샘플구간이 전부 안전하면 안전함을 반환
-	return true;
+	const FVector Direction = (FoundPath[CurrentPathIndex] - CurrentLocation).GetSafeNormal();
+	NextPreferredLocation = CurrentLocation + Direction * MovementSpeed * DeltaTime;
 }
 
 void UPathfindingComponent::UpdateSplinePreferredLocation(float DeltaTime)
 {
 	AActor* MyActor = GetOwner();
-
-	//따라갈 스플라인이 없거나 점이 부족하거나 주인이 없으면 이동 중지
 	if (!MyActor || !PathSplinePtr.IsValid() || PathSplinePtr->GetNumberOfSplinePoints() < 2)
 	{
 		CurrentState = EPathfindingState::Idle;
 		return;
 	}
 
-	// 1. 이번 프레임에 이동할 거리를 누적합니다.
 	DistanceAlongSpline += MovementSpeed * DeltaTime;
+	const float SplineLength = PathSplinePtr->GetSplineLength();
 
-	const FVector CurrentLocation = MyActor->GetActorLocation();
-	const FVector TargetPoint = FoundPath[CurrentPathIndex];
-
-	if (FVector::DistSquared(CurrentLocation, TargetPoint) < FMath::Square(100.f))
+	if (DistanceAlongSpline >= SplineLength)
 	{
-		CurrentPathIndex++;
-		if (CurrentPathIndex >= FoundPath.Num())
-		{
-			CurrentState = EPathfindingState::Idle; // 이동 완료
-			CurrentPathIndex = -1;
-			UE_LOG(LogTemp, Log, TEXT("Movement Finished."));
-			return;
-		}
-	}
-
-	// 4. 아직 이동중이라면, 스플라인 상의 새로운 위치와 회전값을 계산
-	const FVector NewLocation = PathSplinePtr->GetLocationAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::World);
-
-	NextPreferredLocation = NewLocation;
-}
-
-void UPathfindingComponent::UpdateLinearPreferredLocation(float DeltaTime)
-{
-	AActor* Actor = GetOwner();
-	if (!Actor || CurrentPathIndex < 0 || FoundPath.Num() == 0)
-	{
+		MyActor->SetActorLocation(FoundPath.Last());
 		CurrentState = EPathfindingState::Idle;
+		UE_LOG(LogTemp, Log, TEXT("Spline movement finished."));
 		return;
 	}
 
-	// 목표 지점에 도착했는지 확인하고 다음 지점으로 넘어가는 로직
-	const FVector CurrentLocation = Actor->GetActorLocation();
-	const FVector TargetPoint = FoundPath[CurrentPathIndex];
-	
-	if (FVector::DistSquared(CurrentLocation, TargetPoint) < FMath::Square(100.f))
-	{
-		CurrentPathIndex++;
-		if (CurrentPathIndex >= FoundPath.Num())
-		{
-			CurrentState = EPathfindingState::Idle; // 이동 완료
-			CurrentPathIndex = -1;
-			UE_LOG(LogTemp, Log, TEXT("Movement Finished."));
-			return;
-		}
-	}
-
-	// 실제 이동 로직
-	if (CurrentPathIndex >= 0 && CurrentPathIndex < FoundPath.Num())
-	{
-		const FVector Direction = (FoundPath[CurrentPathIndex] - CurrentLocation).GetSafeNormal();
-		NextPreferredLocation = CurrentLocation + Direction * MovementSpeed * DeltaTime;
-	}
+	NextPreferredLocation = PathSplinePtr->GetLocationAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::World);
 }
 
-FVector UPathfindingComponent::GetPreferredVelocity() const{
-    AActor* Owner = GetOwner();
-    // 이동 중이 아니거나, 경로가 없거나, 주인이 없으면 멈춥니다.
-    if (!Owner || (CurrentState != EPathfindingState::FollowSpline && CurrentState != EPathfindingState::FollowLinear) || CurrentPathIndex < 0 || CurrentPathIndex >= FoundPath.Num())
-    {
-        return FVector::ZeroVector;
-    }
-    // 다음 목표 지점을 향하는 방향과 속도를 계산하여 반환합니다.
-    const FVector CurrentLocation = Owner->GetActorLocation();
-    const FVector Direction = (NextPreferredLocation - CurrentLocation).GetSafeNormal();
-
-    return Direction * MovementSpeed;
-}
-
-void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float DeltaTime)
+bool UPathfindingComponent::IsSplinePathSafe() const
 {
-    AActor* Owner = GetOwner();
-    if (!Owner) return;
-    CurrentVelocity = FinalVelocity;
-
-    // 1. 회피 시스템이 계산해준 최종 속도로 액터를 이동 및 회전시킵니다.
-    const FVector CurrentLocation = Owner->GetActorLocation();
-    Owner->SetActorLocation(CurrentLocation + FinalVelocity * DeltaTime);
-
-    if (!FinalVelocity.IsNearlyZero())
-    {
-        Owner->SetActorRotation(FinalVelocity.GetSafeNormal().ToOrientationQuat());
-    }
-
-    // 2. 현재 경로의 진행 상황을 업데이트합니다. (목표 지점 도착 체크)
-    if ((CurrentState == EPathfindingState::FollowSpline || CurrentState == EPathfindingState::FollowLinear) && CurrentPathIndex >= 0 && CurrentPathIndex < FoundPath.Num())
-    {
-        const FVector TargetPoint = FoundPath[CurrentPathIndex];
-        const float ArrivalThresholdSq = FMath::Square(100.f);
-
-        if (FVector::DistSquared(CurrentLocation, TargetPoint) < ArrivalThresholdSq)
-        {
-            CurrentPathIndex++;
-            if (CurrentPathIndex >= FoundPath.Num())
-            {
-                CurrentState = EPathfindingState::Idle;
-                CurrentPathIndex = -1;
-                UE_LOG(LogTemp, Log, TEXT("Movement Finished."));
-            }
-        }
-    }
-}
-
-void UPathfindingComponent::HandleRequestingPathState()
-{
-    if (PathfindingTaskFuture.IsValid() && PathfindingTaskFuture.IsReady())
-    {
-        FoundPathIndices = PathfindingTaskFuture.Get();
-        FoundPath.Empty();
-
-        if (FoundPathIndices.Num() > 0)
-        {
-        	AUniformGridVolume* GridVolume = Cast<AUniformGridVolume>(TargetVolume);
-
-        	if (!GridVolume)
-        	{
-        		return;
-        	}
-            for (const FIntVector& Index : FoundPathIndices)
-            {
-                FoundPath.Add(GridVolume->VoxelIndexToWorld(Index));
-            }
-            CurrentPathIndex = 0;
-        	//TODO: 바꿔야할수도
-            CurrentState = EPathfindingState::FollowSpline; // 상태를 '이동 중'으로 변경!
-
-        	CreateSplineFromPath();
-        	
-            if (bDrawDebugPath)
-            {
-                for (int32 i = 0; i < FoundPath.Num() - 1; ++i)
-                {
-                    DrawDebugLine(GetWorld(), FoundPath[i], FoundPath[i + 1], FColor::Green, false, 10.f, 0, 2.f);
-                }
-            }
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Async path not found."));
-            CurrentState = EPathfindingState::Idle;
-        }
-        PathfindingTaskFuture.Reset();
-    }
-}
-
-bool UPathfindingComponent::CheckAndHandlePathInvalidation()
-{
-	bool bIsPathInvalid = false;
-
-	// --- LOGIC ROUTER ---
-	// Decide which validation method to use based on the current movement state.
-	if (CurrentState == EPathfindingState::FollowSpline)
-	{
-		// For spline movement, we must use the spline-based physics check.
-		if (bEnableSplineSafetyCheck && !IsSplinePathSafe())
-		{
-			bIsPathInvalid = true;
-		}
-	}
-	else if (CurrentState == EPathfindingState::FollowLinear)
-	{
-		// For linear movement, the voxel-based check (from the actor's current position) is correct.
-		if (!IsPathAheadValid())
-		{
-			bIsPathInvalid = true;
-		}
-	}
-
-	// If any check found the path to be invalid, handle it.
-	if (bIsPathInvalid)
-	{
-		CurrentState = EPathfindingState::PathInvalidated;
-		FoundPath.Empty();
-		CurrentPathIndex = -1;
-		UE_LOG(LogTemp, Warning, TEXT("Path Invalidated! Stopping movement and waiting to repath..."));
-
-		GetWorld()->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::OnRepathTimerFired, RepathCooldown, false);
-		return true; // Return true to indicate the path was handled (by invalidating it).
-	}
-
-	return false; // Return false to indicate the path is still valid and movement can continue.
-}
-bool UPathfindingComponent::IsPathAheadValid() const
-{
-	AFenwickVoxelVolume* FenwickVolume = Cast<AFenwickVoxelVolume>(TargetVolume);
-    
-	// If there's no volume or path, it's trivially valid.
-	if (!FenwickVolume || FoundPathIndices.Num() < 2 || CurrentPathIndex < 0 || CurrentPathIndex >= FoundPathIndices.Num() - 1)
+	if (!bEnableSplineSafetyCheck || !PathSplinePtr.IsValid() || !GetWorld())
 	{
 		return true;
 	}
 
-	AUniformGridVolume* GridVolume = Cast<AUniformGridVolume>(TargetVolume);
-	if (!GridVolume)
-	{
-		return false;
-	}
-    
-	const int32 AgentRadiusInVoxels = FMath::CeilToInt(Radius / GridVolume->VoxelExtent);
-	if (AgentRadiusInVoxels <= 0)
+	const float SplineLength = PathSplinePtr->GetSplineLength();
+	if (SplineLength < SafetyCheckStepSize)
 	{
 		return true;
 	}
-    
-	// --- ROBUST CHECK FOR LINEAR MOVEMENT ---
-	const int32 LastCheckIndex = FMath::Min(CurrentPathIndex + PathValidationLookAhead, FoundPathIndices.Num() - 2);
-	for (int32 i = CurrentPathIndex; i <= LastCheckIndex; ++i)
-	{
-		const FIntVector StartSegmentIndex = FoundPathIndices[i];
-		const FIntVector EndSegmentIndex = FoundPathIndices[i + 1];
 
-		if (!FenwickVolume->IsPathSegmentWalkable(StartSegmentIndex, EndSegmentIndex, AgentRadiusInVoxels))
+	FCollisionQueryParams CollisionParams(SCENE_QUERY_STAT(SplineSafetyCheck), false, GetOwner());
+	FCollisionObjectQueryParams ObjectQueryParams(FCollisionObjectQueryParams::AllDynamicObjects);
+
+	for (float Distance = 0; Distance < SplineLength; Distance += SafetyCheckStepSize)
+	{
+		FVector StartPoint = PathSplinePtr->GetLocationAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World);
+		FVector EndPoint = PathSplinePtr->GetLocationAtDistanceAlongSpline(
+			FMath::Min(Distance + SafetyCheckStepSize, SplineLength), ESplineCoordinateSpace::World);
+
+		if (FVector::DistSquared(StartPoint, EndPoint) < KINDA_SMALL_NUMBER)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("Path Invalidated: A future path segment (from waypoint %d to %d) is blocked!"), i, i+1);
+			continue;
+		}
+
+		if (GetWorld()->SweepTestByObjectType(StartPoint, EndPoint, FQuat::Identity, ObjectQueryParams,
+		                                      FCollisionShape::MakeSphere(AgentRadius), CollisionParams))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Obstacle detected on spline path."));
 			return false;
 		}
 	}
@@ -519,8 +455,31 @@ bool UPathfindingComponent::IsPathAheadValid() const
 	return true;
 }
 
-void UPathfindingComponent::OnRepathTimerFired()
+bool UPathfindingComponent::IsPathAheadValid() const
 {
-    // 현재 목표 위치로 재탐색 시도
-    FindPathToLocation(CurrentTargetLocation);
+	AFenwickVoxelVolume* FenwickVolume = Cast<AFenwickVoxelVolume>(TargetVolume);
+	if (!FenwickVolume || FoundPathIndices.Num() < 2 || CurrentPathIndex < 0 || CurrentPathIndex >= FoundPathIndices.
+		Num() - 1)
+	{
+		return true;
+	}
+
+	AUniformGridVolume* GridVolume = Cast<AUniformGridVolume>(TargetVolume);
+	if (!GridVolume) return false;
+
+	const int32 AgentRadiusInVoxels = FMath::CeilToInt(AgentRadius / GridVolume->VoxelExtent);
+	if (AgentRadiusInVoxels <= 0) return true;
+
+	const int32 LastCheckIndex = FMath::Min(CurrentPathIndex + PathValidationLookAhead, FoundPathIndices.Num() - 2);
+	for (int32 i = CurrentPathIndex; i <= LastCheckIndex; ++i)
+	{
+		if (!FenwickVolume->IsPathSegmentWalkable(FoundPathIndices[i], FoundPathIndices[i + 1], AgentRadiusInVoxels))
+		{
+			UE_LOG(LogTemp, Warning,
+			       TEXT("Path Invalidated: A future path segment (from waypoint %d to %d) is blocked!"), i, i + 1);
+			return false;
+		}
+	}
+
+	return true;
 }

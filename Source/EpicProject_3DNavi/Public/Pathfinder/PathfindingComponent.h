@@ -5,164 +5,225 @@
 #include "PathfindingComponent.generated.h"
 
 class USplineComponent;
-// 순환 종속성 방지를 위한 전방 선언
 class UPathfindingStrategy;
 class UPathfindingSubsystem;
-class UAvoidanceSubsystem; // UAgentAvoidanceSubsystem에서 이름 변경
+class UAvoidanceSubsystem;
 class APathActor;
 class AVoxelVolumeBase;
 
+/**
+ * 길찾기 컴포넌트의 현재 상태를 나타냅니다.
+ */
 UENUM(BlueprintType)
 enum class EPathfindingState : uint8
 {
-	Idle,			// 대기 중
-	FollowSpline,			// 경로 따라 이동 중
-	FollowLinear,
+	Idle,           // 대기 중
 	RequestingPath, // 백그라운드 스레드에 경로를 요청하고 결과를 기다리는 중
-	PathInvalidated	// 경로가 막혀 재탐색 대기 중
+	FollowPath,     // 경로를 따라 이동 중 (스플라인/직선 통합)
+	PathInvalidated // 경로가 막혀 재탐색 대기 중
 };
 
+/**
+ * 경로를 따라 이동하는 방식을 결정합니다.
+ */
+UENUM(BlueprintType)
+enum class EPathMovementMode : uint8
+{
+	Linear, // 점프 포인트를 직선으로 따라감
+	Spline  // 점프 포인트를 기반으로 부드러운 스플라인 경로를 생성하여 따라감
+};
+
+
+/**
+ * 액터에게 비동기 길찾기, 경로 추종, 동적 장애물 회피 기능을 제공하는 컴포넌트입니다.
+ * UPathfindingSubsystem과 UAvoidanceSubsystem에 의존하여 동작합니다.
+ */
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class EPICPROJECT_3DNAVI_API UPathfindingComponent : public UActorComponent
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
 public:
-    UPathfindingComponent();
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	UPathfindingComponent();
 
-    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-    bool FindPathToLocation(const FVector& TargetLocation);
-  // --- UAvoidanceSubsystem과의 연동을 위한 새로운 인터페이스 함수들 ---
+#pragma region Public API
 
-    /** 에이전트가 방해받지 않을 때 가고 싶어하는 이상적인 속도를 반환합니다. */
-    UFUNCTION(BlueprintPure, Category = "Pathfinding|Avoidance")
-    FVector GetPreferredVelocity() const;
+	/**
+	 * 지정된 월드 위치로의 경로 탐색을 시작합니다.
+	 * @param TargetLocation 목표 지점의 월드 좌표
+	 * @return 경로 탐색 요청이 성공적으로 시작되었으면 true를 반환합니다.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+	bool FindPathToLocation(const FVector& TargetLocation);
 
-    /** 현재 프레임에 적용되고 있는 실제 속도를 반환합니다. */
-    FVector GetCurrentVelocity() const { return CurrentVelocity; }
+	
+	/**
+	 * 움직이는 목표의 위치를 업데이트합니다. 
+	 * 목표가 일정 거리 이상 움직였을 경우에만 재탐색을 요청합니다.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+	void UpdateTargetLocation(const FVector& NewTargetLocation);
+	
+#pragma endregion
 
-    /** UAvoidanceSubsystem이 계산한 최종 속도를 받아 액터를 실제로 움직입니다. */
-    void ApplyMovement(const FVector& FinalVelocity, float DeltaTime);
+#pragma region Avoidance Interface
 
-    /** UAvoidanceSubsystem에서 에이전트의 크기 정보를 가져가기 위한 Getter 입니다. */
-    UFUNCTION(BlueprintPure, Category = "Pathfinding|Avoidance")
-    float GetAgentRadius() const { return Radius; }
+	/** 회피 시스템이 사용할, 에이전트가 가고 싶어하는 이상적인 속도를 반환합니다. */
+	UFUNCTION(BlueprintPure, Category = "Pathfinding|Avoidance")
+	FVector GetPreferredVelocity() const;
 
+	/** 현재 프레임에 적용되고 있는 실제 속도를 반환합니다. */
+	FVector GetCurrentVelocity() const { return CurrentVelocity; }
+	
+	/** 회피 시스템이 계산한 최종 속도를 받아 액터를 실제로 움직입니다. */
+	void ApplyMovement(const FVector& FinalVelocity, float DeltaTime);
 
-    // --- 블루프린트 및 에디터 노출 속성 ---
+	/** 회피 시스템을 위한 에이전트의 반경 Getter 입니다. */
+	UFUNCTION(BlueprintPure, Category = "Pathfinding|Avoidance")
+	float GetAgentRadius() const { return AgentRadius; }
 
-    // 에이전트의 물리적 반경 (월드 유닛)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    float Radius = 0.f;
+	/** 현재 경로보다 더 효율적인 경로가 있는지 주기적으로 검사합니다. */
+	void CheckForPathOptimization();
 
-    // 에이전트의 최대 이동 속도
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
-    float MovementSpeed;
-	//Tick에서 호출될 이동 함수
+	/** 회피 시스템을 위한 에이전트의 최대 이동 속도 Getter 입니다. */
+	UFUNCTION(BlueprintPure, Category = "Pathfinding|Avoidance")
+	float GetMovementSpeed() const { return MovementSpeed; }
+
+	/** 이 컴포넌트가 현재 목표로 하는 Voxel Volume을 반환합니다. */
+	AVoxelVolumeBase* GetTargetVolume() const { return TargetVolume; }
+	
+#pragma endregion
+
+protected:
+#pragma region Engine Overrides
+
+	virtual void BeginPlay() override;
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+#pragma endregion
+
+#pragma region Internal Logic
+
+	/** 비동기 길찾기 작업이 완료되었을 때 결과를 처리합니다. */
+	void HandlePathfindingResult();
+
+	/** 새로 찾은 경로를 기반으로 이동 상태를 초기화하고 이동 방식을 결정합니다. */
+	void ProcessNewPath(const TArray<FIntVector>& PathIndices);
+
+	/** 현재 경로가 유효한지 검사합니다. (물리/복셀 기반) */
+	bool IsCurrentPathValid() const;
+
+	/** 경로가 유효하지 않을 때, 현재 이동을 중지하고 재탐색 타이머를 시작합니다. */
+	void InvalidatePathAndRequestRepath();
+
+	/** 재탐색 타이머가 만료되었을 때 호출될 콜백 함수입니다. */
+	void OnRepathTimerFired();
+
+	/** 현재 이동 방식(직선/스플라인)에 따라 다음 목표 위치를 업데이트합니다. */
+	void UpdateNextLocation(float DeltaTime);
+	void UpdateLinearPreferredLocation(float DeltaTime);
 	void UpdateSplinePreferredLocation(float DeltaTime);
 
-	void UpdateLinearPreferredLocation(float DeltTime);
+	/** 스플라인 경로가 물리적으로 안전한지 검사합니다. */
+	bool IsSplinePathSafe() const;
 
-	//길찾기 성공 후 호출되어 스플라인을 생성/업데이트하는 함수
-	void CreateSplineFromPath();
+	/** 직선 경로가 복셀 데이터상으로 안전한지 검사합니다. */
+	bool IsPathAheadValid() const;
 
-	bool IsSplinePathSafe(); //Spline 안정성 검사 함수
-	
-	// 재탐색 타이머가 만료되었을 때 호출될 함수
-	void OnRepathTimerFired();
-	
-    void UpdateNextLocation(float DeltaTime);
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Pathfinding|Dynamic")
-	FVector NextPreferredLocation;
-	
-    /** 이 에이전트가 현재 가지고 있는 실제 속도 벡터입니다. */
-    FVector CurrentVelocity;
-
-    // 경로가 막혔을 때 재탐색을 시도하기까지의 대기 시간
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding|Dynamic")
-    float RepathCooldown = 0.5f;
-
-    // 전방 경로의 유효성을 몇 개의 점프 포인트 앞까지 검사할지 결정합니다.
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding|Dynamic")
-    int32 PathValidationLookAhead = 3;
-
-    //UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding", meta = (AllowPrivateAccess = "true"))
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Pathfinding", meta = (AllowPrivateAccess = "true"))
-    TObjectPtr<AVoxelVolumeBase> TargetVolume;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spline Safety")
-	bool bEnableSplineSafetyCheck = true; //안정성 검사 활성화 여부
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spline Safety")
-	float SafetyCheckStepSize = 50.f; //샘플링 간격
-	
-    // 디버깅용
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding|Debug")
-    bool bDrawDebugPath = true;
-
-protected:
-    virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+#pragma endregion
 
 private:
-    // 경로 요청 결과를 처리하는 함수
-    void HandleRequestingPathState();
+#pragma region Configuration Properties
 
-    // 전방 경로가 막혔는지 확인하고 상태를 변경하는 함수
-    bool CheckAndHandlePathInvalidation();
+	// --- 기본 설정 ---
+	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+	TSubclassOf<UPathfindingStrategy> PathfindingStrategyClass;
 
-    // 전방 경로가 실제로 유효한지 검사하는 함수
-    bool IsPathAheadValid() const;
+	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+	float AgentRadius = 50.f;
 
-    // --- 내부 상태 및 데이터 ---
+	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+	float MovementSpeed = 500.f;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding|State", meta = (AllowPrivateAccess = "true"))
-    EPathfindingState CurrentState;
+	// --- 이동 방식 설정 ---
+	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+	EPathMovementMode MovementMode = EPathMovementMode::Spline;
 
-    // 재탐색을 위해 목표 위치를 저장
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding|State", meta = (AllowPrivateAccess = "true"))
-    FVector CurrentTargetLocation;
+	// --- 동적 재탐색 설정 ---
+	UPROPERTY(Category = "Pathfinding|Dynamic Repath", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+	float RepathCooldown = 0.5f;
+
+	UPROPERTY(Category = "Pathfinding|Dynamic Repath", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+	int32 PathValidationLookAhead = 3;
+
+	// --- 스플라인 안전성 검사 설정 ---
+	UPROPERTY(Category = "Pathfinding|Spline", EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "MovementMode == EPathMovementMode::Spline", AllowPrivateAccess = true))
+	bool bEnableSplineSafetyCheck = true;
+
+	UPROPERTY(Category = "Pathfinding|Spline", EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "bEnableSplineSafetyCheck && MovementMode == EPathMovementMode::Spline", AllowPrivateAccess = true))
+	float SafetyCheckStepSize = 50.f;
+
+	// --- 디버깅 ---
+	UPROPERTY(Category = "Pathfinding|Debug", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+	bool bDrawDebugPath = true;
+
+	// --- 동적 목표 설정 ---
+	UPROPERTY(Category = "Pathfinding|Dynamic Goal", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = "true"))
+	float GoalUpdateThreshold = 100.f; // 목표가 이 거리(cm) 이상 움직여야 재탐색
+
+	// --- 경로 최적화 설정 ---
+	UPROPERTY(Category = "Pathfinding|Optimization", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = "true"))
+	float PathOptimizationCheckInterval = 1.0f; // 1초마다 지름길 검사
+
+	UPROPERTY(Category = "Pathfinding|Optimization", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = "true", ClampMin = "0.1", ClampMax = "1.0"))
+	float OptimizationHeuristicFactor = 0.8f; // 직선 거리가 남은 경로의 80%보다 짧아지면 재탐색
+
+#pragma endregion
+
+#pragma region Internal State
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding|State", meta = (AllowPrivateAccess = "true"))
+	EPathfindingState CurrentState = EPathfindingState::Idle;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding|State", meta = (AllowPrivateAccess = "true"))
+	FVector CurrentTargetLocation;
 	
-    // 현재 이동 목표인 경로상의 인덱스 (-1은 이동 중이 아님을 의미)
-    int32 CurrentPathIndex;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding|State", meta = (AllowPrivateAccess = "true"))
+	TArray<FVector> FoundPath;
 
-    // 길찾기 결과로 받은 월드 좌표 경로
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding|State", meta = (AllowPrivateAccess = "true"))
-    TArray<FVector> FoundPath;
+	TArray<FIntVector> FoundPathIndices;
+	int32 CurrentPathIndex = -1;
+	float DistanceAlongSpline = 0.f;
+	FVector NextPreferredLocation;
+	FVector CurrentVelocity;
 
-    // 길찾기 결과로 받은 복셀 인덱스 경로
-    TArray<FIntVector> FoundPathIndices;
+#pragma endregion
 
-    // 비동기 길찾기 작업을 위한 Future
-    TFuture<TArray<FIntVector>> PathfindingTaskFuture;
+#pragma region Dependencies & Handles
 
-    // 재탐색 쿨다운 타이머 핸들
-    FTimerHandle RepathCooldownTimer;
-
-    // --- 길찾기 전략 및 서브시스템 포인터 ---
-
-    UPROPERTY(EditAnywhere, Category = "Pathfinding", meta = (AllowPrivateAccess = "true"))
-    TSubclassOf<UPathfindingStrategy> PathfindingStrategyClass;
-
-    UPROPERTY()
-    TObjectPtr<UPathfindingStrategy> PathfindingStrategy;
-
-protected:
-    UPROPERTY()
-    TObjectPtr<UPathfindingSubsystem> PathSubsystem;
-
-    UPROPERTY()
-    TObjectPtr<UAvoidanceSubsystem> AvoidanceSubsystem;
+	UPROPERTY(Category = "Pathfinding|Volume", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AVoxelVolumeBase> TargetVolume;
 
 	UPROPERTY()
-	APathActor* CurrentPathActor = nullptr; // 스플라인을 소유한 액터에 대한 포인터
+	TObjectPtr<UPathfindingStrategy> PathfindingStrategy;
 
-	// USplineComponent* PathSpline; // 직접 소유하는 대신 포인터만 가짐
 	UPROPERTY()
-	TWeakObjectPtr<USplineComponent> PathSplinePtr = nullptr;
+	TObjectPtr<UPathfindingSubsystem> PathSubsystem;
+
+	UPROPERTY()
+	TObjectPtr<UAvoidanceSubsystem> AvoidanceSubsystem;
+
+	UPROPERTY()
+	TObjectPtr<APathActor> CurrentPathActor;
+
+	TWeakObjectPtr<USplineComponent> PathSplinePtr;
+
+	TFuture<TArray<FIntVector>> PathfindingTaskFuture;
+	FTimerHandle RepathCooldownTimer;
 	
-	//스플라인을 따라 이동한 총 거리
-	float DistanceAlongSpline;
+	/* 경로 최적화 검사를 위한 타이머 핸들 */
+	FTimerHandle PathOptimizationTimer;
+
+#pragma endregion
 };
