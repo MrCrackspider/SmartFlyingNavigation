@@ -182,13 +182,13 @@ void UPathfindingComponent::BeginPlay()
 		       *GetOwner()->GetName());
 	}
 
-	//경로 최적화 타이머를 시작합니다.
-	// 반복 실행되지만, 실제 검사는 FollowPath 상태일 때만 수행됩니다.
-	GetWorld()->GetTimerManager().SetTimer(PathOptimizationTimer,
-	                                       this,
-	                                       &UPathfindingComponent::CheckForPathOptimization,
-	                                       PathOptimizationCheckInterval,
-	                                       true);
+	// //경로 최적화 타이머를 시작합니다.
+	// // 반복 실행되지만, 실제 검사는 FollowPath 상태일 때만 수행됩니다.
+	// GetWorld()->GetTimerManager().SetTimer(PathOptimizationTimer,
+	//                                        this,
+	//                                        &UPathfindingComponent::CheckForPathOptimization,
+	//                                        PathOptimizationCheckInterval,
+	//                                        true);
 }
 
 void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
