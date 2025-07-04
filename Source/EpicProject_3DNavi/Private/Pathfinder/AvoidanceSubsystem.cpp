@@ -133,7 +133,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
         GenerateAgentConstraints(Agent, NearbyAgents, OrcaConstraints);
 
         // Step 3b: 정적 복셀 장애물과의 제약 조건 생성
-        //GenerateVoxelConstraints(Agent, OrcaConstraints);
+        GenerateVoxelConstraints(Agent, OrcaConstraints);
 
         // Step 3c: 대칭성 파괴를 위한 선호 속도 조정
         const FVector PreferredVelocity = Agent->GetPreferredVelocity();
@@ -249,63 +249,72 @@ void UAvoidanceSubsystem::GenerateAgentConstraints(UPathfindingComponent* Curren
 
 void UAvoidanceSubsystem::GenerateVoxelConstraints(UPathfindingComponent* CurrentAgent, TArray<FPlane>& OutConstraints)
 {
-    return;
-    AFenwickVoxelVolume* VoxelVolume = Cast<AFenwickVoxelVolume>(CurrentAgent->GetTargetVolume());
-    if (!VoxelVolume) return;
+    UWorld* World = GetWorld();
+    if (!World) return;
 
     const FVector PositionA = CurrentAgent->GetOwner()->GetActorLocation();
     const float RadiusA = CurrentAgent->GetAgentRadius();
     const FVector CurrentVelocityA = CurrentAgent->GetCurrentVelocity();
 
-    const int32 NumSamples = 16;
-    const float LookaheadDist = RadiusA * 2.0f;
+    FCollisionObjectQueryParams ObjectQueryParams;
+    ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+    ObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
 
-    for (int32 i = 0; i < NumSamples; ++i)
+    FCollisionQueryParams CollisionParams;
+    CollisionParams.AddIgnoredActor(CurrentAgent->GetOwner());
+
+    TArray<FOverlapResult> OverlapResults;
+    const float OverlapRadius = RadiusA * 1.5f;
+
+    bool bHasOverlaps = World->OverlapMultiByObjectType(
+        OverlapResults,
+        PositionA,
+        FQuat::Identity,
+        ObjectQueryParams,
+        FCollisionShape::MakeSphere(OverlapRadius),
+        CollisionParams
+    );
+
+    if (bHasOverlaps)
     {
-        // Fibonacci Sphere 샘플링
-        const float Y = 1.0f - (i / (float)(NumSamples - 1)) * 2.0f;
-        const float RadiusAtY = FMath::Sqrt(1.0f - Y * Y);
-        const float GoldenAngle = PI * (3.0f - FMath::Sqrt(5.0f));
-        const float Theta = GoldenAngle * i;
-        const FVector SampleDir(FMath::Cos(Theta) * RadiusAtY, Y, FMath::Sin(Theta) * RadiusAtY);
-
-        const FIntVector VoxelIndexStart = VoxelVolume->WorldToVoxelIndex(PositionA);
-        const FIntVector VoxelIndexEnd = VoxelVolume->WorldToVoxelIndex(PositionA + SampleDir * LookaheadDist);
-
-        FIntVector HitVoxelIndex;
-        if (FStrategyUtils::Raycast(VoxelVolume, VoxelIndexStart, VoxelIndexEnd, HitVoxelIndex))
+        for (const FOverlapResult& Result : OverlapResults)
         {
-            // 정적 장애물은 점이 아닌 부피로 계산
-            const FVector VoxelWorldPos = VoxelVolume->VoxelIndexToWorld(HitVoxelIndex);
-            // VoxelVolume->VoxelExtent가 복셀 한 변 길이의 절반(half extent)이라고 가정
-            const FBox VoxelBounds(VoxelWorldPos - VoxelVolume->VoxelExtent, VoxelWorldPos + VoxelVolume->VoxelExtent);
-            const FVector ObstaclePos = VoxelBounds.GetClosestPointTo(PositionA);
+            UPrimitiveComponent* HitComponent = Result.GetComponent();
+            if (!HitComponent) continue;
 
+            FVector ClosestPointOnObstacle;
+            HitComponent->GetClosestPointOnCollision(PositionA, ClosestPointOnObstacle);
+
+            const FVector ObstaclePos = ClosestPointOnObstacle;
             const FVector RelativePos = ObstaclePos - PositionA;
-            const FVector RelativeVel = CurrentVelocityA; // ObstacleVel is Zero
 
-            const float InverseTimeHorizon = 1.0f / TimeHorizon;
-            const FVector w = RelativeVel - RelativePos * InverseTimeHorizon;
-            const float w_len_sq = w.SizeSquared();
-            FVector u = FVector::ZeroVector;
-
-            if (w_len_sq > KINDA_SMALL_NUMBER)
+            if (RelativePos.SizeSquared() < FMath::Square(RadiusA))
             {
-                const float DotProduct = FVector::DotProduct(RelativePos, w);
-                if (DotProduct < 0.0f && FMath::Square(DotProduct) > w_len_sq * FMath::Square(RadiusA))
+                const FVector RelativeVel = CurrentVelocityA; // ObstacleVel is Zero
+
+                const float InverseTimeHorizon = 1.0f / TimeHorizon;
+                const FVector w = RelativeVel - RelativePos * InverseTimeHorizon;
+                const float w_len_sq = w.SizeSquared();
+                FVector u = FVector::ZeroVector;
+
+                if (w_len_sq > KINDA_SMALL_NUMBER)
                 {
-                    const float w_len = FMath::Sqrt(w_len_sq);
-                    u = (w / w_len) * (RadiusA * InverseTimeHorizon - w_len);
+                    const float DotProduct = FVector::DotProduct(RelativePos, w);
+                    if (DotProduct < 0.0f && FMath::Square(DotProduct) > w_len_sq * FMath::Square(RadiusA))
+                    {
+                        const float w_len = FMath::Sqrt(w_len_sq);
+                        u = (w / w_len) * (RadiusA * InverseTimeHorizon - w_len);
+                    }
                 }
-            }
 
-            if (!u.IsNearlyZero())
-            {
-                const FVector w_correction = u; // 정적 장애물은 100% 책임
-                const FVector n_correction = u.GetSafeNormal();
-                if (!n_correction.IsNearlyZero())
+                if (!u.IsNearlyZero())
                 {
-                    OutConstraints.Emplace(CurrentVelocityA + w_correction, n_correction);
+                    const FVector w_correction = u; // 정적 장애물은 100% 책임
+                    const FVector n_correction = u.GetSafeNormal();
+                    if (!n_correction.IsNearlyZero())
+                    {
+                        OutConstraints.Emplace(CurrentVelocityA + w_correction, n_correction);
+                    }
                 }
             }
         }
