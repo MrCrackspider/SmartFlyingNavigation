@@ -64,7 +64,7 @@ TArray<UPathfindingComponent*> UAvoidanceSubsystem::GetNearbyAgents(UPathfinding
     const float Radius = Agent->GetAgentRadius();
 
     // 에이전트의 반지름이 그리드 셀 크기를 초과할 경우를 대비해 탐색 범위를 동적으로 계산
-    const int32 SearchRange = FMath::Max(1, FMath::CeilToInt(Radius / GridCellSize));
+    const int32 SearchRange = FMath::Max(1, FMath::CeilToInt((Radius * 2) / GridCellSize));
 
     const FIntVector CenterGridPosition(FMath::FloorToInt(Location.X / GridCellSize), FMath::FloorToInt(Location.Y / GridCellSize), FMath::FloorToInt(Location.Z / GridCellSize));
 
