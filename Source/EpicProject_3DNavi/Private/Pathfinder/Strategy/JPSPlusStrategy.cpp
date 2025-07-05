@@ -123,14 +123,13 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 	{
 		return EPathfindingResult::Failed_InvalidStart;
 	}
-	const bool bIsGoalValid = Volume->IsRegionWalkable(EndIndex, AgentRadiusInVoxels);
 
 	MoveFeasibilityCache.Empty();
 	NodePool->Reset();
 	OpenSet.Empty();
 	OpenSetLookup.Empty();
 	ClosedSet.Empty();
-	OutPath.Empty();
+	// OutPath.Empty();
 
 	FPathNode* StartNode = NodePool->NewNode(StartIndex);
 	StartNode->HCost = CalculateHeuristic(StartIndex, EndIndex);
@@ -143,8 +142,7 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 	// --- 실시간 최적 노드 추적을 위한 변수 추가 ---
 	FPathNode* BestPartialNode = nullptr;
 	int64 MinHeuristic = MAX_int64;
-
-
+	
 	while (OpenSet.Num() > 0)
 	{
 		FPathNode* CurrentNode;
@@ -175,6 +173,7 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 			GoalNode = CurrentNode;
 			break;
 		}
+		
 		TArray<FPathNode*> Successors;
 		IdentifySuccessors(CurrentNode, EndIndex, AgentRadiusInVoxels, Successors);
 
@@ -202,6 +201,9 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 		}
 	}
 
+	//길찾기 끝나고 갱신 바로 전 초기화
+	OutPath.Empty();
+	
 	if (GoalNode)
 	{
 		OptimizePathFromJumpPoints(GoalNode, OutPath, AgentRadiusInVoxels);
@@ -435,6 +437,7 @@ TOptional<FIntVector> UJPSPlusStrategy::Jump(const FIntVector& StartPos, const F
 			}
 		}
 
+		//Question: 밑에 코드 필요있나? 어짜피 한칸씩가는거 아닌가
 		const FIntVector DirToGoal = Goal - CurrentPos;
 		const int64 DistSqToGoal = (int64)DirToGoal.X * DirToGoal.X + (int64)DirToGoal.Y * DirToGoal.Y + (int64)
 			DirToGoal.Z * DirToGoal.Z;
@@ -509,7 +512,7 @@ bool UJPSPlusStrategy::IsAgentMoveFeasible(const FIntVector& From, const FIntVec
 		FScopeLock Lock(&CacheMutex);
 		MoveFeasibilityCache.Add(Key, false);
 		return false;
-	}
+	} 
 
 	const FIntVector FromMin = From - FIntVector(AgentRadiusInVoxels);
 	const FIntVector FromMax = From + FIntVector(AgentRadiusInVoxels);
@@ -626,6 +629,8 @@ int32 UJPSPlusStrategy::GetMoveCost(const FIntVector& A, const FIntVector& B) co
 bool UJPSPlusStrategy::HasForcedNeighbour(const FIntVector& NodePos, const FIntVector& CheckDir,
                                           const FIntVector& ParentDir, uint32 AgentRadiusInVoxels) const
 {
+	//Question: 이거 바깥에서 기록했던 bool값 쓰면 되는거아닌가?
+	
 	if (ParentDir == FIntVector::ZeroValue)
 	{
 		return false;

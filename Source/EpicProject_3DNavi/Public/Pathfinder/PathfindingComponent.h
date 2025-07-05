@@ -18,7 +18,6 @@ UENUM(BlueprintType)
 enum class EPathfindingState : uint8
 {
 	Idle,           // 대기 중
-	RequestingPath, // 백그라운드 스레드에 경로를 요청하고 결과를 기다리는 중
 	FollowPath,     // 경로를 따라 이동 중 (스플라인/직선 통합)
 	PathInvalidated // 경로가 막혀 재탐색 대기 중
 };
@@ -99,6 +98,7 @@ protected:
 
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	void DetermineMovementStrategy();
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 #pragma endregion
@@ -109,11 +109,11 @@ protected:
 	UFUNCTION()
 	void OnPathfindingCompleted(const TArray<FIntVector>& PathIndices, bool bSuccess);
 	
+	/** 비동기 길찾기 작업이 완료되었을 때 결과를 처리합니다. */
+	void HandlePathfindingResult();
+
 	/** 새로 찾은 경로를 기반으로 이동 상태를 초기화하고 이동 방식을 결정합니다. */
 	void ProcessNewPath(const TArray<FIntVector>& PathIndices);
-
-	/** 현재 경로가 유효한지 검사합니다. (물리/복셀 기반) */
-	bool IsCurrentPathValid() const;
 
 	/** 경로가 유효하지 않을 때, 현재 이동을 중지하고 재탐색 타이머를 시작합니다. */
 	void InvalidatePathAndRequestRepath();
@@ -134,6 +134,9 @@ protected:
 
 #pragma endregion
 
+public:
+	void AdjustProgressToSpline(FVector FinalVelocity);
+	
 private:
 #pragma region Configuration Properties
 

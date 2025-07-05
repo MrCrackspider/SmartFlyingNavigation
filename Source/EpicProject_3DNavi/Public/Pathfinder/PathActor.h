@@ -27,6 +27,6 @@ public:
 	USplineComponent* GetSplineComponent();
 
 private:
-	UPROPERTY(VisibleAnywhere)
+	UPROPERTY()
 	USplineComponent* Spline;
 };

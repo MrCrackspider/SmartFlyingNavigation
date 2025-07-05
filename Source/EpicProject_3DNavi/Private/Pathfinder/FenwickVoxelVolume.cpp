@@ -199,13 +199,7 @@ bool AFenwickVoxelVolume::IsRegionWalkable(const FIntVector& VoxelIndex, int32 A
 	}
 
 	// Broad-phase: Use fast bitmask check to see if the region is guaranteed to be empty.
-	if (IsRegionEmpty_Bitmask(MinCorner, MaxCorner))
-	{
-		return true;
-	}
-	
-	// Narrow-phase: If bitmask fails, use the precise Fenwick Tree to count obstacles.
-	return FenwRangeSum(MinCorner, MaxCorner) == 0;
+	return IsRegionEmpty_Bitmask(MinCorner, MaxCorner);
 }
 
 bool AFenwickVoxelVolume::IsPathSegmentWalkable(const FIntVector& FromStartIndex, const FIntVector& ToStartIndex, int32 AgentRadiusInVoxels) const
