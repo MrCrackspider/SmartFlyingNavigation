@@ -26,6 +26,7 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VoxelVolume|UniformGrid")
 	float VoxelExtent;
+	const int CHUNK_SIZE = 64;
 	
 	// --- 균일 격자 공통 프로퍼티가 여기에 위치! ---
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VoxelVolume|UniformGrid")

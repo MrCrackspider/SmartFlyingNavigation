@@ -3,7 +3,6 @@
 
 #include "GameMode/EpicGameMode.h"
 #include "Pathfinder/PathfindingSubsystem.h"
-#include "Pathfinder/VoxelVolume.h"
 #include "Engine/GameInstance.h"
 
 void AEpicGameMode::BeginPlay()
@@ -24,6 +23,4 @@ void AEpicGameMode::BeginPlay()
         UE_LOG(LogTemp, Error, TEXT("PathfindingSubsystem is null!"));
         return;
     }
-
-    PathSubsystem->RenderVoxelVolume(FLinearColor::White, FLinearColor::Red);
 }

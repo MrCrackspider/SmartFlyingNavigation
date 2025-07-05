@@ -10,6 +10,8 @@
 
 void UJPSPlusStrategy::Initialize(AVoxelVolumeBase* InVolume)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(JPS_Initialize);
+	
 	Volume = Cast<AFenwickVoxelVolume>(InVolume);
 	if (Volume.IsValid() == false)
 	{
@@ -119,7 +121,7 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 	SCOPE_LOG_TIME_FUNC()
 	if (!Volume.IsValid())
 	{
-		return EPathfindingResult::Failed_Unreachable;
+		return EPathfindingResult::Failed_InvalidStart;
 	}
 	const bool bIsGoalValid = Volume->IsRegionWalkable(EndIndex, AgentRadiusInVoxels);
 
@@ -238,6 +240,7 @@ void UJPSPlusStrategy::GetPrunedDirections(const FIntVector& Dir, TArray<FIntVec
 
 	// 1. 자연스러운 이웃(Natural Neighbours) 추가
 	OutDirections.Add(Dir); // 원래 진행 방향은 항상 추가
+	
 	if (dx != 0 && dy != 0 && dz != 0) // 3D 대각선
 	{
 		OutDirections.Add(FIntVector(dx, 0, 0));
@@ -610,7 +613,6 @@ bool UJPSPlusStrategy::HasLineOfSight(const FIntVector& From, const FIntVector& 
 	// 모든 검사를 통과했다면 시야가 확보된 것임
 	return true;
 }
-
 int32 UJPSPlusStrategy::CalculateHeuristic(const FIntVector& A, const FIntVector& B) const
 {
 	return FStrategyUtils::Heuristic_Octile(A, B);

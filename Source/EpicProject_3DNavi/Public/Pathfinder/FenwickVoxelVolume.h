@@ -4,7 +4,6 @@
 
 #include "CoreMinimal.h"
 #include "UniformGridVolume.h"
-#include "Pathfinder/VoxelVolume.h"
 #include "FenwickVoxelVolume.generated.h"
 
 UCLASS()

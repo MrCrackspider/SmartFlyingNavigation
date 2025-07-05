@@ -1,6 +1,5 @@
 ﻿// JPSStrategy.cpp
 #include "Pathfinder/Strategy/JPSStrategy.h"
-#include "Pathfinder/VoxelVolume.h"
 #include "Pathfinder/Utility/StrategyUtils.h"
 #include "Pathfinder/PathfindingSubsystem.h"
 #include "Containers/BinaryHeap.h"

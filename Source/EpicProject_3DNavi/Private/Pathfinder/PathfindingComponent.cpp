@@ -14,6 +14,23 @@ UPathfindingComponent::UPathfindingComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 }
 
+
+void UPathfindingComponent::OnPathfindingCompleted(
+	const TArray<FIntVector>& PathIndices, bool bSuccess)
+{
+	if (bSuccess && PathIndices.Num() > 0)
+	{
+		ProcessNewPath(PathIndices);
+		UE_LOG(LogTemp, Log, TEXT("Pathfinding successful. State changed to FollowPath."));
+	}
+	else
+	{
+		// 실패 시 '대기' 상태로 복귀
+		CurrentState = EPathfindingState::Idle;
+		UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed. State changed to Idle."));
+	}
+}
+
 bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
 {
 	if (CurrentState == EPathfindingState::RequestingPath)
@@ -35,29 +52,39 @@ bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
 		return false;
 	}
 
+	this->PathSubsystem = GetWorld()->GetSubsystem<UPathfindingSubsystem>();
+	
+	if (!PathSubsystem)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FindPathToLocation failed: PathfindingSubsystem not found."));
+		return false;
+	}
+
+	FPathfindingRequest Request;
+	Request.RequestingComponent = this;
+	Request.Strategy = PathfindingStrategy;
+	Request.StartIndex = GridVolume->WorldToVoxelIndex(GetOwner()->GetActorLocation());
+	Request.EndIndex = GridVolume->WorldToVoxelIndex(TargetLocation);
+	Request.AgentRadiusInVoxels = FMath::RoundToInt(AgentRadius / GridVolume->VoxelExtent);
+
+	Request.OnPathfindingComplete.BindDynamic(this, &UPathfindingComponent::OnPathfindingCompleted);
+	
 	CurrentState = EPathfindingState::RequestingPath;
 	CurrentTargetLocation = TargetLocation;
 	FoundPath.Empty();
 	FoundPathIndices.Empty();
 	CurrentPathIndex = -1;
 
-	TWeakObjectPtr<UPathfindingStrategy> StrategyPtr = PathfindingStrategy;
-	const FIntVector StartIndex = GridVolume->WorldToVoxelIndex(GetOwner()->GetActorLocation());
-	const FIntVector EndIndex = GridVolume->WorldToVoxelIndex(TargetLocation);
-	const int32 AgentRadiusInVoxels = FMath::RoundToInt(AgentRadius / GridVolume->VoxelExtent);
+	const int32 RequestID = PathSubsystem->RequestPath(Request);
 
-	PathfindingTaskFuture = Async(EAsyncExecution::ThreadPool,
-	                              [StrategyPtr, StartIndex, EndIndex, AgentRadiusInVoxels]() -> TArray<FIntVector>
-	                              {
-		                              TArray<FIntVector> PathIndices;
-		                              if (StrategyPtr.IsValid())
-		                              {
-			                              StrategyPtr->FindPathWithStrategy(
-				                              StartIndex, EndIndex, AgentRadiusInVoxels, PathIndices);
-		                              }
-		                              return PathIndices;
-	                              });
+	if (RequestID == -1)
+	{
+		// 요청이 실패하면 즉시 '대기' 상태로 되돌립니다.
+		CurrentState = EPathfindingState::Idle;
+		return false;
+	}
 
+	// 요청이 성공적으로 큐에 들어갔습니다.
 	return true;
 }
 
@@ -161,13 +188,7 @@ void UPathfindingComponent::BeginPlay()
 			PathSplinePtr = CurrentPathActor->GetSplineComponent();
 		}
 	}
-
-	const TArray<TObjectPtr<AVoxelVolumeBase>>& Volumes = PathSubsystem->GetVoxelVolumes();
-	if (Volumes.Num() > 0)
-	{
-		TargetVolume = Volumes[0]; // FIX-ME: 현재는 첫 번째 볼륨을 사용
-	}
-
+	
 	if (PathfindingStrategyClass)
 	{
 		PathfindingStrategy = NewObject<UPathfindingStrategy>(this, PathfindingStrategyClass);
@@ -181,14 +202,6 @@ void UPathfindingComponent::BeginPlay()
 		UE_LOG(LogTemp, Error, TEXT("PathfindingComponent on Actor '%s': PathfindingStrategyClass is not set!"),
 		       *GetOwner()->GetName());
 	}
-
-	// //경로 최적화 타이머를 시작합니다.
-	// // 반복 실행되지만, 실제 검사는 FollowPath 상태일 때만 수행됩니다.
-	// GetWorld()->GetTimerManager().SetTimer(PathOptimizationTimer,
-	//                                        this,
-	//                                        &UPathfindingComponent::CheckForPathOptimization,
-	//                                        PathOptimizationCheckInterval,
-	//                                        true);
 }
 
 void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
@@ -210,7 +223,7 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		break;
 
 	case EPathfindingState::RequestingPath:
-		HandlePathfindingResult();
+		//HandlePathfindingResult();
 		break;
 
 	case EPathfindingState::PathInvalidated:
@@ -235,19 +248,10 @@ void UPathfindingComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
+
 //======================================================================================
 // Internal Logic
 //======================================================================================
-
-void UPathfindingComponent::HandlePathfindingResult()
-{
-	if (PathfindingTaskFuture.IsValid() && PathfindingTaskFuture.IsReady())
-	{
-		TArray<FIntVector> PathIndices = PathfindingTaskFuture.Get();
-		PathfindingTaskFuture.Reset();
-		ProcessNewPath(PathIndices);
-	}
-}
 
 void UPathfindingComponent::ProcessNewPath(const TArray<FIntVector>& PathIndices)
 {

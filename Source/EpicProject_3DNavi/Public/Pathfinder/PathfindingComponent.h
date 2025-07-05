@@ -105,9 +105,10 @@ protected:
 
 #pragma region Internal Logic
 
-	/** 비동기 길찾기 작업이 완료되었을 때 결과를 처리합니다. */
-	void HandlePathfindingResult();
-
+	//subsystem에서 길찾기가 비동기로 완료 되었을 때 실행될 함수
+	UFUNCTION()
+	void OnPathfindingCompleted(const TArray<FIntVector>& PathIndices, bool bSuccess);
+	
 	/** 새로 찾은 경로를 기반으로 이동 상태를 초기화하고 이동 방식을 결정합니다. */
 	void ProcessNewPath(const TArray<FIntVector>& PathIndices);
 
