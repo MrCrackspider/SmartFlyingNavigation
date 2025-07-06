@@ -104,28 +104,52 @@ FVector UPathfindingComponent::GetPreferredVelocity() const
 		return FVector::ZeroVector;
 	}
 
-	const FVector CurrentLocation = GetOwner()->GetActorLocation();
-	const FVector Direction = (NextPreferredLocation - CurrentLocation).GetSafeNormal();
-	return Direction * MovementSpeed;
+	return PreferredVelocity;
 }
 
 void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float DeltaTime)
 {
 	AActor* Owner = GetOwner();
-	if (!Owner) return;
-
-    AdjustProgressToSpline(FinalVelocity);
+	if (!Owner || !PathSplinePtr.IsValid()) return;
 	
-	CurrentVelocity = FinalVelocity;
+	// 1. 실제 이동 및 회전 (기존과 동일)
 	const FVector CurrentLocation = Owner->GetActorLocation();
-	Owner->SetActorLocation(CurrentLocation + FinalVelocity * DeltaTime);
 
+	const FVector AdjustedVelocity = FinalVelocity * DeltaTime;
+	
+	Owner->SetActorLocation(CurrentLocation + AdjustedVelocity);
 	if (!FinalVelocity.IsNearlyZero())
 	{
 		Owner->SetActorRotation(FinalVelocity.GetSafeNormal().ToOrientationQuat());
 	}
+
+	AdjustProgressToSpline(AdjustedVelocity);
 }
 
+void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
+{
+	// 0. 유효성 검사: 따라갈 스플라인이 없으면 아무것도 하지 않습니다.
+	if (!PathSplinePtr.IsValid())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("PathfindingComponent: TargetSpline is not set."));
+		return;
+	}
+	// 1. 현재 진행도(DistanceAlongSpline)에서의 스플라인 방향 벡터를 구합니다.
+	// 방향은 정규화(길이가 1인 벡터)되어야 합니다.
+	const FVector SplineDirection = PathSplinePtr->GetDirectionAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::World);
+	
+	// 3. 내적(Dot Product) 계산
+	// 두 벡터를 내적하면, 한 벡터가 다른 벡터 방향으로 얼마나 이동했는지(투영된 길이)를 알 수 있습니다.
+	// SplineDirection이 정규화된 벡터이므로, 내적의 결과는 FrameDisplacement 벡터를 SplineDirection에 투영한 길이가 됩니다.
+	const float ForwardDistance = FVector::DotProduct(FinalVelocity, SplineDirection);
+	// 4. 스플라인 진행도 업데이트
+	DistanceAlongSpline += ForwardDistance;
+	// 5. 스플라인 길이 초과 방지
+	// 계산된 진행도가 스플라인의 전체 길이를 넘지 않도록 제한합니다.
+	const float SplineLength = PathSplinePtr->GetSplineLength();
+	DistanceAlongSpline = FMath::Clamp(DistanceAlongSpline, 0.f, SplineLength);
+	// UE_LOG(LogTemp, Warning, TEXT("DistanceAlongSpline: %f"), DistanceAlongSpline);
+}
 
 void UPathfindingComponent::CheckForPathOptimization()
 {
@@ -194,6 +218,39 @@ void UPathfindingComponent::BeginPlay()
 	}
 }
 
+void UPathfindingComponent::UpdateSteering(float DeltaTime)
+{
+	if (CurrentState == EPathfindingState::FollowPath)
+	{
+		if (IsPathAheadValid()) //여기가 리패스하는 곳인듯
+		{
+			UpdatePreferredVelocity(DeltaTime);
+		}
+		else
+		{
+			InvalidatePathAndRequestRepath();
+		}
+	}
+	
+	// switch (CurrentState)
+	// {
+	// case EPathfindingState::FollowPath:
+	// 	if (IsPathAheadValid()) //여기가 리패스하는 곳인듯
+	// 	{
+	// 		UpdatePreferredVelocity(DeltaTime);
+	// 	}
+	// 	else
+	// 	{
+	// 		InvalidatePathAndRequestRepath();
+	// 	}
+	// 	break;
+	// case EPathfindingState::PathInvalidated:
+	// case EPathfindingState::Idle:
+	// default:
+	// 	break;
+	// }
+}
+
 void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
                                           FActorComponentTickFunction* ThisTickFunction)
 {
@@ -202,46 +259,6 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	if (PathfindingTaskFuture.IsValid()) //thread돌아가는지 확인
 	{
 		HandlePathfindingResult();
-	}
-
-	// const UEnum* EnumPtr = StaticEnum<EPathfindingState>();
-	// if (EnumPtr)
-	// {
-	// 	UE_LOG(LogTemp, Warning, TEXT("CurrentState: %s"), *EnumPtr->GetNameStringByValue((int64)CurrentState));
-	// }
-
-	// UE_LOG(LogTemp, Warning, TEXT("NextPreferredLocation: %f %f %f"), NextPreferredLocation.X, NextPreferredLocation.Y, NextPreferredLocation.Z);
-
-	switch (CurrentState)
-	{
-	case EPathfindingState::FollowPath:
-		if (IsPathAheadValid())
-		{
-			DetermineMovementStrategy();			
-			
-			UpdateNextLocation(DeltaTime);
-		}
-		else
-		{
-			InvalidatePathAndRequestRepath();
-		}
-		break;
-	case EPathfindingState::PathInvalidated:
-	case EPathfindingState::Idle:
-	default:
-		break;
-	}
-}
-
-void UPathfindingComponent::DetermineMovementStrategy()
-{
-	if (IsSplinePathSafe())
-	{
-		MovementMode = EPathMovementMode::Spline;
-	}
-	else
-	{
-		MovementMode = EPathMovementMode::Linear;
 	}
 }
 
@@ -373,19 +390,19 @@ void UPathfindingComponent::OnRepathTimerFired()
 	FindPathToLocation(CurrentTargetLocation);
 }
 
-void UPathfindingComponent::UpdateNextLocation(float DeltaTime)
+void UPathfindingComponent::UpdatePreferredVelocity(float DeltaTime)
 {
-	if (MovementMode == EPathMovementMode::Spline)
+	if (IsSplinePathSafe())
 	{
-		UpdateSplinePreferredLocation(DeltaTime);
+		UpdateSplinePreferredVelocity(DeltaTime);
 	}
 	else
 	{
-		UpdateLinearPreferredLocation(DeltaTime);
+		UpdateLinearPreferredVelocity(DeltaTime);
 	}
 }
 
-void UPathfindingComponent::UpdateLinearPreferredLocation(float DeltaTime)
+void UPathfindingComponent::UpdateLinearPreferredVelocity(float DeltaTime)
 {
 	AActor* Actor = GetOwner();
 	if (!Actor || CurrentPathIndex < 0 || CurrentPathIndex >= FoundPath.Num())
@@ -397,6 +414,10 @@ void UPathfindingComponent::UpdateLinearPreferredLocation(float DeltaTime)
 	const FVector CurrentLocation = Actor->GetActorLocation();
 	const FVector TargetPoint = FoundPath[CurrentPathIndex];
 
+
+	const FVector Direction = (FoundPath[CurrentPathIndex] - CurrentLocation).GetSafeNormal();
+	PreferredVelocity = Direction * MovementSpeed;
+
 	const float ArrivalThresholdSq = FMath::Square(100.f);
 	if (FVector::DistSquared(CurrentLocation, TargetPoint) < ArrivalThresholdSq)
 	{
@@ -404,16 +425,13 @@ void UPathfindingComponent::UpdateLinearPreferredLocation(float DeltaTime)
 		if (CurrentPathIndex >= FoundPath.Num())
 		{
 			// CurrentState = EPathfindingState::Idle;
+			PreferredVelocity = FVector::ZeroVector;
 			UE_LOG(LogTemp, Log, TEXT("Linear movement finished."));
-			return;
 		}
 	}
-
-	const FVector Direction = (FoundPath[CurrentPathIndex] - CurrentLocation).GetSafeNormal();
-	NextPreferredLocation = CurrentLocation + Direction * MovementSpeed * DeltaTime;
 }
 
-void UPathfindingComponent::UpdateSplinePreferredLocation(float DeltaTime)
+void UPathfindingComponent::UpdateSplinePreferredVelocity(float DeltaTime)
 {
 	AActor* MyActor = GetOwner();
 	if (!MyActor || !PathSplinePtr.IsValid() || PathSplinePtr->GetNumberOfSplinePoints() < 2)
@@ -422,48 +440,14 @@ void UPathfindingComponent::UpdateSplinePreferredLocation(float DeltaTime)
 		return;
 	}
 
-	// 이거는 지역변수로 바꿔서 기록은 안하고 마지막에 최종 velocity로 내적한 값을 더해줘야함
-	float PreferredDistance = DistanceAlongSpline + MovementSpeed * DeltaTime;
-	
-	// DistanceAlongSpline += MovementSpeed * DeltaTime;
-	const float SplineLength = PathSplinePtr->GetSplineLength();
-
-	if (DistanceAlongSpline >= SplineLength)
-	{
-		UE_LOG(LogTemp, Log, TEXT("Linear movement finished."));
-		return;
-	}
-
-	NextPreferredLocation = PathSplinePtr->GetLocationAtDistanceAlongSpline(PreferredDistance, ESplineCoordinateSpace::World);
-}
-
-void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
-{
-	// 0. 유효성 검사: 따라갈 스플라인이 없으면 아무것도 하지 않습니다.
-	if (!PathSplinePtr.IsValid())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("PathfindingComponent: TargetSpline is not set."));
-		return;
-	}
-
-	// 1. 현재 진행도(DistanceAlongSpline)에서의 스플라인 방향 벡터를 구합니다.
-	// 방향은 정규화(길이가 1인 벡터)되어야 합니다.
 	const FVector SplineDirection = PathSplinePtr->GetDirectionAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::World);
-	
-	// 3. 내적(Dot Product) 계산
-	// 두 벡터를 내적하면, 한 벡터가 다른 벡터 방향으로 얼마나 이동했는지(투영된 길이)를 알 수 있습니다.
-	// SplineDirection이 정규화된 벡터이므로, 내적의 결과는 FrameDisplacement 벡터를 SplineDirection에 투영한 길이가 됩니다.
-	const float ForwardDistance = FVector::DotProduct(FinalVelocity, SplineDirection);
+	PreferredVelocity = SplineDirection * MovementSpeed;
 
-	// 4. 스플라인 진행도 업데이트
-	DistanceAlongSpline += ForwardDistance;
-
-	// 5. 스플라인 길이 초과 방지
-	// 계산된 진행도가 스플라인의 전체 길이를 넘지 않도록 제한합니다.
 	const float SplineLength = PathSplinePtr->GetSplineLength();
-	DistanceAlongSpline = FMath::Clamp(DistanceAlongSpline, 0.f, SplineLength);
-
-	UE_LOG(LogTemp, Warning, TEXT("DistanceAlongSpline: %f"), DistanceAlongSpline);
+	if (SplineLength <= DistanceAlongSpline)
+	{
+		PreferredVelocity = FVector::ZeroVector;
+	}
 }
 
 bool UPathfindingComponent::IsSplinePathSafe() const

@@ -90,15 +90,19 @@ public:
 
 	/** 이 컴포넌트가 현재 목표로 하는 Voxel Volume을 반환합니다. */
 	AVoxelVolumeBase* GetTargetVolume() const { return TargetVolume; }
+
+	void UpdateSteering(float DeltaTime);
 	
 #pragma endregion
 
+protected:
+	FVector PreferredVelocity;
+	
 protected:
 #pragma region Engine Overrides
 
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-	void DetermineMovementStrategy();
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 #pragma endregion
@@ -122,9 +126,9 @@ protected:
 	void OnRepathTimerFired();
 
 	/** 현재 이동 방식(직선/스플라인)에 따라 다음 목표 위치를 업데이트합니다. */
-	void UpdateNextLocation(float DeltaTime);
-	void UpdateLinearPreferredLocation(float DeltaTime);
-	void UpdateSplinePreferredLocation(float DeltaTime);
+	void UpdatePreferredVelocity(float DeltaTime);
+	void UpdateLinearPreferredVelocity(float DeltaTime);
+	void UpdateSplinePreferredVelocity(float DeltaTime);
 
 	/** 스플라인 경로가 물리적으로 안전한지 검사합니다. */
 	bool IsSplinePathSafe() const;
@@ -199,7 +203,6 @@ private:
 	TArray<FIntVector> FoundPathIndices;
 	int32 CurrentPathIndex = -1;
 	float DistanceAlongSpline = 0.f;
-	FVector NextPreferredLocation;
 	FVector CurrentVelocity;
 
 #pragma endregion

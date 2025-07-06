@@ -71,7 +71,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
 
     Super::Tick(DeltaTime);
     SCOPE_CYCLE_COUNTER(STAT_AvoidanceSubsystem_Tick);
-
+        
     if (bIsTaskRunning && AsyncTask && AsyncTask->IsWorkDone())
     {
         TMap<uint32, FAvoidanceResult> LocalResults;
@@ -118,6 +118,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
         {
             if (RegisteredAgentComponents.Num() == 1 && RegisteredAgentComponents[0])
             {
+                RegisteredAgentComponents[0]->UpdateSteering(DeltaTime);
                 RegisteredAgentComponents[0]->ApplyMovement(RegisteredAgentComponents[0]->GetPreferredVelocity(), DeltaTime);
             }
             return;
@@ -127,6 +128,8 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
         AgentDataForThread.Reserve(RegisteredAgentComponents.Num());
         for (UPathfindingComponent* AgentComponent : RegisteredAgentComponents)
         {
+            AgentComponent->UpdateSteering(DeltaTime);
+            
             if (AgentComponent && AgentComponent->GetOwner())
             {
                 AgentDataForThread.Emplace(FAgentThreadData{
@@ -145,7 +148,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
             FScopeLock Lock(&ResultsCriticalSection);
             AvoidanceResults.Empty();
         }
-
+        
         AsyncTask = new FAsyncTask<FParallelAvoidanceTask>(MoveTemp(AgentDataForThread), AvoidanceResults, ResultsCriticalSection, TimeHorizon, MaxNeighbors, GridCellSize, SymmetryBreakingRangeMultiplier, SolverIterations, SideBiasMagnitude);
         AsyncTask->StartBackgroundTask();
         bIsTaskRunning = true;
