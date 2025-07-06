@@ -446,6 +446,7 @@ void UPathfindingComponent::UpdateSplinePreferredVelocity(float DeltaTime)
 	const float SplineLength = PathSplinePtr->GetSplineLength();
 	if (SplineLength <= DistanceAlongSpline)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("Spline path is invalid!"));
 		PreferredVelocity = FVector::ZeroVector;
 	}
 }
@@ -506,6 +507,7 @@ bool UPathfindingComponent::IsPathAheadValid() const
 	const int32 LastCheckIndex = FMath::Min(CurrentPathIndex + PathValidationLookAhead, FoundPathIndices.Num() - 2);
 	for (int32 i = CurrentPathIndex; i <= LastCheckIndex; ++i)
 	{
+		//if (!FenwickVolume->IsRegionWalkable(FoundPathIndices[i], AgentRadiusInVoxels)) 테스트 필요함.
 		if (!FenwickVolume->IsPathSegmentWalkable(FoundPathIndices[i], FoundPathIndices[i + 1], AgentRadiusInVoxels))
 		{
 			UE_LOG(LogTemp, Warning,

@@ -205,6 +205,7 @@ bool AFenwickVoxelVolume::IsRegionWalkable(const FIntVector& VoxelIndex, int32 A
 bool AFenwickVoxelVolume::IsPathSegmentWalkable(const FIntVector& FromStartIndex, const FIntVector& ToStartIndex, int32 AgentRadiusInVoxels) const
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(JPS_IsPathSegmentWalkable);
+	
 	if (!IsReadyForPathfinding()) return false;
 	
 	const FIntVector AgentRadius(AgentRadiusInVoxels);

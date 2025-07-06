@@ -123,6 +123,7 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 	{
 		return EPathfindingResult::Failed_InvalidStart;
 	}
+	const bool bIsGoalValid = Volume->IsRegionWalkable(EndIndex, AgentRadiusInVoxels);
 
 	MoveFeasibilityCache.Empty();
 	NodePool->Reset();
@@ -399,14 +400,17 @@ TOptional<FIntVector> UJPSPlusStrategy::Jump(const FIntVector& StartPos, const F
 	}
 	//const int32 MaxJumpDistance = Volume->GetDistanceToNextObstacle(StartPos, Direction);
 	FIntVector CurrentPos = StartPos;
-	if (HasLineOfSight(CurrentPos, Goal, AgentRadiusInVoxels))
+	if (Volume->IsIndexValid(Goal))
 	{
-		return Goal;
+		if (HasLineOfSight(CurrentPos, Goal, AgentRadiusInVoxels))
+		{
+			return Goal;
+		}
 	}
 	for (int32 Step = 0; ; ++Step)
 	{
 		const FIntVector NextPos = CurrentPos + Direction;
-
+		
 		if (!IsAgentMoveFeasible(CurrentPos, NextPos, AgentRadiusInVoxels))
 		{
 			return {};
@@ -437,7 +441,6 @@ TOptional<FIntVector> UJPSPlusStrategy::Jump(const FIntVector& StartPos, const F
 			}
 		}
 
-		//Question: 밑에 코드 필요있나? 어짜피 한칸씩가는거 아닌가
 		const FIntVector DirToGoal = Goal - CurrentPos;
 		const int64 DistSqToGoal = (int64)DirToGoal.X * DirToGoal.X + (int64)DirToGoal.Y * DirToGoal.Y + (int64)
 			DirToGoal.Z * DirToGoal.Z;
@@ -480,7 +483,7 @@ TOptional<FIntVector> UJPSPlusStrategy::Jump(const FIntVector& StartPos, const F
 			// 여기서 Index는 강제 이웃이 될 수 있는 방향의 인덱스입니다.
 			// 이 방향으로 점프를 시도하거나, 현재 위치를 점프 포인트로 즉시 반환할 수 있습니다.
 			// JPS+의 규칙에 따라, 강제 이웃이 하나라도 발견되면 현재 위치가 점프 포인트가 됩니다.
-			return CurrentPos; 
+			return CurrentPos;
 
 			// 만약 모든 강제 이웃을 다 찾아야 한다면, 처리한 비트를 끄고 루프를 계속합니다.
 			// ForcedNeighborCandidateMask &= ForcedNeighborCandidateMask - 1;
@@ -518,13 +521,12 @@ bool UJPSPlusStrategy::IsAgentMoveFeasible(const FIntVector& From, const FIntVec
 	const FIntVector FromMax = From + FIntVector(AgentRadiusInVoxels);
 	const FIntVector ToMin = To - FIntVector(AgentRadiusInVoxels);
 	const FIntVector ToMax = To + FIntVector(AgentRadiusInVoxels);
-
+	
 	const FIntVector SweptMin(FMath::Min(FromMin.X, ToMin.X), FMath::Min(FromMin.Y, ToMin.Y),
 	                          FMath::Min(FromMin.Z, ToMin.Z));
 	const FIntVector SweptMax(FMath::Max(FromMax.X, ToMax.X), FMath::Max(FromMax.Y, ToMax.Y),
 	                          FMath::Max(FromMax.Z, ToMax.Z));
 
-	// 스윕 볼륨 내에 장애물이 있는지 Fenwick Tree로 빠르게 검사합니다.
 	const bool bIsFeasible = ( Volume.IsValid() && Volume->FenwRangeSum(SweptMin, SweptMax) == 0);
 
 	// 계산 결과를 캐시에 저장합니다.
@@ -616,6 +618,7 @@ bool UJPSPlusStrategy::HasLineOfSight(const FIntVector& From, const FIntVector& 
 	// 모든 검사를 통과했다면 시야가 확보된 것임
 	return true;
 }
+
 int32 UJPSPlusStrategy::CalculateHeuristic(const FIntVector& A, const FIntVector& B) const
 {
 	return FStrategyUtils::Heuristic_Octile(A, B);
@@ -629,8 +632,6 @@ int32 UJPSPlusStrategy::GetMoveCost(const FIntVector& A, const FIntVector& B) co
 bool UJPSPlusStrategy::HasForcedNeighbour(const FIntVector& NodePos, const FIntVector& CheckDir,
                                           const FIntVector& ParentDir, uint32 AgentRadiusInVoxels) const
 {
-	//Question: 이거 바깥에서 기록했던 bool값 쓰면 되는거아닌가?
-	
 	if (ParentDir == FIntVector::ZeroValue)
 	{
 		return false;
@@ -655,6 +656,7 @@ bool UJPSPlusStrategy::HasForcedNeighbour(const FIntVector& NodePos, const FIntV
 	// 그 외의 모든 경우는 강제 이웃이 아닙니다.
 	return false;
 }
+
 uint64 UJPSPlusStrategy::CalculateForcedNeighborMask(const FNeighborWalkability& Neighbors, int32 ParentDirIndex) const
 {
 	uint64 ForcedMask = 0;
@@ -695,6 +697,7 @@ uint64 UJPSPlusStrategy::CalculateForcedNeighborMask(const FNeighborWalkability&
 	}
 	return ForcedMask;
 }
+
 bool UJPSPlusStrategy::HasForcedNeighbourBitMask(const FNeighborWalkability& Neighbors, int32 CheckDirIndex,
                                                  int32 ParentDirIndex) const
 {
