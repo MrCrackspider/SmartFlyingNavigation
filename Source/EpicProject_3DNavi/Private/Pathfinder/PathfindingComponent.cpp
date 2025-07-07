@@ -62,19 +62,26 @@ bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
 	const FIntVector EndIndex = GridVolume->WorldToVoxelIndex(TargetLocation);
 	const int32 AgentRadiusInVoxels = FMath::RoundToInt(AgentRadius / GridVolume->VoxelExtent);
 
-	PathfindingTaskFuture = Async(EAsyncExecution::ThreadPool,
-	                              [StrategyPtr, StartIndex, EndIndex, AgentRadiusInVoxels]() -> TArray<FIntVector>
-	                              {
-		                              TArray<FIntVector> PathIndices;
-		                              if (StrategyPtr.IsValid())
-		                              {
-			                              StrategyPtr->FindPathWithStrategy(
-				                              StartIndex, EndIndex, AgentRadiusInVoxels, PathIndices);
-		                              }
-		                              return PathIndices;
-	                              });
+	// 2. "요청서"를 작성합니다.
+	FPathfindingRequest Request;
+	Request.RequestingComponent = this;
+	Request.Strategy = PathfindingStrategy;
+	Request.StartIndex = GridVolume->WorldToVoxelIndex(GetOwner()->GetActorLocation());
+	Request.EndIndex = GridVolume->WorldToVoxelIndex(TargetLocation);
+	Request.AgentRadiusInVoxels = FMath::RoundToInt(AgentRadius / GridVolume->VoxelExtent);
 
-	return true;
+	//    결과를 받을 콜백 함수를 지정합니다.
+	Request.OnPathfindingComplete.BindDynamic(this, &UPathfindingComponent::OnPathfindingCompleted);
+
+	CurrentRequestID = PathSubsystem->RequestPath(Request);
+
+	if (CurrentRequestID != -1)
+	{
+		// 상태 변경 등...
+		return true;
+	}
+
+	return false;
 }
 
 void UPathfindingComponent::UpdateTargetLocation(const FVector& NewTargetLocation)

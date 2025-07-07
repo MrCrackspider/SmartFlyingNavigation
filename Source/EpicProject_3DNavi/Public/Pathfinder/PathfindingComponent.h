@@ -204,7 +204,7 @@ private:
 	int32 CurrentPathIndex = -1;
 	float DistanceAlongSpline = 0.f;
 	FVector CurrentVelocity;
-
+	int CurrentRequestID;
 #pragma endregion
 
 #pragma region Dependencies & Handles

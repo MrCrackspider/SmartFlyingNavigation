@@ -199,13 +199,18 @@ bool AFenwickVoxelVolume::IsRegionWalkable(const FIntVector& VoxelIndex, int32 A
 	}
 
 	// Broad-phase: Use fast bitmask check to see if the region is guaranteed to be empty.
-	return IsRegionEmpty_Bitmask(MinCorner, MaxCorner);
+	if (IsRegionEmpty_Bitmask(MinCorner, MaxCorner))
+	{
+		return true;
+	}
+	
+	// Narrow-phase: If bitmask fails, use the precise Fenwick Tree to count obstacles.
+	return FenwRangeSum(MinCorner, MaxCorner) == 0;
 }
 
 bool AFenwickVoxelVolume::IsPathSegmentWalkable(const FIntVector& FromStartIndex, const FIntVector& ToStartIndex, int32 AgentRadiusInVoxels) const
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(JPS_IsPathSegmentWalkable);
-	
 	if (!IsReadyForPathfinding()) return false;
 	
 	const FIntVector AgentRadius(AgentRadiusInVoxels);
