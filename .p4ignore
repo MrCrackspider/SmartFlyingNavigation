@@ -34,6 +34,7 @@ Binaries/
 # Engine intermediates
 Engine/Intermediate/*
 Intermediate/
+Plugins/CPathfinding/...
 
 # Intermediate folders for programs should not be checked in
 Engine\Programs\*\Intermediate\*
