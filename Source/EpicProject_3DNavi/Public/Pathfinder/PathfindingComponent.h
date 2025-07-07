@@ -26,19 +26,19 @@ enum class EPathfindingState : uint8
  * 경로를 따라 이동하는 방식을 결정합니다.
  */
 UENUM(BlueprintType)
-enum class EPathMovementMode : uint8
+enum class EPathMovementMode  : uint8
 {
 	Linear, // 점프 포인트를 직선으로 따라감
 	Spline  // 점프 포인트를 기반으로 부드러운 스플라인 경로를 생성하여 따라감
 };
-
 
 /**
  * 액터에게 비동기 길찾기, 경로 추종, 동적 장애물 회피 기능을 제공하는 컴포넌트입니다.
  * UPathfindingSubsystem과 UAvoidanceSubsystem에 의존하여 동작합니다.
  */
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
-class EPICPROJECT_3DNAVI_API UPathfindingComponent : public UActorComponent
+class EPICPROJECT_3DNAVI_API
+UPathfindingComponent : public UActorComponent
 {
 	GENERATED_BODY()
 
@@ -102,6 +102,7 @@ protected:
 #pragma region Engine Overrides
 
 	virtual void BeginPlay() override;
+	void PeriodicRepath();
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
@@ -129,6 +130,7 @@ protected:
 	void UpdatePreferredVelocity(float DeltaTime);
 	void UpdateLinearPreferredVelocity(float DeltaTime);
 	void UpdateSplinePreferredVelocity(float DeltaTime);
+	void ReachDestination();
 
 	/** 스플라인 경로가 물리적으로 안전한지 검사합니다. */
 	bool IsSplinePathSafe() const;
@@ -160,11 +162,17 @@ private:
 
 	// --- 동적 재탐색 설정 ---
 	UPROPERTY(Category = "Pathfinding|Dynamic Repath", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
-	float RepathCooldown = 0.5f;
+	float RepathCooldown = 1.f;
+
+	UPROPERTY(Category = "Pathfinding|Dynamic Repath", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+	bool PeriodicRepathOpt = false;
 
 	UPROPERTY(Category = "Pathfinding|Dynamic Repath", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
 	int32 PathValidationLookAhead = 3;
 
+	UPROPERTY()
+	bool bIsReachDestination = false;
+	
 	// --- 스플라인 안전성 검사 설정 ---
 	UPROPERTY(Category = "Pathfinding|Spline", EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "MovementMode == EPathMovementMode::Spline", AllowPrivateAccess = true))
 	bool bEnableSplineSafetyCheck = true;

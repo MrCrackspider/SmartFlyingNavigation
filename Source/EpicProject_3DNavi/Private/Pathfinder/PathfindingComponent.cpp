@@ -25,9 +25,22 @@ void UPathfindingComponent::OnPathfindingCompleted(
 	}
 	else
 	{
-		// 실패 시 '대기' 상태로 복귀
 		CurrentState = EPathfindingState::Idle;
 		UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed. State changed to Idle."));
+	}
+	
+	if (PeriodicRepathOpt)
+	{
+		//도착하지 않았으면
+		if (!bIsReachDestination)
+		{
+			if (UWorld* World = GetWorld())
+			{
+				//재귀적으로 요청
+				World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath,
+												  RepathCooldown, false);
+			}
+		}
 	}
 }
 
@@ -45,22 +58,23 @@ bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
 		return false;
 	}
 
+	// 기존에 타이머 걸어둔게 있으면 취소
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(RepathCooldownTimer);
+	}
+	
 	AUniformGridVolume* GridVolume = Cast<AUniformGridVolume>(TargetVolume);
 	if (!GridVolume)
 	{
 		UE_LOG(LogTemp, Error, TEXT("FindPathToLocation failed: TargetVolume is not a UniformGridVolume."));
 		return false;
 	}
-
+	
 	CurrentTargetLocation = TargetLocation;
-	// FoundPath.Empty();
 	FoundPathIndices.Empty();
-	// CurrentPathIndex = -1;
-
-	TWeakObjectPtr<UPathfindingStrategy> StrategyPtr = PathfindingStrategy;
-	const FIntVector StartIndex = GridVolume->WorldToVoxelIndex(GetOwner()->GetActorLocation());
-	const FIntVector EndIndex = GridVolume->WorldToVoxelIndex(TargetLocation);
-	const int32 AgentRadiusInVoxels = FMath::RoundToInt(AgentRadius / GridVolume->VoxelExtent);
+	
+	bIsReachDestination = false;
 
 	// 2. "요청서"를 작성합니다.
 	FPathfindingRequest Request;
@@ -72,7 +86,7 @@ bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
 
 	//    결과를 받을 콜백 함수를 지정합니다.
 	Request.OnPathfindingComplete.BindDynamic(this, &UPathfindingComponent::OnPathfindingCompleted);
-
+	
 	CurrentRequestID = PathSubsystem->RequestPath(Request);
 
 	if (CurrentRequestID != -1)
@@ -225,9 +239,15 @@ void UPathfindingComponent::BeginPlay()
 	}
 }
 
+void UPathfindingComponent::PeriodicRepath()
+{	
+	UE_LOG(LogTemp, Warning, TEXT("RePathing"));
+	FindPathToLocation(CurrentTargetLocation);
+}
+
 void UPathfindingComponent::UpdateSteering(float DeltaTime)
 {
-	if (CurrentState == EPathfindingState::FollowPath)
+	if (CurrentState == EPathfindingState::FollowPath && !bIsReachDestination)
 	{
 		if (IsPathAheadValid()) //여기가 리패스하는 곳인듯
 		{
@@ -387,8 +407,8 @@ void UPathfindingComponent::InvalidatePathAndRequestRepath()
 
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::OnRepathTimerFired,
-		                                  RepathCooldown, false);
+		//subsystem에서 스케줄링 해줄거니까 repath 시간 둘 필요 없음
+		OnRepathTimerFired();
 	}
 }
 
@@ -421,7 +441,6 @@ void UPathfindingComponent::UpdateLinearPreferredVelocity(float DeltaTime)
 	const FVector CurrentLocation = Actor->GetActorLocation();
 	const FVector TargetPoint = FoundPath[CurrentPathIndex];
 
-
 	const FVector Direction = (FoundPath[CurrentPathIndex] - CurrentLocation).GetSafeNormal();
 	PreferredVelocity = Direction * MovementSpeed;
 
@@ -453,9 +472,15 @@ void UPathfindingComponent::UpdateSplinePreferredVelocity(float DeltaTime)
 	const float SplineLength = PathSplinePtr->GetSplineLength();
 	if (SplineLength <= DistanceAlongSpline)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Spline path is invalid!"));
-		PreferredVelocity = FVector::ZeroVector;
+		ReachDestination();
 	}
+}
+
+void UPathfindingComponent::ReachDestination()
+{
+	UE_LOG(LogTemp, Warning, TEXT("Reach the Destination!"));
+	PreferredVelocity = FVector::ZeroVector;
+	bIsReachDestination = true;
 }
 
 bool UPathfindingComponent::IsSplinePathSafe() const
