@@ -198,6 +198,26 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FPathfindingRequest&
 			}
 			else
 			{
+				// AFenwickVoxelVolume* V = Volume.Get();
+				// AsyncTask(
+				// 			ENamedThreads::GameThread,
+				// 			[V, Successor]()
+				// 			{
+				// 				UWorld* World = V->GetWorld();
+				// 				// 디버그 구체를 그립니다.
+				// 				DrawDebugSphere(
+				// 					World,                  // 구체를 그릴 월드
+				// 					FVector(V->VoxelIndexToWorld(Successor->Position)),             // 구체의 중심 위치: StartPoint
+				// 					50.f,            // 구체의 반지름: AgentRadius
+				// 					6,                     // 구체의 정밀도 (12 또는 24 정도면 충분합니다)
+				// 					FColor::Green,          // 색상: 녹색
+				// 					true,                  // 한 프레임만 표시할지 여부
+				// 					5.0f,                   // 표시 시간: 5초
+				// 					0,                      // 렌더링 우선순위
+				// 					2.0f                    // 선의 두께 (추가적인 파라미터)
+				// 				);
+				// 			}
+				// 		);
 				Successor->HCost = CalculateHeuristic(Successor->Position, InRequest.EndIndex);
 				Successor->SetParent(CurrentNode, NewGCost, Successor->HCost);
 				OpenSet.HeapPush(Successor, FPathNodePtrCompare());

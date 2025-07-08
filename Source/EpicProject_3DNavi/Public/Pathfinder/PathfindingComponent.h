@@ -213,7 +213,7 @@ public:
 	TArray<FVector> FoundPath;
 
 	TArray<FIntVector> FoundPathIndices;
-	int32 CurrentPathIndex = -1;
+	int32 CurrentPathDestinationIndex = -1;
 	float DistanceAlongSpline = 0.f;
 	FVector CurrentVelocity;
 	int CurrentRequestID;
