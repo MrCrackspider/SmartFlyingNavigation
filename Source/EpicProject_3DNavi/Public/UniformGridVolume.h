@@ -19,6 +19,7 @@ public:
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+	virtual void OnConstruction(const FTransform& Transform) override;
 
 public:	
 	// Called every frame
@@ -27,6 +28,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VoxelVolume|UniformGrid")
 	float VoxelExtent;
 	const int CHUNK_SIZE = 64;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visualization")
+	TObjectPtr<UStaticMeshComponent> VolumeBoundsVisualizer;
+	
 	
 	// --- 균일 격자 공통 프로퍼티가 여기에 위치! ---
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VoxelVolume|UniformGrid")

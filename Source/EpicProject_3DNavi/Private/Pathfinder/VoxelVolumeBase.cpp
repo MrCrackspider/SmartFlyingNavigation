@@ -13,6 +13,7 @@ AVoxelVolumeBase::AVoxelVolumeBase()
 	bDrawDebugObstacles = true; // Default to on, can be changed in editor
 	DebugObstaclesComponent = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("DebugObstaclesComponent"));
 	DebugObstaclesComponent->SetupAttachment(RootComponent);
+	DebugObstaclesComponent->bSelectable  = false;
 	DebugObstaclesComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
@@ -21,7 +22,7 @@ void AVoxelVolumeBase::BeginPlay()
 	Super::BeginPlay();
 	if (bDrawDebugObstacles)
 	{
-		GetWorldTimerManager().SetTimer(DebugUpdateTimer, this, &AVoxelVolumeBase::UpdateDebugObstacleVisualization, 1.0f, true, 0.5f);
+		GetWorldTimerManager().SetTimer(DebugUpdateTimer, this, &AVoxelVolumeBase::UpdateDebugObstacleVisualization, 0.8f, true, 0.5f);
 	}
 }
 
@@ -33,6 +34,14 @@ void AVoxelVolumeBase::GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObsta
 {
 }
 void AVoxelVolumeBase::UpdateDebugObstacleVisualization()
+{
+}
+
+void AVoxelVolumeBase::RegisterStreamingAgent(AActor* Agent)
+{
+}
+
+void AVoxelVolumeBase::UnregisterStreamingAgent(AActor* Agent)
 {
 }
 

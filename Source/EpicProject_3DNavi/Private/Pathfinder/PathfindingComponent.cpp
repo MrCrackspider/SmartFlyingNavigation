@@ -80,7 +80,7 @@ bool UPathfindingComponent::FindPathToLocation(const FVector& TargetLocation)
 	Request.Strategy = PathfindingStrategy;
 	Request.StartIndex = GridVolume->WorldToVoxelIndex(GetOwner()->GetActorLocation());
 	Request.EndIndex = GridVolume->WorldToVoxelIndex(TargetLocation);
-	Request.AgentRadiusInVoxels = FMath::CeilToInt((AgentRadius - GridVolume->VoxelExtent / 2) / GridVolume->VoxelExtent);
+	Request. AgentRadiusInVoxels = FMath::CeilToInt((AgentRadius / GridVolume->VoxelExtent) - 0.5f);
 
 	//    결과를 받을 콜백 함수를 지정합니다.
 	Request.OnPathfindingComplete.BindDynamic(this, &UPathfindingComponent::OnPathfindingCompleted);
@@ -288,7 +288,7 @@ void UPathfindingComponent::BeginPlay()
 
 	PathSubsystem = World->GetSubsystem<UPathfindingSubsystem>();
 	AvoidanceSubsystem = World->GetSubsystem<UAvoidanceSubsystem>();
-
+	
 	if (!ensure(PathSubsystem))
 	{
 		UE_LOG(LogTemp, Error, TEXT("PathfindingComponent: PathfindingSubsystem not found!"));
@@ -321,6 +321,10 @@ void UPathfindingComponent::BeginPlay()
 	{
 		UE_LOG(LogTemp, Error, TEXT("PathfindingComponent on Actor '%s': PathfindingStrategyClass is not set!"),
 		       *GetOwner()->GetName());
+	}
+	if (TargetVolume)
+	{
+		TargetVolume->RegisterStreamingAgent(GetOwner());
 	}
 }
 
@@ -608,14 +612,16 @@ bool UPathfindingComponent::IsPathAheadValid() const
 	if (!GridVolume || GridVolume->VoxelExtent == 0) return false;
 
 	//const int32 AgentRadiusInVoxels = FMath::CeilToInt(AgentRadius / GridVolume->VoxelExtent);
-	const int32 AgentRadiusInVoxels = FMath::CeilToInt((AgentRadius - GridVolume->VoxelExtent / 2) / GridVolume->VoxelExtent);
-	if (AgentRadiusInVoxels <= 0) return true;
+	//const int32 AgentRadiusInVoxels = FMath::CeilToInt((AgentRadius - GridVolume->VoxelExtent / 2) / GridVolume->VoxelExtent);
+	const int32 AgentRadiusInVoxels = FMath::CeilToInt((AgentRadius / GridVolume->VoxelExtent) - 0.5f);
+
+	//if (AgentRadiusInVoxels <= 0) return true;
 
 	const int32 LastCheckIndex = FMath::Min(CurrentPathIndex + PathValidationLookAhead, FoundPathIndices.Num() - 2);
 	for (int32 i = CurrentPathIndex; i <= LastCheckIndex; ++i)
 	{
-		//if (!FenwickVolume->IsRegionWalkable(FoundPathIndices[i], AgentRadiusInVoxels)) 테스트 필요함.
-		if (!FenwickVolume->IsPathSegmentWalkable(FoundPathIndices[i], FoundPathIndices[i + 1], AgentRadiusInVoxels))
+		if (!FenwickVolume->IsRegionWalkable(FoundPathIndices[i], AgentRadiusInVoxels)) //테스트 필요함.
+		//if (!FenwickVolume->IsPathSegmentWalkable(FoundPathIndices[i], FoundPathIndices[i + 1], AgentRadiusInVoxels))
 		{
 			UE_LOG(LogTemp, Warning,
 			       TEXT("Path Invalidated: A future path segment (from waypoint %d to %d) is blocked!"), i, i + 1);

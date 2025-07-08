@@ -17,7 +17,7 @@ enum class EVolumeDataStructure : uint8
 
 
 
-UCLASS(Abstract, HideCategories = (Rendering, Replication, Collision, Input, Actor, LOD, Cooking))
+UCLASS()
 class EPICPROJECT_3DNAVI_API AVoxelVolumeBase : public AActor
 {
 	GENERATED_BODY()
@@ -52,12 +52,18 @@ public:
 	
 	virtual void UpdateDebugObstacleVisualization();
 
+	virtual void RegisterStreamingAgent(AActor* Agent);
+
+	virtual void UnregisterStreamingAgent(AActor* Agent) ;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VoxelVolume")
 	bool bDrawDebugObstacles;
-	
+
+#if WITH_EDITORONLY_DATA
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VoxelVolume")
 	TObjectPtr<UInstancedStaticMeshComponent> DebugObstaclesComponent;
-
+#endif
+	
 	FTimerHandle DebugUpdateTimer;
 
 };
