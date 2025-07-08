@@ -1,9 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
+#include "FPathfindingWorker.h"
 #include "Pathfinder/FPathfindingRequest.h"
 #include "Pathfinder/Strategy/PathfindingStrategy.h"
-#include "FPathfindingWorker.h"
 #include "Pathfinder/PathfindingSubsystem.h"
 
 FPathfindingWorker::FPathfindingWorker(UPathfindingSubsystem* InSubsystem, TQueue<FPathfindingRequest, EQueueMode::Mpsc>* InRequestQueue)
