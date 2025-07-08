@@ -155,18 +155,11 @@ void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 		UE_LOG(LogTemp, Warning, TEXT("PathfindingComponent: TargetSpline is not set."));
 		return;
 	}
-	// 1. 현재 진행도(DistanceAlongSpline)에서의 스플라인 방향 벡터를 구합니다.
-	// 방향은 정규화(길이가 1인 벡터)되어야 합니다.
+
 	const FVector SplineDirection = PathSplinePtr->GetDirectionAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::World);
 	
-	// 3. 내적(Dot Product) 계산
-	// 두 벡터를 내적하면, 한 벡터가 다른 벡터 방향으로 얼마나 이동했는지(투영된 길이)를 알 수 있습니다.
-	// SplineDirection이 정규화된 벡터이므로, 내적의 결과는 FrameDisplacement 벡터를 SplineDirection에 투영한 길이가 됩니다.
 	const float ForwardDistance = FVector::DotProduct(FinalVelocity, SplineDirection);
-	// 4. 스플라인 진행도 업데이트
 	DistanceAlongSpline += ForwardDistance;
-	// 5. 스플라인 길이 초과 방지
-	// 계산된 진행도가 스플라인의 전체 길이를 넘지 않도록 제한합니다.
 	const float SplineLength = PathSplinePtr->GetSplineLength();
 	DistanceAlongSpline = FMath::Clamp(DistanceAlongSpline, 0.f, SplineLength);
 	// UE_LOG(LogTemp, Warning, TEXT("DistanceAlongSpline: %f"), DistanceAlongSpline);
@@ -174,28 +167,42 @@ void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 	//DistanceAlongSpline으로 현재 목표포인트인덱스 업데이트
 	if (!bIsReachDestination)
 	{
-
 		const FVector CurrentLocation = GetOwner()->GetActorLocation();
 		const FVector TargetPoint = FoundPath[CurrentPathIndex];
 
-		const float ArrivalThresholdSq = FMath::Square(10.f);
 
-		// 스플라인인지 linear인지 분기처리해서 따로 if문 처리할 수 있지만 저걸로 전부 처리 가능할거같아서 일단 이렇게 처리
-		// if (DistanceAlongSpline >= TargetPointDistance)
-		if (FVector::DistSquared(CurrentLocation, TargetPoint) < ArrivalThresholdSq)
+		if (MovementMode == EPathMovementMode::Spline/* && CurrentPathIndex != 0*/)
 		{
-			//직선이 더 빠르기때문에 특정포인트에 도달하면 동기화시켜줘야함
-			DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathIndex);
-			
-			int32 PassedPointIndex = CurrentPathIndex - 1;
-			if (PassedPointIndex >= 0)
+			const float TargetPointDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathIndex);
+			if (DistanceAlongSpline >= TargetPointDistance)
 			{
-				UE_LOG(LogTemp, Warning, TEXT("passed point %d"), PassedPointIndex);
+				DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathIndex - 1);
+				
+				int32 PassedPointIndex = CurrentPathIndex - 1;
+				if (PassedPointIndex >= 0)
+				{
+					UE_LOG(LogTemp, Display, TEXT("%s: passed point %d"), *GetOwner()->GetName(), PassedPointIndex);
+					UE_LOG(LogTemp, Display, TEXT("%s: FoundPath.Num() %d"), *GetOwner()->GetName(), FoundPath.Num());
+				}
+				ProgressNextPoint();
 			}
+		}
+		else
+		{
+			
+			const float ArrivalThresholdSq = FMath::Square(5.f);
+			if (FVector::DistSquared(CurrentLocation, TargetPoint) < ArrivalThresholdSq)
+			{
+				DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathIndex - 1);
 
-			//포인트 통과시 실행할 코드 있으면 삽입
-
-			ProgressNextPoint();
+				int32 PassedPointIndex = CurrentPathIndex - 1;
+				if (PassedPointIndex >= 0)
+				{
+					UE_LOG(LogTemp, Display, TEXT("%s: passed point %d"), *GetOwner()->GetName(), PassedPointIndex);
+					UE_LOG(LogTemp, Display, TEXT("%s: FoundPath.Num() %d"), *GetOwner()->GetName(), FoundPath.Num());
+				}
+				ProgressNextPoint();
+			}
 		}
 	}
 }
@@ -225,13 +232,14 @@ bool UPathfindingComponent::IsOnSplineLine()
 	const FVector MyLocation = MyActor->GetActorLocation();
 	const FVector SplineLocation = PathSplinePtr->GetLocationAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::World);
 
-	const float MyTolerance = 1.0f; 
+	const float MyTolerance = 100.0f; 
 
 	if (MyLocation.Equals(SplineLocation, MyTolerance))
 	{
 		return true;
 	}
 
+	UE_LOG(LogTemp, Warning, TEXT("%s is not on Spline line"), *GetOwner()->GetName());
 	return false;
 }
 
@@ -240,11 +248,12 @@ void UPathfindingComponent::DetermineMovementModeForNextPath()
 	if (IsSplinePathSafe())
 	{
 		MovementMode = EPathMovementMode::Spline;
-		UE_LOG(LogTemp, Warning, TEXT("Path is safe to next point! Move Spline"));
-	}else
+		UE_LOG(LogTemp, Warning, TEXT("%s: Path is safe to next point! Move Spline"), *GetOwner()->GetName());
+	}
+	else
 	{
 		MovementMode = EPathMovementMode::Linear;
-		UE_LOG(LogTemp, Warning, TEXT("Path is unsafe to next point! Move Linear"));
+		UE_LOG(LogTemp, Warning, TEXT("%s: Path is unsafe to next point! Move Linear"), *GetOwner()->GetName());
 	}
 }
 
@@ -361,13 +370,18 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
                                           FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	const FVector CurrentLocation = GetOwner()->GetActorLocation();
+	UE_LOG(LogTemp, Display, TEXT("%s, %f, %f, %f"), *GetOwner()->GetName(), CurrentLocation.X, CurrentLocation.Y, CurrentLocation.Z);
 
-	// avoidance때문에 경로를 벗어나면 일단 linear하게 움직이도록 땜빵?처리 (기존의방식)
-	if (MovementMode == EPathMovementMode::Spline && IsOnSplineLine())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Out Of Spline Line. Change MovementMode to Linear"));
-		MovementMode = EPathMovementMode::Linear;
-	}
+	//CurrentPathIndex >= FoundPath.Num()
+	//UE_LOG(LogTemp, Display, TEXT("%s: CurrentPathIndex %d, FoundPathNum %d"), *GetOwner()->GetName(), CurrentPathIndex, FoundPath.Num());
+
+	//// avoidance때문에 경로를 벗어나면 일단 linear하게 움직이도록 땜빵?처리 (기존의방식)
+	//if (MovementMode == EPathMovementMode::Spline && IsOnSplineLine())
+	//{
+	//	UE_LOG(LogTemp, Warning, TEXT("Out Of Spline Line. Change MovementMode to Linear"));
+	//	MovementMode = EPathMovementMode::Linear;
+	//}
 	
 	if (PathfindingTaskFuture.IsValid()) //thread돌아가는지 확인
 	{
@@ -454,7 +468,7 @@ void UPathfindingComponent::ProcessNewPath(const TArray<FIntVector>& PathIndices
 	{
 		for (int32 i = 0; i < FoundPath.Num() - 1; ++i)
 		{
-			DrawDebugLine(GetWorld(), FoundPath[i], FoundPath[i + 1], FColor::Green, false, 10.f, 0, 2.f);
+			DrawDebugLine(GetWorld(), FoundPath[i], FoundPath[i + 1], FColor::Red, false, 10.f, 0, 2.f);
 		}
 	}
 }
@@ -591,9 +605,10 @@ bool UPathfindingComponent::IsPathAheadValid() const
 	}
 
 	AUniformGridVolume* GridVolume = Cast<AUniformGridVolume>(TargetVolume);
-	if (!GridVolume) return false;
+	if (!GridVolume || GridVolume->VoxelExtent == 0) return false;
 
-	const int32 AgentRadiusInVoxels = FMath::CeilToInt(AgentRadius / GridVolume->VoxelExtent);
+	//const int32 AgentRadiusInVoxels = FMath::CeilToInt(AgentRadius / GridVolume->VoxelExtent);
+	const int32 AgentRadiusInVoxels = FMath::CeilToInt((AgentRadius - GridVolume->VoxelExtent / 2) / GridVolume->VoxelExtent);
 	if (AgentRadiusInVoxels <= 0) return true;
 
 	const int32 LastCheckIndex = FMath::Min(CurrentPathIndex + PathValidationLookAhead, FoundPathIndices.Num() - 2);

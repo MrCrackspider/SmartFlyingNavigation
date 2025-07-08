@@ -11,6 +11,9 @@ AUniformGridVolume::AUniformGridVolume()
  	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
+	// Set as default
+	MapSize = FIntVector(64, 64, 64);
+	VoxelExtent = 100.f;
 }
 
 // Called when the game starts or when spawned

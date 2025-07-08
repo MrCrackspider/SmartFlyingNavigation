@@ -195,6 +195,10 @@ private:
 	UPROPERTY(Category = "Pathfinding|Optimization", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = "true", ClampMin = "0.1", ClampMax = "1.0"))
 	float OptimizationHeuristicFactor = 0.8f; // 직선 거리가 남은 경로의 80%보다 짧아지면 재탐색
 
+public:
+	void SetMovementMode(EPathMovementMode InMovementMode) { MovementMode = InMovementMode; }
+	EPathMovementMode GetMovementMode() const { return MovementMode; }
+
 #pragma endregion
 
 #pragma region Internal State

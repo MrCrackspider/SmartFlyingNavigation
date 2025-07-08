@@ -102,6 +102,13 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
 
                 Agent->ApplyMovement(FinalVelocity, DeltaTime);
 
+                // Begin Test
+                if (Agent->GetMovementMode() == EPathMovementMode::Spline && !Agent->IsOnSplineLine())
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("%s: Out Of Spline Line. Change MovementMode to Linear"), *Agent->GetOwner()->GetName());
+                    Agent->SetMovementMode(EPathMovementMode::Linear);
+                }
+                // End Test
                 DebugVisualizeVelocities(Agent, ResultPair.Value, FinalOptimalVelocity);
             }
         }
