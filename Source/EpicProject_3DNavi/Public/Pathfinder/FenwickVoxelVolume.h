@@ -32,6 +32,11 @@ public:
 	/** Checks if the volume has been fully initialized and is safe to query for pathfinding. Thread-safe. */
 	bool IsReadyForPathfinding() const { return bIsReady.Load(); }
 
+	
+#if WITH_EDITOR
+	virtual void BakeStaticDataToChunks() override;
+#endif
+	
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -47,10 +52,6 @@ public:
 	virtual void GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const override;
 	//~ End AUniformGridVolume Interface
 
-#if WITH_EDITOR
-	UFUNCTION(CallInEditor, Category = "Voxel Chunk Data")
-	void BakeStaticDataToChunks();
-#endif
 
 	void UpdateStreamingState();
 	void RequestChunkLoad(const FIntVector& ChunkCoords);

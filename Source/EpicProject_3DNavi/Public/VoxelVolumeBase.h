@@ -34,6 +34,12 @@ public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
+#if WITH_EDITOR
+	UFUNCTION(CallInEditor, Category="★ Bake Actions", meta=(DisplayName="Bake Static Data"))
+	virtual void BakeStaticDataToChunks();
+
+#endif
+	
 	// --- 모든 자식이 반드시 구현해야 하는 공통 인터페이스 ---
 
 	virtual EVolumeDataStructure GetStructureType() const PURE_VIRTUAL(AVoxelVolumeBase::GetStructureType, return EVolumeDataStructure::NONE;);
@@ -56,11 +62,11 @@ public:
 
 	virtual void UnregisterStreamingAgent(AActor* Agent) ;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VoxelVolume")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug", meta = (DisplayPriority = "10"))
 	bool bDrawDebugObstacles;
 
 #if WITH_EDITORONLY_DATA
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VoxelVolume")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Debug", meta = (DisplayPriority = "10"))
 	TObjectPtr<UInstancedStaticMeshComponent> DebugObstaclesComponent;
 #endif
 	

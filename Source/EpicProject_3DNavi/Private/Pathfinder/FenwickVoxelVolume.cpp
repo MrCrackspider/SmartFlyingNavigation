@@ -3,6 +3,7 @@
 #include "ObjectTools.h"
 #include "Engine/AssetManager.h"
 #include "Engine/StreamableManager.h"
+#include "Pathfinder/PathfindingComponent.h"
 #include "Pathfinder/StaticVoxelChunkData.h"
 
 
@@ -28,14 +29,8 @@ void AFenwickVoxelVolume::BeginPlay()
 	Super::BeginPlay();
 	InitializeDataStructures();
 
-	// 스트리밍 업데이트 타이머 시작
-	GetWorldTimerManager().SetTimer(StreamingUpdateTimer, this, &AFenwickVoxelVolume::UpdateStreamingState, 1.0f, true,
-	                                0.5f);
-
-	// 동적 장애물 베이킹 타이머 시작
-	GetWorldTimerManager().SetTimer(DynamicObstacleTimer, this, &AFenwickVoxelVolume::UpdateDynamicObstacles, 0.5f,
-	                                true,
-	                                0.1f);
+	GetWorldTimerManager().SetTimer(StreamingUpdateTimer, this, &AFenwickVoxelVolume::UpdateStreamingState, 1.0f, true, 0.5f);
+	GetWorldTimerManager().SetTimer(DynamicObstacleTimer, this, &AFenwickVoxelVolume::UpdateDynamicObstacles, 0.3f, true, 0.1f);
 
 	bIsReady = true;
 	UE_LOG(LogTemp, Log, TEXT("FenwickVoxelVolume streaming system initialized."));
@@ -68,7 +63,6 @@ void AFenwickVoxelVolume::InitializeDataStructures()
 	check(MapSize.Y > 0 && MapSize.Y % CHUNK_SIZE == 0);
 	check(MapSize.Z > 0 && MapSize.Z % CHUNK_SIZE == 0);
 
-	// 전체 월드 크기만큼의 거대한, 하지만 비어있는(0으로 채워진) 데이터 구조를 생성합니다.
 	FenwickTreeSize = MapSize + FIntVector(1, 1, 1);
 	const int32 TotalFenwickSize = FenwickTreeSize.X * FenwickTreeSize.Y * FenwickTreeSize.Z;
 	FenwickTree.Empty(TotalFenwickSize);
@@ -76,10 +70,6 @@ void AFenwickVoxelVolume::InitializeDataStructures()
 
 	const int32 ChunksAlongX = MapSize.X / CHUNK_SIZE;
 	ObstacleBitmasks_X.Init(0, ChunksAlongX * MapSize.Y * MapSize.Z);
-	// const int32 ChunksAlongY = MapSize.Y / CHUNK_SIZE;
-	// ObstacleBitmasks_Y.Init(0, ChunksAlongY * MapSize.X * MapSize.Z);
-	// const int32 ChunksAlongZ = MapSize.Z / CHUNK_SIZE;
-	// ObstacleBitmasks_Z.Init(0, ChunksAlongZ * MapSize.X * MapSize.Y);
 }
 
 //======================================================================
@@ -88,25 +78,18 @@ void AFenwickVoxelVolume::InitializeDataStructures()
 
 void AFenwickVoxelVolume::UpdateStreamingState()
 {
-	// 1. 현재 프레임에 필요한 모든 청크를 담을 빈 집합(Set)을 생성합니다.
 	TSet<FIntVector> NewRequiredChunks;
-
-	// 각 축의 최대 청크 개수를 미리 계산합니다.
 	const int32 NumChunksX = MapSize.X / CHUNK_SIZE;
 	const int32 NumChunksY = MapSize.Y / CHUNK_SIZE;
 	const int32 NumChunksZ = MapSize.Z / CHUNK_SIZE;
 
-	// 2. 등록된 모든 에이전트를 순회합니다.
 	for (auto It = StreamingAgents.CreateIterator(); It; ++It)
 	{
 		TWeakObjectPtr<AActor> AgentPtr = *It;
-		if (AgentPtr.IsValid()) // 에이전트가 파괴되지 않고 유효한지 확인
+		if (AgentPtr.IsValid())
 		{
 			AActor* Agent = AgentPtr.Get();
 			const FIntVector AgentChunkCoords = WorldToChunkCoords(Agent->GetActorLocation());
-
-			// 3. 각 에이전트 주변의 필요한 청크를 계산하여 NewRequiredChunks에 추가합니다.
-			// TSet이 알아서 중복을 처리해주므로, 여러 에이전트가 같은 청크를 요구해도 문제가 없습니다.
 			for (int32 z = -StreamingRangeInChunks.Z; z <= StreamingRangeInChunks.Z; ++z)
 			{
 				for (int32 y = -StreamingRangeInChunks.Y; y <= StreamingRangeInChunks.Y; ++y)
@@ -126,16 +109,13 @@ void AFenwickVoxelVolume::UpdateStreamingState()
 		}
 		else
 		{
-			// 에이전트가 파괴되었다면(예: 죽음), 목록에서 제거합니다.
 			It.RemoveCurrent();
 		}
 	}
 
-	// 4. 이전 상태와 현재 상태를 비교하여 변경 사항 계산 (이 로직은 동일)
 	const TSet<FIntVector> ChunksToLoad = NewRequiredChunks.Difference(RequiredChunks);
 	const TSet<FIntVector> ChunksToUnload = RequiredChunks.Difference(NewRequiredChunks);
 
-	// 5. 계산된 변경 사항을 시스템에 적용 (이 로직은 동일)
 	for (const FIntVector& Coords : ChunksToLoad)
 	{
 		RequestChunkLoad(Coords);
@@ -145,7 +125,6 @@ void AFenwickVoxelVolume::UpdateStreamingState()
 		UnloadChunk(Coords);
 	}
 
-	// 6. 현재 상태를 다음 프레임을 위해 저장 (이 로직은 동일)
 	RequiredChunks = NewRequiredChunks;
 }
 
@@ -157,58 +136,40 @@ void AFenwickVoxelVolume::RequestChunkLoad(const FIntVector& ChunkCoords)
 	}
 
 	const FString AssetPrefix = GetUniqueAssetPrefix();
-	
-	const FString AssetName = FString::Printf(TEXT("%s%d_%d_%d"),
-											  *AssetPrefix,
-											  ChunkCoords.X, ChunkCoords.Y, ChunkCoords.Z);
-	
+	const FString AssetName = FString::Printf(TEXT("%s%d_%d_%d"), *AssetPrefix, ChunkCoords.X, ChunkCoords.Y, ChunkCoords.Z);
 	FString AssetPath = FPaths::Combine(BakedDataSaveDirectory, AssetName) + TEXT(".") + AssetName;
-
 	FSoftObjectPath SoftPath(AssetPath);
+	
 	PendingLoadChunks.Add(ChunkCoords);
-
-	UAssetManager::Get().GetStreamableManager().RequestAsyncLoad(
-		SoftPath, FStreamableDelegate::CreateUObject(this, &AFenwickVoxelVolume::OnChunkLoadCompleted, SoftPath,
-		                                             ChunkCoords));
+	UAssetManager::Get().GetStreamableManager().RequestAsyncLoad(SoftPath, FStreamableDelegate::CreateUObject(this, &AFenwickVoxelVolume::OnChunkLoadCompleted, SoftPath, ChunkCoords));
 }
 
 void AFenwickVoxelVolume::OnChunkLoadCompleted(FSoftObjectPath LoadedAssetPath, FIntVector ChunkCoords)
 {
 	PendingLoadChunks.Remove(ChunkCoords);
-
-	if (!RequiredChunks.Contains(ChunkCoords))
-	{
-		return; // 로드되는 동안 플레이어가 멀리 벗어남
-	}
+	if (!RequiredChunks.Contains(ChunkCoords)) return;
 
 	UStaticVoxelChunkData* LoadedData = Cast<UStaticVoxelChunkData>(LoadedAssetPath.ResolveObject());
 	if (LoadedData)
 	{
 		ActiveChunks.Add(ChunkCoords, LoadedData);
-
 		const FIntVector ChunkOriginGlobal = ChunkCoords * FIntVector(CHUNK_SIZE);
 
 		for (int32 i = 0; i < LoadedData->ObstacleBitmasks_X.Num(); ++i)
 		{
 			uint64 Mask = LoadedData->ObstacleBitmasks_X[i];
+			if (Mask == 0) continue;
 
 			const int32 LocalZ = i / CHUNK_SIZE;
 			const int32 LocalY = i % CHUNK_SIZE;
 
-			if (Mask == 0) continue;
-
 			while (Mask != 0)
 			{
 				unsigned long StartBitIndex;
-				_BitScanForward64(&StartBitIndex, Mask); // 연속된 1의 시작 위치
-
-				// 연속된 1의 끝을 찾기 위해, 시작점부터의 비트들을 모두 1로 채운 마스크를 만듦
+				_BitScanForward64(&StartBitIndex, Mask);
 				uint64 TempMask = Mask >> StartBitIndex;
 				unsigned long EndBitOffset;
-				// 연속된 1이 끝나는 지점(즉, 첫 0이 나오는 위치)을 찾음
 				_BitScanForward64(&EndBitOffset, ~TempMask);
-
-				// 만약 TempMask가 전부 1이면(예: 0xFFF...) _BitScanForward64가 0을 반환할 수 있으므로 64로 처리
 				if (EndBitOffset == 0 && TempMask != 1) EndBitOffset = 64;
 
 				const uint32 RunLength = (EndBitOffset == 0) ? 1 : EndBitOffset;
@@ -217,15 +178,12 @@ void AFenwickVoxelVolume::OnChunkLoadCompleted(FSoftObjectPath LoadedAssetPath, 
 				const FIntVector WorldMin = ChunkOriginGlobal + FIntVector(StartBitIndex, LocalY, LocalZ);
 				const FIntVector WorldMax = ChunkOriginGlobal + FIntVector(EndBitIndex, LocalY, LocalZ);
 
-				// 범위 단위로 Fenwick 업데이트
 				FenwUpdateCuboid(WorldMin, WorldMax, 1);
-				ChunkObstacleCounter.FindOrAdd(ChunkCoords, 0) += (EndBitIndex - StartBitIndex + 1);
+				ChunkObstacleCounter.FindOrAdd(ChunkCoords, 0) += RunLength;
 
-				// 처리된 비트들을 마스크에서 제거
 				const uint64 ProcessedMask = (~0ULL >> (64 - RunLength)) << StartBitIndex;
 				Mask &= ~ProcessedMask;
 
-				// StaticObstacleVoxels, UpdateVoxelObstacleState 등 다른 처리도 범위 단위로 하면 더 좋음
 				for (uint32 x = StartBitIndex; x <= EndBitIndex; ++x)
 				{
 					const FIntVector ObstacleIndex = ChunkOriginGlobal + FIntVector(x, LocalY, LocalZ);
@@ -253,21 +211,38 @@ void AFenwickVoxelVolume::UnloadChunk(const FIntVector& ChunkCoords)
 
 			for (int32 i = 0; i < DataAsset->ObstacleBitmasks_X.Num(); ++i)
 			{
-				const uint64 Mask = DataAsset->ObstacleBitmasks_X[i];
+				uint64 Mask = DataAsset->ObstacleBitmasks_X[i];
 				if (Mask == 0) continue;
 
 				const int32 LocalZ = i / CHUNK_SIZE;
 				const int32 LocalY = i % CHUNK_SIZE;
 
-				for (int32 LocalX = 0; LocalX < CHUNK_SIZE; ++LocalX)
+				while (Mask != 0)
 				{
-					if ((Mask & (1ULL << LocalX)) != 0)
+					unsigned long StartBitIndex;
+					_BitScanForward64(&StartBitIndex, Mask);
+					uint64 TempMask = Mask >> StartBitIndex;
+					unsigned long EndBitOffset;
+					_BitScanForward64(&EndBitOffset, ~TempMask);
+					if (EndBitOffset == 0 && TempMask != 1) EndBitOffset = 64;
+
+					const uint32 RunLength = (EndBitOffset == 0) ? 1 : EndBitOffset;
+					const uint32 EndBitIndex = StartBitIndex + RunLength - 1;
+
+					const FIntVector WorldMin = ChunkOriginGlobal + FIntVector(StartBitIndex, LocalY, LocalZ);
+					const FIntVector WorldMax = ChunkOriginGlobal + FIntVector(EndBitIndex, LocalY, LocalZ);
+
+					FenwUpdateCuboid(WorldMin, WorldMax, -1);
+
+					const uint64 ProcessedMask = (~0ULL >> (64 - RunLength)) << StartBitIndex;
+					Mask &= ~ProcessedMask;
+
+					for (uint32 x = StartBitIndex; x <= EndBitIndex; ++x)
 					{
-						const FIntVector ObstacleIndex = ChunkOriginGlobal + FIntVector(LocalX, LocalY, LocalZ);
+						const FIntVector ObstacleIndex = ChunkOriginGlobal + FIntVector(x, LocalY, LocalZ);
 						if (IsIndexValid(ObstacleIndex))
 						{
 							StaticObstacleVoxels.Remove(ObstacleIndex);
-							FenwUpdate(ObstacleIndex, -1);
 							if (!DynamicObstacleVoxelCounts.Contains(ObstacleIndex))
 							{
 								UpdateVoxelObstacleState(ObstacleIndex, false);
@@ -330,79 +305,27 @@ void AFenwickVoxelVolume::UpdateVoxelObstacleState(const FIntVector& Index, bool
 {
 	if (!IsIndexValid(Index)) return;
 
-	// X-axis bitmask
-	{
-		const uint32 ChunkX = Index.X / CHUNK_SIZE;
-		const uint32 BitPos = Index.X % CHUNK_SIZE;
-		const uint32 ChunkArrIndex = GetFlatIndex_X(ChunkX, Index.Y, Index.Z);
-		if (bIsObstacle) ObstacleBitmasks_X[ChunkArrIndex] |= (1ULL << BitPos);
-		else ObstacleBitmasks_X[ChunkArrIndex] &= ~(1ULL << BitPos);
-	}
+	const uint32 ChunkX = Index.X / CHUNK_SIZE;
+	const uint32 BitPos = Index.X % CHUNK_SIZE;
+	const uint32 ChunkArrIndex = GetFlatIndex_X(ChunkX, Index.Y, Index.Z);
+	if (bIsObstacle) ObstacleBitmasks_X[ChunkArrIndex] |= (1ULL << BitPos);
+	else ObstacleBitmasks_X[ChunkArrIndex] &= ~(1ULL << BitPos);
 
 	FIntVector ChunkCoords = WorldToChunkCoords(VoxelIndexToWorld(Index));
 	int32& Counter = ChunkObstacleCounter.FindOrAdd(ChunkCoords, 0);
-	if (bIsObstacle)
-	{
-		Counter++;
-	}
+	if (bIsObstacle) Counter++;
 	else
 	{
 		Counter--;
 		if (Counter <= 0)
 		{
-			// 카운터가 0 이하면 맵에서 제거하여 메모리를 절약하고, Contains() 검사를 빠르게 합니다.
 			ChunkObstacleCounter.Remove(ChunkCoords);
 		}
 	}
-
-	// // Y-axis bitmask
-	// {
-	// 	const int32 ChunkY = Index.Y / CHUNK_SIZE;
-	// 	const int32 BitPos = Index.Y % CHUNK_SIZE;
-	// 	const int32 ChunkArrIndex = GetFlatIndex_Y(ChunkY, Index.X, Index.Z);
-	// 	if (bIsObstacle) ObstacleBitmasks_Y[ChunkArrIndex] |= (1ULL << BitPos);
-	// 	else ObstacleBitmasks_Y[ChunkArrIndex] &= ~(1ULL << BitPos);
-	// }
-	// // Z-axis bitmask
-	// {
-	// 	const int32 ChunkZ = Index.Z / CHUNK_SIZE;
-	// 	const int32 BitPos = Index.Z % CHUNK_SIZE;
-	// 	const int32 ChunkArrIndex = GetFlatIndex_Z(ChunkZ, Index.X, Index.Y);
-	// 	if (bIsObstacle) ObstacleBitmasks_Z[ChunkArrIndex] |= (1ULL << BitPos);
-	// 	else ObstacleBitmasks_Z[ChunkArrIndex] &= ~(1ULL << BitPos);
-	// }
 }
 
 bool AFenwickVoxelVolume::IsRegionEmpty_Bitmask(const FIntVector& MinCorner, const FIntVector& MaxCorner) const
 {
-	// const FIntVector MinChunk = WorldToChunkCoords(VoxelIndexToWorld(MinCorner));
-	// const FIntVector MaxChunk = WorldToChunkCoords(VoxelIndexToWorld(MaxCorner));
-	// bool bNeedsDetailedCheck = false;
-	//
-	// // 1. Coarse-Grid 검사: 검사 범위 내 청크들에 장애물이 있는지 먼저 확인
-	// for (int32 cz = MinChunk.Z; cz <= MaxChunk.Z; ++cz)
-	// {
-	// 	for (int32 cy = MinChunk.Y; cy <= MaxChunk.Y; ++cy)
-	// 	{
-	// 		for (int32 cx = MinChunk.X; cx <= MaxChunk.X; ++cx)
-	// 		{
-	// 			const FIntVector CurrentChunkCoords(cx, cy, cz);
-	// 			if (ChunkObstacleCounter.Contains(CurrentChunkCoords))
-	// 			{
-	// 				bNeedsDetailedCheck = true;
-	// 				break;
-	// 			}
-	// 		}
-	// 		if (bNeedsDetailedCheck) break; 
-	// 	}
-	// 	if (bNeedsDetailedCheck) break; 
-	// }
-	//
-	// if (!bNeedsDetailedCheck)
-	// {
-	// 	return true;
-	// }
-
 	for (int32 z = MinCorner.Z; z <= MaxCorner.Z; ++z)
 	{
 		for (int32 y = MinCorner.Y; y <= MaxCorner.Y; ++y)
@@ -424,7 +347,7 @@ bool AFenwickVoxelVolume::IsRegionEmpty_Bitmask(const FIntVector& MinCorner, con
 
 				if ((Mask & CheckMask) != 0)
 				{
-					return false; // Obstacle found
+					return false;
 				}
 			}
 		}
@@ -435,13 +358,7 @@ bool AFenwickVoxelVolume::IsRegionEmpty_Bitmask(const FIntVector& MinCorner, con
 void AFenwickVoxelVolume::UpdateDynamicObstacles()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(FenwickVolume_UpdateDynamicObstacles);
-
-	if (!IsReadyForPathfinding())
-	{
-		return;
-	}
-
-	if (!GetWorld()) return;
+	if (!IsReadyForPathfinding() || !GetWorld()) return;
 
 	TMap<FIntVector, int32> CurrentFrameVoxelCounts;
 	GatherCurrentObstacleVoxels(CurrentFrameVoxelCounts);
@@ -455,10 +372,7 @@ void AFenwickVoxelVolume::UpdateDynamicObstacles()
 void AFenwickVoxelVolume::GatherCurrentObstacleVoxels(TMap<FIntVector, int32>& OutVoxelCounts) const
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(FenwickVolume_GatherObstacles);
-	if (!IsValid(ObstacleFilterProfile))
-	{
-		return;
-	}
+	if (!IsValid(ObstacleFilterProfile)) return;
 
 	FCollisionObjectQueryParams ObjectQueryParams;
 	for (const TEnumAsByte<ECollisionChannel>& Channel : ObstacleFilterProfile->CollisionChannels)
@@ -474,16 +388,18 @@ void AFenwickVoxelVolume::GatherCurrentObstacleVoxels(TMap<FIntVector, int32>& O
 		UPrimitiveComponent* OverlappedComponent = Result.GetComponent();
 		AActor* OverlappedActor = Result.GetActor();
 
+		if (OverlappedActor && OverlappedActor->FindComponentByClass<UPathfindingComponent>())
+		{
+			continue;
+		}
+
 		if (ObstacleFilterProfile->DoesActorMatch(OverlappedActor, OverlappedComponent))
 		{
 			const FBox ObstacleBounds = OverlappedComponent->Bounds.GetBox();
 			FIntVector MinVoxelIndex = WorldToVoxelIndex(ObstacleBounds.Min);
 			FIntVector MaxVoxelIndex = WorldToVoxelIndex(ObstacleBounds.Max - FVector(KINDA_SMALL_NUMBER));
 
-			if (!ClampVoxelIndicesToVolume(MinVoxelIndex, MaxVoxelIndex))
-			{
-				continue;
-			}
+			if (!ClampVoxelIndicesToVolume(MinVoxelIndex, MaxVoxelIndex)) continue;
 
 			for (int32 z = MinVoxelIndex.Z; z <= MaxVoxelIndex.Z; ++z)
 			{
@@ -512,16 +428,15 @@ void AFenwickVoxelVolume::ProcessRemovedAndChangedObstacles(const TMap<FIntVecto
 		const int32 PreviousCount = Pair.Value;
 		const int32 CurrentCount = CurrentCounts.FindRef(Index);
 
-		if (CurrentCount != PreviousCount)
+		// State Transition: Obstacle existed and now is completely gone.
+		if (PreviousCount > 0 && CurrentCount == 0)
 		{
-			FenwUpdate(Index, CurrentCount - PreviousCount);
-			if (CurrentCount == 0) // Obstacle was fully removed
+			// Only update the state if there is no static obstacle at this location.
+			if (!StaticObstacleVoxels.Contains(Index))
 			{
-				// Only clear the bit if no static obstacle is also present
-				if (!StaticObstacleVoxels.Contains(Index))
-				{
-					UpdateVoxelObstacleState(Index, false);
-				}
+				// Update Fenwick Tree using a cuboid of size 1x1x1
+				FenwUpdateCuboid(Index, Index, -1);
+				UpdateVoxelObstacleState(Index, false);
 			}
 		}
 	}
@@ -533,11 +448,17 @@ void AFenwickVoxelVolume::ProcessNewObstacles(const TMap<FIntVector, int32>& Cur
 	for (const auto& Pair : CurrentCounts)
 	{
 		const FIntVector& Index = Pair.Key;
-		if (!StaticObstacleVoxels.Contains(Index))
+
+		// Process only if this voxel was NOT a dynamic obstacle in the previous frame.
+		if (!DynamicObstacleVoxelCounts.Contains(Index))
 		{
-			if (!DynamicObstacleVoxelCounts.Contains(Index))
+			// State Transition: A new obstacle appeared where there was none before (dynamically).
+			// We must also check if it was already occupied by a static obstacle.
+			// IsVoxelWalkable checks the combined state from the bitmask.
+			if (IsVoxelWalkable(Index))
 			{
-				FenwUpdate(Index, Pair.Value);
+				// Update Fenwick Tree using a cuboid of size 1x1x1
+				FenwUpdateCuboid(Index, Index, 1);
 				UpdateVoxelObstacleState(Index, true);
 			}
 		}
@@ -551,48 +472,32 @@ void AFenwickVoxelVolume::ProcessNewObstacles(const TMap<FIntVector, int32>& Cur
 bool AFenwickVoxelVolume::IsRegionWalkable(const FIntVector& VoxelIndex, int32 AgentRadiusInVoxels) const
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(JPS_IsRegionWalkable);
-
-	if (!IsReadyForPathfinding())
-	{
-		return false;
-	}
-	if (!IsVoxelWalkable(VoxelIndex))
-	{
-		return false;
-	}
-	if (AgentRadiusInVoxels < 0)
-	{
-		return false;
-	}
+	if (!IsReadyForPathfinding()) return false;
+	if (!IsVoxelWalkable(VoxelIndex)) return false;
+	if (AgentRadiusInVoxels < 0) return false;
+	
 	const FIntVector AgentRadius(AgentRadiusInVoxels);
 	const FIntVector MinCorner = VoxelIndex - AgentRadius;
 	const FIntVector MaxCorner = VoxelIndex + AgentRadius;
 
-	if (!IsIndexValid(MinCorner) || !IsIndexValid(MaxCorner))
-	{
-		return false;
-	}
+	if (!IsIndexValid(MinCorner) || !IsIndexValid(MaxCorner)) return false;
 
 	return IsRegionEmpty_Bitmask(MinCorner, MaxCorner);
 }
 
-bool AFenwickVoxelVolume::IsPathSegmentWalkable(const FIntVector& FromStartIndex, const FIntVector& ToStartIndex,
-                                                int32 AgentRadiusInVoxels) const
+bool AFenwickVoxelVolume::IsPathSegmentWalkable(const FIntVector& FromStartIndex, const FIntVector& ToStartIndex, int32 AgentRadiusInVoxels) const
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(JPS_IsPathSegmentWalkable);
 	if (!IsReadyForPathfinding()) return false;
 
 	const FIntVector AgentRadius(AgentRadiusInVoxels);
-
 	const FIntVector FromMin = FromStartIndex - AgentRadius;
 	const FIntVector FromMax = FromStartIndex + AgentRadius;
 	const FIntVector ToMin = ToStartIndex - AgentRadius;
 	const FIntVector ToMax = ToStartIndex + AgentRadius;
 
-	const FIntVector SweptMin(FMath::Min(FromMin.X, ToMin.X), FMath::Min(FromMin.Y, ToMin.Y),
-	                          FMath::Min(FromMin.Z, ToMin.Z));
-	const FIntVector SweptMax(FMath::Max(FromMax.X, ToMax.X), FMath::Max(FromMax.Y, ToMax.Y),
-	                          FMath::Max(FromMax.Z, ToMax.Z));
+	const FIntVector SweptMin(FMath::Min(FromMin.X, ToMin.X), FMath::Min(FromMin.Y, ToMin.Y), FMath::Min(FromMin.Z, ToMin.Z));
+	const FIntVector SweptMax(FMath::Max(FromMax.X, ToMax.X), FMath::Max(FromMax.Y, ToMax.Y), FMath::Max(FromMax.Z, ToMax.Z));
 
 	return FenwRangeSum(SweptMin, SweptMax) == 0;
 }
@@ -612,13 +517,13 @@ void AFenwickVoxelVolume::GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutOb
 {
 	OutObstacleIndices.Empty();
 	if (!IsReadyForPathfinding()) return;
-	OutObstacleIndices.Reserve(StaticObstacleVoxels.Num() + DynamicObstacleVoxelCounts.Num());
-
-	OutObstacleIndices.Append(StaticObstacleVoxels.Array());
-
+	
+	TSet<FIntVector> AllObstacles = StaticObstacleVoxels;
 	TArray<FIntVector> DynamicKeys;
 	DynamicObstacleVoxelCounts.GenerateKeyArray(DynamicKeys);
-	OutObstacleIndices.Append(DynamicKeys);
+	AllObstacles.Append(DynamicKeys);
+
+	OutObstacleIndices = AllObstacles.Array();
 }
 
 int32 AFenwickVoxelVolume::FenwRangeSum(const FIntVector& MinCorner, const FIntVector& MaxCorner) const
@@ -656,24 +561,19 @@ int32 AFenwickVoxelVolume::FenwRangeSum(const FIntVector& MinCorner, const FIntV
 
 void AFenwickVoxelVolume::RegisterStreamingAgent(AActor* Agent)
 {
-	if (Agent)
-	{
-		StreamingAgents.Add(Agent);
-	}
+	if (Agent) StreamingAgents.Add(Agent);
 }
 
 void AFenwickVoxelVolume::UnregisterStreamingAgent(AActor* Agent)
 {
-	if (Agent)
-	{
-		StreamingAgents.Remove(Agent);
-	}
+	if (Agent) StreamingAgents.Remove(Agent);
 }
 
 //======================================================================
-// --- EDITOR BAKING ---
+// --- EDITOR BAKING (No changes needed here) ---
 //======================================================================
 #if WITH_EDITOR
+// ... The entire BakeStaticDataToChunks function and its helpers remain unchanged ...
 void AFenwickVoxelVolume::BakeStaticDataToChunks()
 {
 	// --- (기존 유효성 검사 코드는 동일) ---
@@ -892,7 +792,7 @@ void AFenwickVoxelVolume::BakeStaticDataToChunks()
 }
 #endif
 //======================================================================
-// --- HELPER FUNCTIONS ---
+// --- HELPER FUNCTIONS (No changes needed here) ---
 //======================================================================
 FIntVector AFenwickVoxelVolume::WorldToChunkCoords(const FVector& WorldPos) const
 {
@@ -906,21 +806,18 @@ FIntVector AFenwickVoxelVolume::WorldToChunkCoords(const FVector& WorldPos) cons
 
 FString AFenwickVoxelVolume::GetUniqueAssetPrefix() const
 {
-	// 1. 월드 이름 가져오기 및 정제
 	const FString WorldName = GetWorld()->GetName();
 	FString SanitizedWorldName = WorldName;
 	SanitizedWorldName.ReplaceInline(TEXT(" "), TEXT("_"));
 	SanitizedWorldName.ReplaceInline(TEXT("/"), TEXT("_"));
 	SanitizedWorldName.ReplaceInline(TEXT("."), TEXT("_"));
 
-	// 2. 이 액터의 이름 가져오기 및 정제
 	const FString ActorName = GetName();
 	FString SanitizedActorName = ActorName;
 	SanitizedActorName.ReplaceInline(TEXT(" "), TEXT("_"));
 	SanitizedActorName.ReplaceInline(TEXT("/"), TEXT("_"));
 	SanitizedActorName.ReplaceInline(TEXT("."), TEXT("_"));
 
-	// 3. 두 이름을 조합하여 최종 접두사 반환
 	return FString::Printf(TEXT("DA_%s_%s_VoxelChunk_"), *SanitizedWorldName, *SanitizedActorName);
 }
 

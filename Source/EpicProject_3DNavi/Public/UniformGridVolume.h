@@ -27,15 +27,15 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VoxelVolume|UniformGrid")
 	float VoxelExtent;
-	const int CHUNK_SIZE = 64;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visualization")
-	TObjectPtr<UStaticMeshComponent> VolumeBoundsVisualizer;
-	
-	
 	// --- 균일 격자 공통 프로퍼티가 여기에 위치! ---
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VoxelVolume|UniformGrid")
 	FIntVector MapSize;
+
+	const int CHUNK_SIZE = 64;
+
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Debug", meta = (DisplayPriority = "10"))
+	TObjectPtr<UStaticMeshComponent> VolumeBoundsVisualizer;
 	
 	// --- 공통 기능 구현 ---
 	virtual EVolumeDataStructure GetStructureType() const override { return EVolumeDataStructure::UniformGrid; }

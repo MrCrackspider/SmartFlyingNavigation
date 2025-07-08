@@ -8,7 +8,7 @@ public class EpicProject_3DNavi : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore","AssetRegistry" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore","AssetRegistry","PropertyEditor" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
 

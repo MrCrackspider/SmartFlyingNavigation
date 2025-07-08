@@ -30,6 +30,11 @@ void AVoxelVolumeBase::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 }
+
+void AVoxelVolumeBase::BakeStaticDataToChunks()
+{
+}
+
 void AVoxelVolumeBase::GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const
 {
 }
