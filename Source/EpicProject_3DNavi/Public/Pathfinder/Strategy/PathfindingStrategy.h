@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Pathfinder/FPathfindingRequest.h"
 #include "UObject/NoExportTypes.h"
 #include "PathfindingStrategy.generated.h"
 
@@ -31,13 +32,7 @@ class EPICPROJECT_3DNAVI_API UPathfindingStrategy : public UObject
 public:
 	virtual void Initialize(AVoxelVolumeBase* InVolume);
 
-	virtual bool FindPathWithStrategy(
-		const FIntVector& StartIndex,
-		const FIntVector& EndIndex,
-		TArray<FIntVector>& OutPath
-	);
-	virtual bool FindPathWithStrategy(const FIntVector& StartIndex, const FIntVector& EndIndex,
-	                                  int32 AgentRadiusInVoxels, TArray<FIntVector>& OutPath);
+	virtual bool FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FIntVector>& OutPath);
 	
 	virtual bool ShouldRepathForOptimization(const FVector& CurrentAgentLocation, const TArray<FVector>& CurrentPath,
 	                                         int32 CurrentPathIndex, const FVector& GoalLocation,

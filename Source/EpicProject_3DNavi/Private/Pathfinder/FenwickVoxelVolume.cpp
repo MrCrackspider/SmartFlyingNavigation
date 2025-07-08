@@ -198,6 +198,12 @@ bool AFenwickVoxelVolume::IsRegionWalkable(const FIntVector& VoxelIndex, int32 A
 		return false;
 	}
 
+	if (!IsRegionEmpty_Bitmask(MinCorner, MaxCorner) &&
+		FenwRangeSum(MinCorner, MaxCorner) == 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("hello nice to meet you"));
+	}
+		
 	// Broad-phase: Use fast bitmask check to see if the region is guaranteed to be empty.
 	if (IsRegionEmpty_Bitmask(MinCorner, MaxCorner))
 	{

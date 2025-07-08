@@ -41,8 +41,7 @@ void UJPSPlusStrategy::Initialize(AVoxelVolumeBase* InVolume)
 	}
 }
 
-bool UJPSPlusStrategy::FindPathWithStrategy(const FIntVector& StartIndex, const FIntVector& EndIndex,
-                                            int32 AgentRadiusInVoxel, TArray<FIntVector>& OutPath)
+bool UJPSPlusStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FIntVector>& OutPath)
 {
 	if (!Volume.IsValid())
 	{
@@ -51,7 +50,7 @@ bool UJPSPlusStrategy::FindPathWithStrategy(const FIntVector& StartIndex, const 
 		return false;
 	}
 
-	const EPathfindingResult Result = FindPathInternal(StartIndex, EndIndex, OutPath, AgentRadiusInVoxel);
+	const EPathfindingResult Result = FindPathInternal(InRequest,OutPath);
 
 	// 실패 원인에 대한 로그 기록 (디버깅 용이성)
 	if (Result != EPathfindingResult::Success && Result != EPathfindingResult::Success_Partial)
@@ -60,14 +59,17 @@ bool UJPSPlusStrategy::FindPathWithStrategy(const FIntVector& StartIndex, const 
 		switch (Result)
 		{
 		case EPathfindingResult::Failed_InvalidStart:
-			ErrorMessage = FString::Printf(TEXT("Invalid Start Node: %s"), *StartIndex.ToString());
+			// ★★★ 수정 ★★★
+			ErrorMessage = FString::Printf(TEXT("Invalid Start Node: %s"), *InRequest.StartIndex.ToString());
 			break;
 		case EPathfindingResult::Failed_InvalidGoal:
-			ErrorMessage = FString::Printf(TEXT("Invalid Goal Node: %s"), *EndIndex.ToString());
+			// ★★★ 수정 ★★★
+			ErrorMessage = FString::Printf(TEXT("Invalid Goal Node: %s"), *InRequest.EndIndex.ToString());
 			break;
 		case EPathfindingResult::Failed_Unreachable:
+			// ★★★ 수정 ★★★
 			ErrorMessage = FString::Printf(
-				TEXT("Goal %s is unreachable from Start %s."), *EndIndex.ToString(), *StartIndex.ToString());
+				TEXT("Goal %s is unreachable from Start %s."), *InRequest.EndIndex.ToString(), *InRequest.StartIndex.ToString());
 			break;
 		default:
 			ErrorMessage = TEXT("An unknown error occurred.");
@@ -115,15 +117,14 @@ FName UJPSPlusStrategy::GetStrategyName() const
 	return FName("JPS_3D_Robust_Complete");
 }
 
-EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartIndex, const FIntVector& EndIndex,
-                                                      TArray<FIntVector>& OutPath, uint32 AgentRadiusInVoxels)
+EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FPathfindingRequest& InRequest, TArray<FIntVector>& OutPath)
 {
 	SCOPE_LOG_TIME_FUNC()
 	if (!Volume.IsValid())
 	{
 		return EPathfindingResult::Failed_InvalidStart;
 	}
-	const bool bIsGoalValid = Volume->IsRegionWalkable(EndIndex, AgentRadiusInVoxels);
+	const bool bIsGoalValid = Volume->IsRegionWalkable(InRequest.EndIndex, InRequest.AgentRadiusInVoxels);
 
 	MoveFeasibilityCache.Empty();
 	NodePool->Reset();
@@ -132,12 +133,12 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 	ClosedSet.Empty();
 	// OutPath.Empty();
 
-	FPathNode* StartNode = NodePool->NewNode(StartIndex);
-	StartNode->HCost = CalculateHeuristic(StartIndex, EndIndex);
+	FPathNode* StartNode = NodePool->NewNode(InRequest.StartIndex);
+	StartNode->HCost = CalculateHeuristic(InRequest.StartIndex, InRequest.EndIndex);
 	StartNode->CalculateAndSetFCost();
 
 	OpenSet.HeapPush(StartNode, FPathNodePtrCompare());
-	OpenSetLookup.Add(StartIndex, StartNode);
+	OpenSetLookup.Add(InRequest.StartIndex, StartNode);
 
 	FPathNode* GoalNode = nullptr;
 	// --- 실시간 최적 노드 추적을 위한 변수 추가 ---
@@ -155,7 +156,7 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 		{
 			if (CurrentNode->Parent)
 			{
-				if (IsAgentMoveFeasible(CurrentNode->Parent->Position, CurrentNode->Position, AgentRadiusInVoxels))
+				if (IsAgentMoveFeasible(CurrentNode->Parent->Position, CurrentNode->Position, InRequest.AgentRadiusInVoxels))
 				{
 					// 이동이 가능할 때만 최적 후보로 인정하고 업데이트.
 					MinHeuristic = CurrentNode->HCost;
@@ -169,14 +170,14 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 				BestPartialNode = CurrentNode;
 			}
 		}
-		if (CurrentNode->Position == EndIndex)
+		if (CurrentNode->Position == InRequest.EndIndex)
 		{
 			GoalNode = CurrentNode;
 			break;
 		}
 		
 		TArray<FPathNode*> Successors;
-		IdentifySuccessors(CurrentNode, EndIndex, AgentRadiusInVoxels, Successors);
+		IdentifySuccessors(CurrentNode, InRequest.EndIndex, InRequest.AgentRadiusInVoxels, Successors);
 
 		for (const auto& Successor : Successors)
 		{
@@ -194,7 +195,7 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 			}
 			else
 			{
-				Successor->HCost = CalculateHeuristic(Successor->Position, EndIndex);
+				Successor->HCost = CalculateHeuristic(Successor->Position, InRequest.EndIndex);
 				Successor->SetParent(CurrentNode, NewGCost, Successor->HCost);
 				OpenSet.HeapPush(Successor, FPathNodePtrCompare());
 				OpenSetLookup.Add(Successor->Position, Successor);
@@ -207,7 +208,7 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 	
 	if (GoalNode)
 	{
-		OptimizePathFromJumpPoints(GoalNode, OutPath, AgentRadiusInVoxels);
+		OptimizePathFromJumpPoints(GoalNode, OutPath, InRequest.AgentRadiusInVoxels);
 		return EPathfindingResult::Success;
 	}
 	else // 길찾기에 실패한 경우 (목표가 무효하거나 도달 불가)
@@ -220,7 +221,7 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FIntVector& StartInd
 
 			// --- 스레드 안전성 강화 ---
 			if (!Volume.IsValid()) return EPathfindingResult::Failed_Unreachable;
-			OptimizePathFromJumpPoints(GoalNode, OutPath, AgentRadiusInVoxels);
+			OptimizePathFromJumpPoints(GoalNode, OutPath, InRequest.AgentRadiusInVoxels);
 			return EPathfindingResult::Success_Partial;
 		}
 	}

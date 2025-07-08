@@ -2,21 +2,13 @@
 
 #include "Pathfinder/Strategy/PathfindingStrategy.h"
 
+#include "Pathfinder/FPathfindingRequest.h"
+
 void UPathfindingStrategy::Initialize(AVoxelVolumeBase* InVolume)
 {
 }
 
-bool UPathfindingStrategy::FindPathWithStrategy(
-	const FIntVector& StartIndex,
-	const FIntVector& EndIndex,
-	TArray<FIntVector>& OutPath
-)
-{
-	return false;
-}
-
-bool UPathfindingStrategy::FindPathWithStrategy(const FIntVector& StartIndex, const FIntVector& EndIndex,
-                                                int32 AgentRadiusInVoxels, TArray<FIntVector>& OutPath)
+bool UPathfindingStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FIntVector>& OutPath)
 {
 	return false;
 }
