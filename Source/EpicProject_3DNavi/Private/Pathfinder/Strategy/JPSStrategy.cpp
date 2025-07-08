@@ -36,35 +36,12 @@ void UJPSStrategy::Initialize(AVoxelVolumeBase* InVolume)
     }
 }
 
-bool UJPSStrategy::FindPathWithStrategy(const FIntVector& StartIndex, const FIntVector& EndIndex, TArray<FIntVector>& OutPath)
+bool UJPSStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest,
+    TArray<FIntVector>& OutPath)
 {
-    const EPathfindingResult Result = FindPathInternal(StartIndex, EndIndex, OutPath);
-
-    // 실패 원인에 대한 로그 기록 (디버깅 용이성)
-    if (Result != EPathfindingResult::Success)
-    {
-        FString ErrorMessage;
-        switch (Result)
-        {
-        case EPathfindingResult::Failed_InvalidStart:
-            ErrorMessage = FString::Printf(TEXT("Invalid Start Node: %s"), *StartIndex.ToString());
-            break;
-        case EPathfindingResult::Failed_InvalidGoal:
-            ErrorMessage = FString::Printf(TEXT("Invalid Goal Node: %s"), *EndIndex.ToString());
-            break;
-        case EPathfindingResult::Failed_Unreachable:
-            ErrorMessage = FString::Printf(TEXT("Goal %s is unreachable from Start %s."), *EndIndex.ToString(), *StartIndex.ToString());
-            break;
-        default:
-            ErrorMessage = TEXT("An unknown error occurred.");
-            break;
-        }
-        UE_LOG(LogTemp, Warning, TEXT("JPS Pathfinding failed. Reason: %s"), *ErrorMessage);
-        return false;
-    }
-
-    return true;
+    return false;
 }
+
 
 FName UJPSStrategy::GetStrategyName() const
 {

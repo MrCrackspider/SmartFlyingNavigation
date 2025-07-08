@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Pathfinder/FPathfindingRequest.h"
 #include "PathfindingStrategy.h"
 #include "Pathfinder/Utility/MemoryPool.h"
 #include "JPSPlusStrategy.generated.h"
@@ -65,8 +66,7 @@ public:
 	// =============================================================================
 	virtual void Initialize(AVoxelVolumeBase* InVolume) override;
 
-	virtual bool FindPathWithStrategy(const FIntVector& StartIndex, const FIntVector& EndIndex,
-	                                  int32 AgentRadiusInVoxels, TArray<FIntVector>& OutPath) override;
+	virtual bool FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FIntVector>& OutPath) override;
 	
 	virtual bool ShouldRepathForOptimization(const FVector& CurrentAgentLocation, const TArray<FVector>& CurrentPath,
 	                                         int32 CurrentPathIndex, const FVector& GoalLocation,
@@ -78,8 +78,7 @@ protected:
 	// =============================================================================
 	// 메인 알고리즘 흐름 (Main Algorithm Flow)
 	// =============================================================================
-	EPathfindingResult FindPathInternal(const FIntVector& StartIndex, const FIntVector& EndIndex,
-	                                    TArray<FIntVector>& OutPath, uint32 AgentRadiusInVoxels);
+	EPathfindingResult FindPathInternal(const FPathfindingRequest& InRequest, TArray<FIntVector>& OutPath);
 
 	// =============================================================================
 	// JPS+ 핵심 로직 (JPS+ Core Logic)

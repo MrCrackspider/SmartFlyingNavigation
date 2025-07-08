@@ -21,7 +21,7 @@ class EPICPROJECT_3DNAVI_API UJPSStrategy final : public UPathfindingStrategy
 
 public:
     virtual void Initialize(AVoxelVolumeBase* InVolume) override;
-    virtual bool FindPathWithStrategy(const FIntVector& StartIndex, const FIntVector& EndIndex, TArray<FIntVector>& OutPath) override;
+    virtual bool FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FIntVector>& OutPath) override;
     virtual FName GetStrategyName() const override;
 
 protected:
