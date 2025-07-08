@@ -142,7 +142,10 @@ protected:
 
 public:
 	void AdjustProgressToSpline(FVector FinalVelocity);
-	
+	void ProgressNextPoint();
+	bool IsOnSplineLine();
+	void DetermineMovementModeForNextPath();
+
 private:
 #pragma region Configuration Properties
 
@@ -175,9 +178,6 @@ private:
 	
 	// --- 스플라인 안전성 검사 설정 ---
 	UPROPERTY(Category = "Pathfinding|Spline", EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "MovementMode == EPathMovementMode::Spline", AllowPrivateAccess = true))
-	bool bEnableSplineSafetyCheck = true;
-
-	UPROPERTY(Category = "Pathfinding|Spline", EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "bEnableSplineSafetyCheck && MovementMode == EPathMovementMode::Spline", AllowPrivateAccess = true))
 	float SafetyCheckStepSize = 50.f;
 
 	// --- 디버깅 ---
