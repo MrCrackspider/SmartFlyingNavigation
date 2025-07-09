@@ -7,7 +7,7 @@
 #include "GameFramework/Actor.h"
 #include "UniformGridVolume.generated.h"
 
-UCLASS(Abstract) // <--- 바로 이 키워드!
+UCLASS(Abstract)
 class EPICPROJECT_3DNAVI_API AUniformGridVolume : public AVoxelVolumeBase
 {
 	GENERATED_BODY()
@@ -20,6 +20,8 @@ protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 	virtual void OnConstruction(const FTransform& Transform) override;
+protected:
+	TSet<FIntVector> ExcludedBakeVoxels;
 
 public:	
 	// Called every frame
@@ -34,8 +36,6 @@ public:
 	const int CHUNK_SIZE = 64;
 
 	
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Debug", meta = (DisplayPriority = "10"))
-	TObjectPtr<UStaticMeshComponent> VolumeBoundsVisualizer;
 	
 	// --- 공통 기능 구현 ---
 	virtual EVolumeDataStructure GetStructureType() const override { return EVolumeDataStructure::UniformGrid; }
@@ -67,5 +67,9 @@ public:
 
 	// --- JPS를 위해 추가된 인터페이스 ---
 	virtual bool IsRegionWalkable(const FIntVector& CenterIndex, int32 AgentRadiusInVoxels) const PURE_VIRTUAL(AUniformGridVolume::IsRegionWalkable, return false;);
+
+protected:
+	TObjectPtr<UStaticMeshComponent> VolumeBoundsVisualizer;
+	
 };
 

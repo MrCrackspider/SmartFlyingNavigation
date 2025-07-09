@@ -497,6 +497,7 @@ TOptional<FIntVector> UJPSPlusStrategy::Jump(const FIntVector& StartPos, const F
 bool UJPSPlusStrategy::IsAgentMoveFeasible(const FIntVector& From, const FIntVector& To,
                                            int32 AgentRadiusInVoxels) const
 {
+	FScopeLock Lock(&CacheMutex);
 	if (Volume.IsValid() == false)
 	{
 		return false;
@@ -504,7 +505,6 @@ bool UJPSPlusStrategy::IsAgentMoveFeasible(const FIntVector& From, const FIntVec
 
 	const FMoveFeasibilityKey Key(From, To);
 	{
-		FScopeLock Lock(&CacheMutex);
 		if (const bool* bCachedResult = MoveFeasibilityCache.Find(Key))
 		{
 			return *bCachedResult;
@@ -513,7 +513,6 @@ bool UJPSPlusStrategy::IsAgentMoveFeasible(const FIntVector& From, const FIntVec
 
 	if (Volume.IsValid() && !Volume->IsRegionWalkable(To, AgentRadiusInVoxels))
 	{
-		FScopeLock Lock(&CacheMutex);
 		MoveFeasibilityCache.Add(Key, false);
 		return false;
 	}
@@ -534,10 +533,10 @@ bool UJPSPlusStrategy::IsAgentMoveFeasible(const FIntVector& From, const FIntVec
 			// 이 두 코너가 모두 막혀있으면 에이전트는 통과할 수 없습니다.
 			const FIntVector Corner1 = From + FIntVector(Delta.X, 0, 0);
 			const FIntVector Corner2 = From + FIntVector(0, Delta.Y, 0);
-			if (!Volume->IsRegionWalkable(Corner1, AgentRadiusInVoxels) &&
+
+			if (Volume.IsValid() && !Volume->IsRegionWalkable(Corner1, AgentRadiusInVoxels) &&
 				!Volume->IsRegionWalkable(Corner2, AgentRadiusInVoxels))
 			{
-				FScopeLock Lock(&CacheMutex);
 				MoveFeasibilityCache.Add(Key, false);
 				return false;
 			}
@@ -547,10 +546,9 @@ bool UJPSPlusStrategy::IsAgentMoveFeasible(const FIntVector& From, const FIntVec
 		{
 			const FIntVector Corner1 = From + FIntVector(Delta.X, 0, 0);
 			const FIntVector Corner2 = From + FIntVector(0, 0, Delta.Z);
-			if (!Volume->IsRegionWalkable(Corner1, AgentRadiusInVoxels) &&
+			if (Volume.IsValid() && !Volume->IsRegionWalkable(Corner1, AgentRadiusInVoxels) &&
 				!Volume->IsRegionWalkable(Corner2, AgentRadiusInVoxels))
 			{
-				FScopeLock Lock(&CacheMutex);
 				MoveFeasibilityCache.Add(Key, false);
 				return false;
 			}
@@ -560,10 +558,9 @@ bool UJPSPlusStrategy::IsAgentMoveFeasible(const FIntVector& From, const FIntVec
 		{
 			const FIntVector Corner1 = From + FIntVector(0, Delta.Y, 0);
 			const FIntVector Corner2 = From + FIntVector(0, 0, Delta.Z);
-			if (!Volume->IsRegionWalkable(Corner1, AgentRadiusInVoxels) &&
+			if (Volume.IsValid() && !Volume->IsRegionWalkable(Corner1, AgentRadiusInVoxels) &&
 				!Volume->IsRegionWalkable(Corner2, AgentRadiusInVoxels))
 			{
-				FScopeLock Lock(&CacheMutex);
 				MoveFeasibilityCache.Add(Key, false);
 				return false;
 			}
@@ -578,20 +575,18 @@ bool UJPSPlusStrategy::IsAgentMoveFeasible(const FIntVector& From, const FIntVec
 			const FIntVector CornerZ = From + FIntVector(0, 0, Delta.Z);
 
 			// XY 평면 코너 검사
-			if (Volume.IsValid())
-			{
-				if (!Volume->IsRegionWalkable(CornerX, AgentRadiusInVoxels) && !Volume->IsRegionWalkable(
-					CornerY, AgentRadiusInVoxels))
-					return false;
-				// XZ 평면 코너 검사
-				if (!Volume->IsRegionWalkable(CornerX, AgentRadiusInVoxels) && !Volume->IsRegionWalkable(
-					CornerZ, AgentRadiusInVoxels))
-					return false;
-				// YZ 평면 코너 검사
-				if (!Volume->IsRegionWalkable(CornerY, AgentRadiusInVoxels) && !Volume->IsRegionWalkable(
-					CornerZ, AgentRadiusInVoxels))
-					return false;
-			}
+
+			if (Volume.IsValid() && !Volume->IsRegionWalkable(CornerX, AgentRadiusInVoxels)
+				&& !Volume->IsRegionWalkable(CornerY, AgentRadiusInVoxels))
+				return false;
+			// XZ 평면 코너 검사
+			if (Volume.IsValid() && !Volume->IsRegionWalkable(CornerX, AgentRadiusInVoxels)
+				&& !Volume->IsRegionWalkable(CornerZ, AgentRadiusInVoxels))
+				return false;
+			// YZ 평면 코너 검사
+			if (Volume.IsValid() && !Volume->IsRegionWalkable(CornerY, AgentRadiusInVoxels)
+				&& !Volume->IsRegionWalkable(CornerZ, AgentRadiusInVoxels))
+				return false;
 		}
 	}
 	// =======================================================================
@@ -613,7 +608,6 @@ bool UJPSPlusStrategy::IsAgentMoveFeasible(const FIntVector& From, const FIntVec
 
 	// 계산 결과를 캐시에 저장합니다.
 	{
-		FScopeLock Lock(&CacheMutex);
 		MoveFeasibilityCache.Add(Key, bIsFeasible);
 	}
 	return bIsFeasible;

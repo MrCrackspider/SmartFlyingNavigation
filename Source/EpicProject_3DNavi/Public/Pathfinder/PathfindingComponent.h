@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FenwickVoxelVolume.h"
 #include "Components/ActorComponent.h"
 #include "PathfindingComponent.generated.h"
 
@@ -53,15 +54,13 @@ public:
 	 * @return 경로 탐색 요청이 성공적으로 시작되었으면 true를 반환합니다.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-	bool FindPathToLocation(const FVector& TargetLocation);
-
+	bool RequestPathToLocation(const FVector& TargetLocation);
 	
-	/**
-	 * 움직이는 목표의 위치를 업데이트합니다. 
-	 * 목표가 일정 거리 이상 움직였을 경우에만 재탐색을 요청합니다.
-	 */
 	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-	void UpdateTargetLocation(const FVector& NewTargetLocation);
+	bool RequestPathToTargetActor();
+	
+	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+	void SetTargetActor(AActor* NewTarget);
 	
 #pragma endregion
 
@@ -90,9 +89,11 @@ public:
 
 	/** 이 컴포넌트가 현재 목표로 하는 Voxel Volume을 반환합니다. */
 	AVoxelVolumeBase* GetTargetVolume() const { return TargetVolume; }
+	
+	AActor* GetTargetActor() const { return TargetActor; }
 
 	void UpdateSteering(float DeltaTime);
-	
+
 #pragma endregion
 
 protected:
@@ -221,6 +222,9 @@ public:
 
 #pragma region Dependencies & Handles
 
+	UPROPERTY(Category = "Pathfinding|TargetActor", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AActor> TargetActor;
+	
 	UPROPERTY(Category = "Pathfinding|Volume", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<AVoxelVolumeBase> TargetVolume;
 
@@ -235,6 +239,8 @@ public:
 
 	UPROPERTY()
 	TObjectPtr<APathActor> CurrentPathActor;
+
+	
 
 	TWeakObjectPtr<USplineComponent> PathSplinePtr;
 

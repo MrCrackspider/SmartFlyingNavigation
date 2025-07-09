@@ -34,6 +34,8 @@ public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
+	UPROPERTY(EditAnywhere, Category="Baking")
+	TArray<AActor*> BakeExcludeActors;
 #if WITH_EDITOR
 	UFUNCTION(CallInEditor, Category="★ Bake Actions", meta=(DisplayName="Bake Static Data"))
 	virtual void BakeStaticDataToChunks();
@@ -63,10 +65,9 @@ public:
 	virtual void UnregisterStreamingAgent(AActor* Agent) ;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug", meta = (DisplayPriority = "10"))
-	bool bDrawDebugObstacles;
+	bool bDrawDebugBox;
 
 #if WITH_EDITORONLY_DATA
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Debug", meta = (DisplayPriority = "10"))
 	TObjectPtr<UInstancedStaticMeshComponent> DebugObstaclesComponent;
 #endif
 	

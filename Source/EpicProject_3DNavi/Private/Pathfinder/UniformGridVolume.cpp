@@ -8,7 +8,7 @@
 // Sets default values
 AUniformGridVolume::AUniformGridVolume()
 {
- 	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
+	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
 	if (!GetRootComponent())
@@ -18,9 +18,15 @@ AUniformGridVolume::AUniformGridVolume()
 
 	// 볼륨 범위 시각화용 Static Mesh 컴포넌트 생성
 	VolumeBoundsVisualizer = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VolumeBoundsVisualizer"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> DebugMeshFinder(TEXT("StaticMesh'/Game/PathfinderPlugin/Debug/SM_DebugVoxel.SM_DebugVoxel'"));
+	if (DebugMeshFinder.Succeeded())
+	{
+		VolumeBoundsVisualizer->SetStaticMesh(DebugMeshFinder.Object);
+	}
+	
 	VolumeBoundsVisualizer->SetupAttachment(GetRootComponent());
 	VolumeBoundsVisualizer->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	
+
 	// Set as default
 	MapSize = FIntVector(64, 64, 64);
 	VoxelExtent = 100.f;
@@ -30,13 +36,12 @@ AUniformGridVolume::AUniformGridVolume()
 void AUniformGridVolume::BeginPlay()
 {
 	Super::BeginPlay();
-	
 }
 
 void AUniformGridVolume::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
-	
+
 	if (VolumeBoundsVisualizer)
 	{
 		const FVector TotalVolumeDimensions = FVector(MapSize) * VoxelExtent;
@@ -64,7 +69,6 @@ void AUniformGridVolume::OnConstruction(const FTransform& Transform)
 void AUniformGridVolume::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-
 }
 
 FVector AUniformGridVolume::GetLocationFromIndex(
@@ -123,7 +127,8 @@ bool AUniformGridVolume::ClampVoxelIndicesToVolume(FIntVector& MinVoxelIndex, FI
 		MaxVoxelIndex.Z >= MinVoxelIndex.Z);
 }
 
-bool AUniformGridVolume::GetOverlappingComponentsInVolume(const FCollisionObjectQueryParams& ObjectQueryParams,TArray<FOverlapResult>& OutResults) const
+bool AUniformGridVolume::GetOverlappingComponentsInVolume(const FCollisionObjectQueryParams& ObjectQueryParams,
+                                                          TArray<FOverlapResult>& OutResults) const
 {
 	OutResults.Empty();
 	UWorld* World = GetWorld();
@@ -140,17 +145,17 @@ bool AUniformGridVolume::GetOverlappingComponentsInVolume(const FCollisionObject
 	const FVector VolumeLocalCenter = VolumeHalfExtent;
 	const FVector QueryWorldOrigin = ActorTransform.TransformPosition(VolumeLocalCenter);
 	const FQuat QueryWorldRotation = ActorTransform.GetRotation();
-	
+
 	FCollisionShape VolumeQueryShape = FCollisionShape::MakeBox(VolumeHalfExtent);
 	FCollisionQueryParams CollisionQueryParams;
 	CollisionQueryParams.AddIgnoredActor(this);
 
 	return World->OverlapMultiByObjectType(OutResults,
-											   QueryWorldOrigin,
-											   QueryWorldRotation,
-											   ObjectQueryParams,
-											   VolumeQueryShape,
-											   CollisionQueryParams);
+	                                       QueryWorldOrigin,
+	                                       QueryWorldRotation,
+	                                       ObjectQueryParams,
+	                                       VolumeQueryShape,
+	                                       CollisionQueryParams);
 }
 
 bool AUniformGridVolume::CheckVoxelOverlap(const FIntVector& VoxelIndex, UPrimitiveComponent* ComponentToTest) const
@@ -179,17 +184,22 @@ bool AUniformGridVolume::CheckVoxelOverlap(const FIntVector& VoxelIndex, UPrimit
 }
 
 bool AUniformGridVolume::IsPathSegmentWalkable(const FIntVector& FromStartIndex, const FIntVector& ToStartIndex,
-	int32 AgentRadiusInVoxels) const
+                                               int32 AgentRadiusInVoxels) const
 {
 	return false;
 }
+
 void AUniformGridVolume::UpdateDebugObstacleVisualization()
 {
-	if (!bDrawDebugObstacles || !DebugObstaclesComponent || !DebugObstaclesComponent->GetStaticMesh())
+	if (!bDrawDebugBox || !DebugObstaclesComponent || !DebugObstaclesComponent->GetStaticMesh())
 	{
 		if (DebugObstaclesComponent)
 		{
 			DebugObstaclesComponent->ClearInstances();
+		}
+		if (VolumeBoundsVisualizer)
+		{
+			VolumeBoundsVisualizer->SetVisibility(false);
 		}
 		return;
 	}
@@ -225,7 +235,3 @@ void AUniformGridVolume::UpdateDebugObstacleVisualization()
 		DebugObstaclesComponent->AddInstances(InstanceTransforms, false);
 	}
 }
-
-
-
-

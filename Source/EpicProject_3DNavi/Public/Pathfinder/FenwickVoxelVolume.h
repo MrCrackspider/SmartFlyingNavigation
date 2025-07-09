@@ -126,7 +126,27 @@ private:
 	FORCEINLINE uint32 GetFlatIndex_Z(uint32 ChunkZ, uint32 X, uint32 Y) const;
 
 	FIntVector WorldToChunkCoords(const FVector& WorldPos) const;
+#if WITH_EDITOR
+	/** 베이크 전 맵 크기, 저장 경로 등의 유효성을 검사합니다. */
+	bool ValidateBakePrerequisites() const;
 
+	/** 베이크 과정에서 제외되어야 할 모든 복셀의 목록을 수집합니다. */
+	void GatherBakeExclusionVoxels(TSet<FIntVector>& OutExcludedVoxels);
+
+	/** 월드를 스캔하여 모든 정적 장애물 복셀을 찾습니다. (const TSet<FIntVector>& ExcludedVoxels)를 입력으로 받습니다. */
+	void ScanForAllStaticObstacles(const TSet<FIntVector>& ExcludedVoxels, TSet<FIntVector>& OutStaticObstacles) const;
+
+	/** 모든 장애물 복셀을 청크 좌표에 따라 그룹화합니다. */
+	void GroupObstaclesIntoChunks(const TSet<FIntVector>& AllObstacles, TMap<FIntVector, TArray<FIntVector>>& OutObstaclesByChunk) const;
+
+	/** 현재 장애물이 없는 오래된 청크 데이터 애셋을 삭제합니다. */
+	void CleanUpStaleChunkAssets(const TMap<FIntVector, TArray<FIntVector>>& ActiveObstacleChunks) const;
+
+	/** 청크 데이터를 기반으로 데이터 애셋을 생성하거나 업데이트합니다. */
+	void CreateOrUpdateChunkAssets(const TMap<FIntVector, TArray<FIntVector>>& ObstaclesByChunk);
+#endif
+
+	
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Filter", meta=(AllowPrivateAccess="true"))
 	TObjectPtr<UVoxelObstacleFilter> ObstacleFilterProfile;

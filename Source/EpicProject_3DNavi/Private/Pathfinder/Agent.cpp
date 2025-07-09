@@ -30,13 +30,6 @@ void AAgent::ExecuteFindPath()
     if (PathfindingComponent)
     {
 	    UE_LOG(LogTemp, Log, TEXT("--- Executing Find Path Test ---"));
-    	if (IsValid(TargetActor))
-    	{
-    		PathfindingComponent->FindPathToLocation(TargetActor->GetActorLocation());
-    	}
-	    else
-	    {
-		    UE_LOG(LogTemp, Error, TEXT("Agent: Target Actor is InValid!"));
-	    }
+    	PathfindingComponent->RequestPathToTargetActor();
     }
 }
