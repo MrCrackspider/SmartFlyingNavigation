@@ -52,7 +52,7 @@ public:
 	virtual void GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const override;
 	//~ End AUniformGridVolume Interface
 
-
+	bool FindNearestWalkableVoxel(const FIntVector& TargetVoxel, int32 AgentRadiusInVoxels, int32 SearchRadiusInVoxels, FIntVector& OutNearestWalkableVoxel) const;
 	void UpdateStreamingState();
 	void RequestChunkLoad(const FIntVector& ChunkCoords);
 	void OnChunkLoadCompleted(FSoftObjectPath LoadedAssetPath, FIntVector ChunkCoords);
@@ -125,6 +125,8 @@ private:
 	/** Calculates the flattened index for the Z-axis-major bitmask array. */
 	FORCEINLINE uint32 GetFlatIndex_Z(uint32 ChunkZ, uint32 X, uint32 Y) const;
 
+	FORCEINLINE bool IsVoxelIndexValid(const FIntVector& VoxelIndex) const;
+	
 	FIntVector WorldToChunkCoords(const FVector& WorldPos) const;
 #if WITH_EDITOR
 	/** 베이크 전 맵 크기, 저장 경로 등의 유효성을 검사합니다. */

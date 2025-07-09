@@ -128,6 +128,30 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FPathfindingRequest&
 	}
 	const bool bIsGoalValid = Volume->IsRegionWalkable(InRequest.EndIndex, InRequest.AgentRadiusInVoxels);
 
+
+	// --- 목표 지점 유효성 검사 및 조정 로직 추가 ---
+	FIntVector ActualGoalIndex = InRequest.EndIndex;
+	const bool bIsRequestedGoalWalkable = Volume->IsRegionWalkable(InRequest.EndIndex, InRequest.AgentRadiusInVoxels);
+
+	if (!bIsRequestedGoalWalkable)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Requested goal voxel (%s) is unwalkable. Attempting to find nearest walkable voxel."), *InRequest.EndIndex.ToString());
+		FIntVector NearestWalkableVoxel;
+		const int32 SearchRadiusInVoxels = 50; // 적절한 탐색 반경 설정
+		if (Volume->FindNearestWalkableVoxel(InRequest.EndIndex, InRequest.AgentRadiusInVoxels, SearchRadiusInVoxels, NearestWalkableVoxel))
+		{
+			ActualGoalIndex = NearestWalkableVoxel;
+			UE_LOG(LogTemp, Log, TEXT("Adjusted JPS goal to nearest walkable voxel: %s"), *ActualGoalIndex.ToString());
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Could not find a nearby walkable voxel for the goal. JPS might still return a partial path."));
+		}
+	}
+
+
+
+	
 	MoveFeasibilityCache.Empty();
 	NodePool->Reset();
 	OpenSet.Empty();
@@ -136,7 +160,7 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FPathfindingRequest&
 	// OutPath.Empty();
 
 	FPathNode* StartNode = NodePool->NewNode(InRequest.StartIndex);
-	StartNode->HCost = CalculateHeuristic(InRequest.StartIndex, InRequest.EndIndex);
+	StartNode->HCost = CalculateHeuristic(InRequest.StartIndex, ActualGoalIndex);
 	StartNode->CalculateAndSetFCost();
 
 	OpenSet.HeapPush(StartNode, FPathNodePtrCompare());
@@ -173,14 +197,14 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FPathfindingRequest&
 				BestPartialNode = CurrentNode;
 			}
 		}
-		if (CurrentNode->Position == InRequest.EndIndex)
+		if (CurrentNode->Position == ActualGoalIndex)
 		{
 			GoalNode = CurrentNode;
 			break;
 		}
 
 		TArray<FPathNode*> Successors;
-		IdentifySuccessors(CurrentNode, InRequest.EndIndex, InRequest.AgentRadiusInVoxels, Successors);
+		IdentifySuccessors(CurrentNode,ActualGoalIndex, InRequest.AgentRadiusInVoxels, Successors);
 
 		for (const auto& Successor : Successors)
 		{
@@ -198,7 +222,7 @@ EPathfindingResult UJPSPlusStrategy::FindPathInternal(const FPathfindingRequest&
 			}
 			else
 			{
-				Successor->HCost = CalculateHeuristic(Successor->Position, InRequest.EndIndex);
+				Successor->HCost = CalculateHeuristic(Successor->Position, ActualGoalIndex);
 				Successor->SetParent(CurrentNode, NewGCost, Successor->HCost);
 				OpenSet.HeapPush(Successor, FPathNodePtrCompare());
 				OpenSetLookup.Add(Successor->Position, Successor);

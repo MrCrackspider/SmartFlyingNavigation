@@ -358,14 +358,14 @@ void UAvoidanceSubsystem::GenerateVoxelConstraints(UPathfindingComponent* Curren
     CollisionParams.AddIgnoredActor(CurrentAgent->GetOwner());
 
     TArray<FOverlapResult> OverlapResults;
-    const float OverlapRadius = RadiusA * 1.f;
+    const float DetectionRadius = RadiusA + CurrentAgent->GetMovementSpeed() * TimeHorizon * 0.5f; 
 
     bool bHasOverlaps = World->OverlapMultiByObjectType(
         OverlapResults,
         PositionA,
         FQuat::Identity,
         ObjectQueryParams,
-        FCollisionShape::MakeSphere(OverlapRadius),
+        FCollisionShape::MakeSphere(DetectionRadius),
         CollisionParams
     );
 
