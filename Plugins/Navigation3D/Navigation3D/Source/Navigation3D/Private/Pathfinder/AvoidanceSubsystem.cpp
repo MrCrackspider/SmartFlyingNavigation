@@ -16,7 +16,7 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
     TimeHorizon = 1.f;
     MaxNeighbors = 4;
-    GridCellSize = 200.f;
+    GridCellSize = 100.f;
     SymmetryBreakingRangeMultiplier = 4.f;
     SolverIterations = 5;
     SideBiasMagnitude = 0.8f;
@@ -26,10 +26,6 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 void UAvoidanceSubsystem::PostInitialize()
 {
     Super::PostInitialize();
-    /**
-    * 여기서 GridCellSize를 VoxelExtent의 두 배로 설정할 예정
-    * 그래서 UPathfindingSubsystem에서 Volume을 다루고, 해당 Extent를 가져올 수 있게 수정해야함.
-    */
 }
 
 void UAvoidanceSubsystem::Deinitialize()
@@ -66,15 +62,14 @@ TStatId UAvoidanceSubsystem::GetStatId() const
     RETURN_QUICK_DECLARE_CYCLE_STAT(UAvoidanceSubsystem, STATGROUP_Tickables);
 }
 
-void UAvoidanceSubsystem::Tick(float DeltaTime) 
+void UAvoidanceSubsystem::Tick(float DeltaTime)
 {
-
     Super::Tick(DeltaTime);
     SCOPE_CYCLE_COUNTER(STAT_AvoidanceSubsystem_Tick);
-        
+
     if (bIsTaskRunning && AsyncTask && AsyncTask->IsWorkDone())
     {
-        TMap<uint32, FAvoidanceResult> LocalResults;
+        TMap<uint32, FThreadAvoidanceResult> LocalResults;
         {
             FScopeLock Lock(&ResultsCriticalSection);
             LocalResults = MoveTemp(AvoidanceResults);
@@ -84,32 +79,80 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
         {
             if (UPathfindingComponent* Agent = AgentMap.FindRef(ResultPair.Key))
             {
-                // 워커스레드에서 Avoidance가 적용된 속도를 가져옴
-                const FVector OptimalVelocity_AgentOnly = ResultPair.Value.OptimalVelocity;
+                const TArray<FPlane> AgentConstraints = ResultPair.Value.AgentConstraints;
+                const FVector ActualPreferredVelocity = ResultPair.Value.ActualPreferredVelocity;
 
-				// 게임스레드에서 StaticObstacleConstraints를 생성
                 TArray<FPlane> VoxelConstraints;
-                GenerateVoxelConstraints(Agent, VoxelConstraints);
+                GenerateVoxelConstraints(Agent, ActualPreferredVelocity, VoxelConstraints);
 
-                // 정적 장애물 제약 조건을 적용하여 최종 속도를 계산
-                // 이때 선호 속도는 에이전트 간 회피가 적용된 속도
-                const FVector FinalOptimalVelocity = SolveOptimalVelocity(VoxelConstraints, OptimalVelocity_AgentOnly);
+                const FVector SafeVelocity = SolveOptimalVelocity(VoxelConstraints, ActualPreferredVelocity);
 
-                // 최종 속도를 보간
+                const FVector FinalOptimalVelocity = SolveOptimalVelocity(AgentConstraints, SafeVelocity);
+
                 const FVector CurrentVelocity = Agent->GetCurrentVelocity();
-                const FVector InterpolatedVelocity = FMath::VInterpTo(CurrentVelocity, FinalOptimalVelocity, DeltaTime, InterpSpeed);
-                const FVector FinalVelocity = InterpolatedVelocity.GetClampedToMaxSize(Agent->GetMovementSpeed());
+                FVector InterpolatedVelocity = FMath::VInterpTo(CurrentVelocity, FinalOptimalVelocity, DeltaTime, InterpSpeed);
 
-                Agent->ApplyMovement(FinalVelocity, DeltaTime);
+                FVector FinalVelocity = InterpolatedVelocity;
 
-                // Begin Test
+                TArray<FOverlapResult> OverlapResults;
+                FCollisionShape OverlapSphere = FCollisionShape::MakeSphere(Agent->GetAgentRadius() * 1.5f); // FIX-ME
+                FCollisionQueryParams OverlapParams(TEXT("PenetrationCheck"), false);
+                OverlapParams.AddIgnoredActor(Agent->GetOwner());
+
+                bool bIsPenetrating = GetWorld()->OverlapMultiByObjectType(
+                    OverlapResults,
+                    Agent->GetOwner()->GetActorLocation(),
+                    FQuat::Identity,
+                    FCollisionObjectQueryParams(ECC_WorldStatic),
+                    OverlapSphere,
+                    OverlapParams
+                );
+
+                if (bIsPenetrating)
+                {
+                    FinalVelocity = SafeVelocity;
+                }
+
+                FHitResult HitResult;
+                const FVector AgentLocation = Agent->GetOwner()->GetActorLocation();
+                const FVector MoveDelta = FinalVelocity * DeltaTime;
+
+                if (MoveDelta.SizeSquared() > KINDA_SMALL_NUMBER)
+                {
+                    bool bWillCollide = GetWorld()->SweepSingleByChannel(
+                        HitResult,
+                        AgentLocation,
+                        AgentLocation + MoveDelta,
+                        FQuat::Identity,
+                        ECC_WorldStatic, // 정적 지오메트리 채널
+                        FCollisionShape::MakeSphere(Agent->GetAgentRadius() * 1.5f), // FIX-ME
+                        OverlapParams // 위에서 사용한 파라미터 재활용
+                    );
+
+                    if (bWillCollide)
+                    {
+                        const float TimeOfImpact = HitResult.Time;
+                        const FVector MovementToImpact = MoveDelta * TimeOfImpact;
+                        const float RemainingTime = DeltaTime * (1.f - TimeOfImpact);
+                        const FVector RemainingVelocity = FVector::VectorPlaneProject(FinalVelocity, HitResult.ImpactNormal);
+
+                        // 최종 이동 벡터 = 충돌 지점까지의 이동 + 충돌 후 미끄러지는 이동
+                        const FVector FinalMoveDelta = MovementToImpact + RemainingVelocity * RemainingTime;
+
+                        // 최종 속도를 이동 벡터로부터 역산
+                        FinalVelocity = FinalMoveDelta / DeltaTime;
+                    }
+                }
+
+                Agent->ApplyMovement(FinalVelocity.GetClampedToMaxSize(Agent->GetMovementSpeed()), DeltaTime);
+
                 if (Agent->GetMovementMode() == EPathMovementMode::Spline && !Agent->IsOnSplineLine())
                 {
                     UE_LOG(LogTemp, Warning, TEXT("%s: Out Of Spline Line. Change MovementMode to Linear"), *Agent->GetOwner()->GetName());
                     Agent->SetMovementMode(EPathMovementMode::Linear);
                 }
-                // End Test
-                DebugVisualizeVelocities(Agent, ResultPair.Value, FinalOptimalVelocity);
+
+                DebugVisualizeVelocities(Agent, ResultPair.Value, FinalVelocity);
             }
         }
 
@@ -136,7 +179,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
         for (UPathfindingComponent* AgentComponent : RegisteredAgentComponents)
         {
             AgentComponent->UpdateSteering(DeltaTime);
-            
+
             if (AgentComponent && AgentComponent->GetOwner())
             {
                 AgentDataForThread.Emplace(FAgentThreadData{
@@ -145,6 +188,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
                     AgentComponent->GetCurrentVelocity(),
                     AgentComponent->GetPreferredVelocity(),
                     AgentComponent->GetAgentRadius(),
+                    AgentComponent->GetAgentRadius() * 1.5f, // FIX-ME
                     AgentComponent->GetMovementSpeed(),
                     AgentComponent->GetUniqueID()
                     });
@@ -155,20 +199,21 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
             FScopeLock Lock(&ResultsCriticalSection);
             AvoidanceResults.Empty();
         }
-        
-        AsyncTask = new FAsyncTask<FParallelAvoidanceTask>(MoveTemp(AgentDataForThread), AvoidanceResults, ResultsCriticalSection, TimeHorizon, MaxNeighbors, GridCellSize, SymmetryBreakingRangeMultiplier, SolverIterations, SideBiasMagnitude);
+
+        AsyncTask = new FAsyncTask<FParallelAvoidanceTask>(MoveTemp(AgentDataForThread), AvoidanceResults, ResultsCriticalSection, TimeHorizon, MaxNeighbors, GridCellSize, SymmetryBreakingRangeMultiplier, SideBiasMagnitude);
         AsyncTask->StartBackgroundTask();
         bIsTaskRunning = true;
     }
 }
-static void GenerateAgentConstraints_ThreadSafe(const FAgentThreadData& CurrentAgent, const TArray<const FAgentThreadData*>& NearbyAgents, TArray<FPlane>& OutConstraints, float TimeHorizon)
+
+static void GenerateAgentConstraints_ThreadSafe(const FAgentThreadData& CurrentAgent, const FVector& ActualPreferredVelocity, const TArray<const FAgentThreadData*>& NearbyAgents, TArray<FPlane>& OutConstraints, float TimeHorizon)
 {
     for (const FAgentThreadData* AgentB : NearbyAgents)
     {
         const FVector RelativePosition = AgentB->Position - CurrentAgent.Position;
-        const FVector RelativeVelocity = CurrentAgent.CurrentVelocity - AgentB->CurrentVelocity;
+        const FVector RelativeVelocity = ActualPreferredVelocity - AgentB->CurrentVelocity;
         const float DistSq = RelativePosition.SizeSquared();
-        const float CombinedRadius = CurrentAgent.AgentRadius + AgentB->AgentRadius;
+        const float CombinedRadius = CurrentAgent.AvoidanceRadius + AgentB->AvoidanceRadius;
         const float CombinedRadiusSq = FMath::Square(CombinedRadius);
 
         float EffectiveTimeHorizon = TimeHorizon;
@@ -217,7 +262,7 @@ static void GenerateAgentConstraints_ThreadSafe(const FAgentThreadData& CurrentA
             const FVector n_correction = u.GetSafeNormal();
             if (!n_correction.IsNearlyZero(KINDA_SMALL_NUMBER))
             {
-                OutConstraints.Emplace(CurrentAgent.CurrentVelocity + w_correction, n_correction);
+                OutConstraints.Emplace(ActualPreferredVelocity + w_correction, n_correction);
             }
         }
     }
@@ -237,7 +282,7 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
     {
         const FVector ToAgentB = AgentB->Position - CurrentAgent.Position;
         const float DistToAgentBSq = ToAgentB.SizeSquared();
-        const float CombinedRadius = CurrentAgent.AgentRadius + AgentB->AgentRadius;
+        const float CombinedRadius = CurrentAgent.AvoidanceRadius + AgentB->AvoidanceRadius;
 
         if (DistToAgentBSq < FMath::Square(CombinedRadius * SymmetryBreakingRangeMultiplier) && FVector::DotProduct(PreferredVelocity, ToAgentB) > 0)
         {
@@ -266,27 +311,14 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
     return PreferredVelocity;
 }
 
-static FVector SolveOptimalVelocity_ThreadSafe(const TArray<FPlane>& Constraints, const FVector& PreferredVelocity, int32 SolverIterations)
-{
-    FVector NewVelocity = PreferredVelocity;
-    for (int32 i = 0; i < SolverIterations; ++i)
-    {
-        bool bViolated = false;
-        for (const FPlane& Constraint : Constraints)
-        {
-            const float ViolationDepth = Constraint.PlaneDot(NewVelocity);
-            if (ViolationDepth < 0.0f)
-            {
-                NewVelocity -= (FVector)Constraint * ViolationDepth;
-                bViolated = true;
-            }
-        }
-        if (!bViolated) break;
-    }
-    return NewVelocity;
-}
-
-void UAvoidanceSubsystem::RunAvoidanceCalculation(const TArray<FAgentThreadData>& AgentData, TMap<uint32, FAvoidanceResult>& OutResults, const float InTimeHorizon, const int32 InMaxNeighbors, const float InGridCellSize, const float InSymmetryBreakingRangeMultiplier, const int32 InSolverIterations, const float InSideBiasMagnitude)
+void UAvoidanceSubsystem::RunAvoidanceCalculation(
+    const TArray<FAgentThreadData>& AgentData,
+    TMap<uint32, FThreadAvoidanceResult>& OutResults,
+    const float InTimeHorizon,
+    const int32 InMaxNeighbors,
+    const float InGridCellSize,
+    const float InSymmetryBreakingRangeMultiplier,
+    const float InSideBiasMagnitude)
 {
     if (AgentData.Num() < 2 || InGridCellSize <= 0) return;
 
@@ -300,7 +332,8 @@ void UAvoidanceSubsystem::RunAvoidanceCalculation(const TArray<FAgentThreadData>
     for (const FAgentThreadData& Agent : AgentData)
     {
         TArray<const FAgentThreadData*> NearbyAgents;
-        const int32 SearchRange = FMath::Max(1, FMath::CeilToInt((Agent.AgentRadius * 2) / InGridCellSize));
+        //const int32 SearchRange = FMath::Max(1, FMath::CeilToInt((Agent.AvoidanceRadius * 2) / InGridCellSize));
+        const int32 SearchRange = FMath::CeilToInt((Agent.AvoidanceRadius / InGridCellSize) - 0.5f);
         const FIntVector CenterGridPosition(FMath::FloorToInt(Agent.Position.X / InGridCellSize), FMath::FloorToInt(Agent.Position.Y / InGridCellSize), FMath::FloorToInt(Agent.Position.Z / InGridCellSize));
 
         for (int32 z = -SearchRange; z <= SearchRange; ++z)
@@ -331,85 +364,91 @@ void UAvoidanceSubsystem::RunAvoidanceCalculation(const TArray<FAgentThreadData>
             NearbyAgents.SetNum(InMaxNeighbors);
         }
 
-        TArray<FPlane> OrcaConstraints;
-        GenerateAgentConstraints_ThreadSafe(Agent, NearbyAgents, OrcaConstraints, InTimeHorizon);
-
         const FVector ActualPreferredVelocity = CalculateSymmetryBreakingVelocity_ThreadSafe(Agent, Agent.PreferredVelocity, NearbyAgents, InSymmetryBreakingRangeMultiplier, InSideBiasMagnitude);
-        const FVector OptimalVelocity = SolveOptimalVelocity_ThreadSafe(OrcaConstraints, ActualPreferredVelocity, InSolverIterations);
 
-        OutResults.Add(Agent.AgentId, { Agent.AgentId, OptimalVelocity, Agent.PreferredVelocity, ActualPreferredVelocity });
+        TArray<FPlane> OrcaConstraints;
+        GenerateAgentConstraints_ThreadSafe(Agent, ActualPreferredVelocity, NearbyAgents, OrcaConstraints, InTimeHorizon);
+
+        OutResults.Add(Agent.AgentId, { Agent.AgentId, OrcaConstraints, Agent.PreferredVelocity, ActualPreferredVelocity });
     }
 }
 
-void UAvoidanceSubsystem::GenerateVoxelConstraints(UPathfindingComponent* CurrentAgent, TArray<FPlane>& OutConstraints)
+void UAvoidanceSubsystem::GenerateVoxelConstraints(UPathfindingComponent* CurrentAgent, const FVector& DesiredVelocity, TArray<FPlane>& OutConstraints)
 {
+    // 유효성 검사
     UWorld* World = GetWorld();
-    if (!World || !CurrentAgent || !CurrentAgent->GetOwner()) return;
+    if (!World || !CurrentAgent || !CurrentAgent->GetOwner())
+    {
+        return;
+    }
 
     const FVector PositionA = CurrentAgent->GetOwner()->GetActorLocation();
-    const float RadiusA = CurrentAgent->GetAgentRadius();
-    const FVector CurrentVelocityA = CurrentAgent->GetCurrentVelocity();
+    const float RadiusA = CurrentAgent->GetAgentRadius() * 1.5f; // FIX-ME
+    const FVector VelocityA = DesiredVelocity;
+
+    const FVector EndPoint = PositionA + VelocityA * TimeHorizon;
 
     FCollisionObjectQueryParams ObjectQueryParams;
     ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+    ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
     ObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
 
-    FCollisionQueryParams CollisionParams;
+    FCollisionQueryParams CollisionParams(TEXT("VoxelAvoidance"), false);
     CollisionParams.AddIgnoredActor(CurrentAgent->GetOwner());
+    CollisionParams.bTraceComplex = true;
 
-    TArray<FOverlapResult> OverlapResults;
-    const float DetectionRadius = RadiusA + CurrentAgent->GetMovementSpeed() * TimeHorizon * 0.5f; 
-
-    bool bHasOverlaps = World->OverlapMultiByObjectType(
-        OverlapResults,
+    TArray<FHitResult> HitResults;
+    const bool bHasHits = World->SweepMultiByObjectType(
+        HitResults,
         PositionA,
+        EndPoint,
         FQuat::Identity,
         ObjectQueryParams,
-        FCollisionShape::MakeSphere(DetectionRadius),
+        FCollisionShape::MakeSphere(RadiusA),
         CollisionParams
     );
 
-    if (bHasOverlaps)
+    if (bHasHits)
     {
-        for (const FOverlapResult& Result : OverlapResults)
+        for (const FHitResult& Hit : HitResults)
         {
-            UPrimitiveComponent* HitComponent = Result.GetComponent();
-            if (!HitComponent) continue;
-
-            FVector ClosestPointOnObstacle;
-            if (!HitComponent->GetClosestPointOnCollision(PositionA, ClosestPointOnObstacle))
+            if (Hit.Time > KINDA_SMALL_NUMBER)
             {
-                continue;
-            }
+                const FVector RelativePosition = Hit.ImpactPoint - PositionA;
 
-            const FVector RelativePos = ClosestPointOnObstacle - PositionA;
+                const float EffectiveTimeHorizon = Hit.Time;
+                const float InverseEffectiveTimeHorizon = 1.0f / EffectiveTimeHorizon;
 
-            if (RelativePos.SizeSquared() < FMath::Square(RadiusA))
-            {
-                const FVector RelativeVel = CurrentVelocityA; // ObstacleVel is Zero
-                const float InverseTimeHorizon = 1.0f / TimeHorizon;
-                const FVector w = RelativeVel - RelativePos * InverseTimeHorizon;
-                const float w_len_sq = w.SizeSquared();
+                const FVector w = VelocityA - RelativePosition * InverseEffectiveTimeHorizon;
+                const float w_sq = w.SizeSquared();
                 FVector u = FVector::ZeroVector;
 
-                if (w_len_sq > KINDA_SMALL_NUMBER)
+                const float VORadius = RadiusA * InverseEffectiveTimeHorizon;
+                const float VORadiusSq = FMath::Square(VORadius);
+
+                if (FVector::DotProduct(w, RelativePosition) < 0.0f && FMath::Square(FVector::DotProduct(w, RelativePosition)) > w_sq * VORadiusSq)
                 {
-                    const float DotProduct = FVector::DotProduct(RelativePos, w);
-                    if (DotProduct < 0.0f && FMath::Square(DotProduct) > w_len_sq * FMath::Square(RadiusA))
-                    {
-                        const float w_len = FMath::Sqrt(w_len_sq);
-                        u = (w / w_len) * (RadiusA * InverseTimeHorizon - w_len);
-                    }
+                    const float w_len = FMath::Sqrt(w_sq);
+                    const FVector n_w = w / w_len;
+                    u = (n_w * VORadius - w);
                 }
 
-                if (!u.IsNearlyZero())
+                if (!u.IsNearlyZero(KINDA_SMALL_NUMBER))
                 {
-                    const FVector w_correction = u; // 정적 장애물은 100% 책임
                     const FVector n_correction = u.GetSafeNormal();
-                    if (!n_correction.IsNearlyZero())
+                    if (!n_correction.IsNearlyZero(KINDA_SMALL_NUMBER))
                     {
-                        OutConstraints.Emplace(CurrentVelocityA + w_correction, n_correction);
+                        OutConstraints.Emplace(VelocityA + u, n_correction);
                     }
+                }
+            }
+            else
+            {
+                // 충돌 표면의 법선 벡터 (장애물에서 에이전트 방향으로 밀어내는 방향)
+                const FVector Normal = Hit.ImpactNormal;
+                if (!Normal.IsNearlyZero())
+                {
+                    OutConstraints.Emplace(FVector::ZeroVector, Normal);
                 }
             }
         }
@@ -427,7 +466,7 @@ FVector UAvoidanceSubsystem::SolveOptimalVelocity(const TArray<FPlane>& Constrai
             const float ViolationDepth = Constraint.PlaneDot(NewVelocity);
             if (ViolationDepth < 0.0f)
             {
-                NewVelocity -= (FVector)Constraint * ViolationDepth;
+                NewVelocity -= (FVector)Constraint * ViolationDepth * (1.01f);
                 bViolated = true;
             }
         }
@@ -436,7 +475,7 @@ FVector UAvoidanceSubsystem::SolveOptimalVelocity(const TArray<FPlane>& Constrai
     return NewVelocity;
 }
 
-void UAvoidanceSubsystem::DebugVisualizeVelocities(const UPathfindingComponent* Agent, const FAvoidanceResult& Result, const FVector& FinalOptimalVelocity) const
+void UAvoidanceSubsystem::DebugVisualizeVelocities(const UPathfindingComponent* Agent, const FThreadAvoidanceResult& Result, const FVector& FinalOptimalVelocity) const
 {
     if (!GEngine || !Agent || !Agent->GetOwner()) return;
 
@@ -450,8 +489,7 @@ void UAvoidanceSubsystem::DebugVisualizeVelocities(const UPathfindingComponent* 
     DrawDebugLine(World, LineStart, LineStart + Result.PreferredVelocity * LineLengthMultiplier, FColor::Blue, false, -1, 0, 2.f);
     // 2. 대칭 파괴 속도 (Symmetry Broken) - 노란색
     DrawDebugLine(World, LineStart, LineStart + Result.ActualPreferredVelocity * LineLengthMultiplier, FColor::Yellow, false, -1, 0, 3.f);
-    // 3. 에이전트 회피 속도 (Agent Avoidance) - 주황색
-    DrawDebugLine(World, LineStart, LineStart + Result.OptimalVelocity * LineLengthMultiplier, FColor::Orange, false, -1, 0, 4.f);
-    // 4. 최종 최적 속도 (Final Optimal) - 초록색
-    DrawDebugLine(World, LineStart, LineStart + FinalOptimalVelocity * LineLengthMultiplier, FColor::Green, false, -1, 0, 5.f);
+    // >> 삭제: 3. 에이전트 회피 속도 (Agent Avoidance) - 주황색 (더 이상 계산되지 않음)
+    // 3. 최종 최적 속도 (Final Optimal) - 빨간색
+    DrawDebugLine(World, LineStart, LineStart + FinalOptimalVelocity * LineLengthMultiplier, FColor::Red, false, -1, 0, 5.f);
 }

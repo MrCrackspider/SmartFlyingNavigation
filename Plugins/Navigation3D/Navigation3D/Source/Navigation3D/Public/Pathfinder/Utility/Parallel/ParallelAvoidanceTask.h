@@ -1,24 +1,20 @@
-﻿// ParallelAvoidanceTask.h
-
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "Async/AsyncWork.h"
-#include "Pathfinder/AvoidanceSubsystem.h" // FAgentThreadData, FAvoidanceResult를 위해 포함
+#include "Pathfinder/AvoidanceSubsystem.h" 
 
 class FParallelAvoidanceTask : public FNonAbandonableTask
 {
 public:
-    // 생성자: 필요한 모든 데이터를 게임 스레드로부터 받습니다.
     FParallelAvoidanceTask(
         TArray<FAgentThreadData>&& InAgentData,
-        TMap<uint32, FAvoidanceResult>& InResults,
+        TMap<uint32, FThreadAvoidanceResult>& InResults,
         FCriticalSection& InResultsLock,
         const float InTimeHorizon,
         const int32 InMaxNeighbors,
         const float InGridCellSize,
         const float InSymmetryBreakingRangeMultiplier,
-        const int32 InSolverIterations,
         const float InSideBiasMagnitude
     );
 
@@ -34,7 +30,7 @@ public:
 private:
     // 스레드에서 사용할 데이터
     TArray<FAgentThreadData> AgentData;
-    TMap<uint32, FAvoidanceResult>& Results;
+    TMap<uint32, FThreadAvoidanceResult>& Results;
     FCriticalSection& ResultsLock;
 
     // 서브시스템의 튜닝 파라미터 복사본
@@ -42,6 +38,5 @@ private:
     const int32 MaxNeighbors;
     const float GridCellSize;
     const float SymmetryBreakingRangeMultiplier;
-    const int32 SolverIterations;
     const float SideBiasMagnitude;
 };
