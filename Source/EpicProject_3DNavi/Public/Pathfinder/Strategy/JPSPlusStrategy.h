@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Pathfinder/FPathfindingRequest.h"
+#include "Pathfinder/PathfindingRequest.h"
 #include "PathfindingStrategy.h"
 #include "Pathfinder/Utility/MemoryPool.h"
 #include "JPSPlusStrategy.generated.h"

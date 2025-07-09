@@ -2,7 +2,7 @@
 
 #include "Pathfinder/Strategy/PathfindingStrategy.h"
 
-#include "Pathfinder/FPathfindingRequest.h"
+#include "Pathfinder/PathfindingRequest.h"
 
 void UPathfindingStrategy::Initialize(AVoxelVolumeBase* InVolume)
 {

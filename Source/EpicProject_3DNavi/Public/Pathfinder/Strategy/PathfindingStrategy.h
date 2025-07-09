@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Pathfinder/FPathfindingRequest.h"
+#include "Pathfinder/PathfindingRequest.h"
 #include "UObject/NoExportTypes.h"
 #include "PathfindingStrategy.generated.h"
 

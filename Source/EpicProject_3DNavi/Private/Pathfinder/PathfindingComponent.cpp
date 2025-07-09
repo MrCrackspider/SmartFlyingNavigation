@@ -85,6 +85,8 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	//    결과를 받을 콜백 함수를 지정합니다.
 	Request.OnPathfindingComplete.BindDynamic(this, &UPathfindingComponent::OnPathfindingCompleted);
 
+	Request.RequestingObject = this;
+	
 	CurrentRequestID = PathSubsystem->RequestPath(Request);
 
 	if (CurrentRequestID != -1)

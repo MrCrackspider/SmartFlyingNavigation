@@ -3,9 +3,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Pathfinder/FPathfindingRequest.h"
 #include "Subsystems/WorldSubsystem.h"
-#include "Pathfinder/FPathfindingWorker.h" // ★★★ 새로 만든 Worker 클래스의 헤더를 반드시 포함해야 합니다.
+#include "Pathfinder/PathfindingAsyncTask.h"
 #include "PathfindingSubsystem.generated.h"
 
 
@@ -13,6 +12,7 @@ class AVoxelVolumeBase;
 class UPathfindingComponent;
 class UPathfindingStrategy;
 class FPathfindingWorker;
+class FPathfindingAsyncTask;
 
 UCLASS()
 class EPICPROJECT_3DNAVI_API UPathfindingSubsystem : public UWorldSubsystem
@@ -28,24 +28,22 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
 	int32 RequestPath(FPathfindingRequest& Request);
+	
 protected:
 	// --- Subsystem Lifecycle ---
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 private:
-
-	TQueue<FPathfindingRequest, EQueueMode::Mpsc> PathRequestQueue;
-
-	/**
-	 * 실제 길찾기 계산을 수행하는 전용 작업자 스레드 객체.
-	 * TUniquePtr로 소유하여 서브시스템이 파괴될 때 자동으로 메모리를 관리합니다.
-	 */
-	TUniquePtr<FPathfindingWorker> PathfindingWorker;
-
 	/**
 	 * 고유한 요청 ID를 발급하기 위한 스레드 안전 카운터.
 	 * 여러 스레드에서 동시에 ID를 요청해도 안전합니다.
 	 */
 	FThreadSafeCounter NextRequestID;
+
+	/** 현재 실행 중인 모든 비동기 작업을 추적하는 배열. */
+	TArray<FAsyncTask<FPathfindingAsyncTask>*> ActiveTasks;
+
+	/** ActiveTasks 배열에 대한 동시 접근을 막기 위한 크리티컬 섹션. */
+	FCriticalSection TasksCriticalSection;
 
 };
