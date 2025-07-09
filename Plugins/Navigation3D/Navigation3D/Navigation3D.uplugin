@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "Navigation3D",
+	"Description": "This is 3DNavigation",
+	"Category": "Other",
+	"CreatedBy": "TeamHamDev",
+	"CreatedByURL": "https://www.fab.com/sellers/TeamHamDev",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "Navigation3D",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}
