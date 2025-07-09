@@ -70,6 +70,11 @@ public:
 
 protected:
 	TObjectPtr<UStaticMeshComponent> VolumeBoundsVisualizer;
-	
+
+	/** 현재 디버그 메쉬로 표시되고 있는 복셀의 인덱스 집합 */
+	TSet<FIntVector> DisplayedVoxelIndices;
+
+	/** 업데이트가 진행 중인지 확인하는 플래그 */
+	bool bIsUpdatingVisualization = false;
 };
 

@@ -18,12 +18,13 @@ AUniformGridVolume::AUniformGridVolume()
 
 	// 볼륨 범위 시각화용 Static Mesh 컴포넌트 생성
 	VolumeBoundsVisualizer = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VolumeBoundsVisualizer"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> DebugMeshFinder(TEXT("StaticMesh'/Game/PathfinderPlugin/Debug/SM_DebugVoxel.SM_DebugVoxel'"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> DebugMeshFinder(
+		TEXT("StaticMesh'/Game/PathfinderPlugin/Debug/SM_DebugVoxel.SM_DebugVoxel'"));
 	if (DebugMeshFinder.Succeeded())
 	{
 		VolumeBoundsVisualizer->SetStaticMesh(DebugMeshFinder.Object);
 	}
-	
+
 	VolumeBoundsVisualizer->SetupAttachment(GetRootComponent());
 	VolumeBoundsVisualizer->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
@@ -191,8 +192,14 @@ bool AUniformGridVolume::IsPathSegmentWalkable(const FIntVector& FromStartIndex,
 
 void AUniformGridVolume::UpdateDebugObstacleVisualization()
 {
+	if (bIsUpdatingVisualization)
+	{
+		return;
+	}
+
 	if (!bDrawDebugBox || !DebugObstaclesComponent || !DebugObstaclesComponent->GetStaticMesh())
 	{
+		// 바로 GameThread 에서 지우기
 		if (DebugObstaclesComponent)
 		{
 			DebugObstaclesComponent->ClearInstances();
@@ -204,34 +211,87 @@ void AUniformGridVolume::UpdateDebugObstacleVisualization()
 		return;
 	}
 
-	TArray<FIntVector> ObstacleIndices;
-	GetDebugObstacleVoxelIndices(ObstacleIndices);
-
-	TArray<FTransform> InstanceTransforms;
-	InstanceTransforms.Reserve(ObstacleIndices.Num());
-	const FVector Scale = FVector(VoxelExtent / 100.0f);
-
-	// 컴포넌트의 월드 트랜스폼을 가져옵니다.
-	const FTransform ComponentWorldTransform = DebugObstaclesComponent->GetComponentTransform();
-
-	for (const FIntVector& GlobalIndex : ObstacleIndices)
+	if (VolumeBoundsVisualizer)
 	{
-		// 1. VoxelIndexToWorld를 사용해 복셀의 '월드' 위치를 정확하게 계산합니다.
-		//    이 함수는 액터의 현재 위치와 회전을 모두 반영합니다.
-		const FVector VoxelWorldCenter = VoxelIndexToWorld(GlobalIndex);
-
-		// 2. AddInstances는 '로컬' 공간의 트랜스폼을 요구합니다.
-		//    따라서 계산된 월드 위치를 컴포넌트의 로컬 공간으로 변환해줍니다.
-		const FVector VoxelComponentLocalCenter = ComponentWorldTransform.InverseTransformPosition(VoxelWorldCenter);
-
-		// 3. 변환된 로컬 위치를 사용해 트랜스폼을 만듭니다.
-		InstanceTransforms.Emplace(FRotator::ZeroRotator, VoxelComponentLocalCenter, Scale);
+		VolumeBoundsVisualizer->SetVisibility(true);
 	}
 
-	DebugObstaclesComponent->ClearInstances();
-	if (InstanceTransforms.Num() > 0)
+	bIsUpdatingVisualization = true;
+
+	// 1) 컴포넌트 월드 트랜스폼 스냅샷
+	const FTransform CompXform = DebugObstaclesComponent->GetComponentTransform();
+	TWeakObjectPtr<AUniformGridVolume> WeakThis(this);
+
+	// 2) 백그라운드에서 인덱스 수집 + 월드→로컬 변환
+	Async(EAsyncExecution::ThreadPool, [WeakThis, CompXform]()
 	{
-		// 이제 이 트랜스폼들은 항상 올바른 위치를 가리킵니다.
-		DebugObstaclesComponent->AddInstances(InstanceTransforms, false);
-	}
+		if (!WeakThis.IsValid()) return;
+
+		TSet<FIntVector> RequiredIndices;
+		TArray<FIntVector> ObstacleIndices;
+		WeakThis->GetDebugObstacleVoxelIndices(ObstacleIndices);
+
+		for (const FIntVector& Index : ObstacleIndices)
+		{
+			RequiredIndices.Add(Index);
+		}
+
+		// 3) 게임 스레드에서 실제 Clear/Add 호출
+		AsyncTask(ENamedThreads::GameThread, [WeakThis, RequiredIndices = MoveTemp(RequiredIndices)]() mutable
+		{
+			if (!WeakThis.IsValid() || !WeakThis->DebugObstaclesComponent)
+			{
+				if (WeakThis.IsValid()) WeakThis->bIsUpdatingVisualization = false;
+				return;
+			}
+
+			auto Comp = WeakThis->DebugObstaclesComponent;
+			const float Scale = WeakThis->VoxelExtent / 100.0f;
+
+			// 2. 제거할 인스턴스 계산 (이전에는 있었지만 지금은 없는 것)
+			TSet<FIntVector> IndicesToRemove = WeakThis->DisplayedVoxelIndices.Difference(RequiredIndices);
+
+			// 3. 추가할 인스턴스 계산 (이전에는 없었지만 지금은 있는 것)
+			TSet<FIntVector> IndicesToAdd = RequiredIndices.Difference(WeakThis->DisplayedVoxelIndices);
+
+			if (IndicesToRemove.Num() > 0)
+			{
+				TArray<int32> InstanceIndicesToRemove;
+				// TMap을 사용해 복셀 인덱스로 인스턴스 인덱스를 빠르게 찾을 수 있다면 더 효율적입니다.
+				// 여기서는 간단하게 전체를 순회합니다.
+				for (int32 i = Comp->GetInstanceCount() - 1; i >= 0; --i)
+				{
+					FTransform InstanceTransform;
+					Comp->GetInstanceTransform(i, InstanceTransform, /*bWorldSpace=*/ false);
+
+					// 월드 위치로 변환 후 인덱스 계산 (정확성을 위해)
+					FVector WorldPos = Comp->GetComponentTransform().TransformPosition(InstanceTransform.GetLocation());
+					FIntVector VoxelIndex = WeakThis->WorldToVoxelIndex(WorldPos);
+
+					if (IndicesToRemove.Contains(VoxelIndex))
+					{
+						Comp->RemoveInstance(i);
+					}
+				}
+			}
+
+			if (IndicesToAdd.Num() > 0)
+			{
+				TArray<FTransform> NewTransforms;
+				NewTransforms.Reserve(IndicesToAdd.Num());
+				for (const FIntVector& Idx : IndicesToAdd)
+				{
+					FVector WorldPos = WeakThis->VoxelIndexToWorld(Idx);
+					FVector LocalPos = Comp->GetComponentTransform().InverseTransformPosition(WorldPos);
+					NewTransforms.Emplace(FRotator::ZeroRotator, LocalPos, FVector(Scale));
+				}
+				Comp->AddInstances(NewTransforms, /*bWorldSpace=*/ false);
+			}
+			// 6. 현재 표시된 인덱스 상태를 최신으로 업데이트
+			WeakThis->DisplayedVoxelIndices = MoveTemp(RequiredIndices);
+
+			// 모든 작업이 완료된 후 플래그를 false로 설정
+			WeakThis->bIsUpdatingVisualization = false;
+		});
+	});
 }
