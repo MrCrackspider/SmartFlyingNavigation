@@ -1,4 +1,6 @@
-﻿#pragma once
+﻿// --- START OF FILE AvoidanceSubsystem.h ---
+
+#pragma once
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
@@ -6,7 +8,6 @@
 #include "AvoidanceSubsystem.generated.h"
 
 // 스레드 간 데이터 전달을 위한 구조체
-
 struct FAgentThreadData
 {
     uint32 AgentId;
@@ -16,7 +17,6 @@ struct FAgentThreadData
     float AgentRadius;
     float AvoidanceRadius;
     float MovementSpeed;
-    // 대칭성 파괴 로직을 위해 UniqueID도 전달합니다.
     uint32 UniqueID;
 };
 
@@ -24,13 +24,15 @@ struct FAgentThreadData
 struct FThreadAvoidanceResult
 {
     uint32 AgentId;
-    TArray<FPlane> AgentConstraints; // 에이전트 간 회피 제약 조건
-    FVector PreferredVelocity;       // 원본 선호 속도 (디버깅용)
-    FVector ActualPreferredVelocity; // 대칭성 파괴가 적용된 선호 속도
+    TArray<FPlane> AgentConstraints;
+    // --- ADDED ---: 스레드에서 계산된 Voxel 제약 조건을 저장할 배열
+    TArray<FPlane> VoxelConstraints;
+    FVector PreferredVelocity;
+    FVector ActualPreferredVelocity;
 };
 
 class UPathfindingComponent;
-class FParallelAvoidanceTask; // Forward Declaration
+class FParallelAvoidanceTask;
 
 UCLASS()
 class NAVIGATION3D_API UAvoidanceSubsystem : public UTickableWorldSubsystem
@@ -44,20 +46,20 @@ public:
     virtual void Tick(float DeltaTime) override;
     virtual TStatId GetStatId() const override;
 
-    /** 에이전트를 회피 시스템에 등록합니다. */
     void RegisterAgent(UPathfindingComponent* AgentComponent);
-
-    /** 에이전트를 회피 시스템에서 제거합니다. */
     void UnregisterAgent(UPathfindingComponent* AgentComponent);
 
+    // --- CHANGED ---: 스레드에서 World에 접근하기 위해 UWorld 포인터를 받도록 수정
     static void RunAvoidanceCalculation(
+        const UWorld* World,
         const TArray<FAgentThreadData>& AgentData,
         TMap<uint32, FThreadAvoidanceResult>& OutResults,
         const float InTimeHorizon,
         const int32 InMaxNeighbors,
         const float InGridCellSize,
         const float InSymmetryBreakingRangeMultiplier,
-        const float InSideBiasMagnitude
+        const float InSideBiasMagnitude,
+        const float InCollisionRadiusMultiplier
     );
 
 protected:
@@ -68,7 +70,6 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Avoidance|Tuning")
     int32 MaxNeighbors;
 
-    // RECOMMENDATION: VoxelExtent * 2
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Avoidance|Tuning")
     float GridCellSize;
 
@@ -78,43 +79,32 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Avoidance|Tuning")
     int32 SolverIterations;
 
-    // 대칭성 파괴 시 측면 힘의 강도 (0.0 ~ 1.0f)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Avoidance|Tuning")
     float SideBiasMagnitude;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Avoidance|Tuning")
     float InterpSpeed;
+
+    // --- ADDED ---: 하드코딩된 값을 UPROPERTY로 만들어 튜닝이 용이하게 함
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Avoidance|Tuning", meta = (ClampMin = "1.0"))
+    float CollisionRadiusMultiplier;
     // ~ End Tuning Parameters
 
 private:
-    /** 등록된 모든 회피 에이전트 목록 */
     UPROPERTY()
     TArray<TObjectPtr<UPathfindingComponent>> RegisteredAgentComponents;
 
-    /** ID로 에이전트를 빠르게 찾기 위한 맵 */
     UPROPERTY()
     TMap<uint32, TObjectPtr<UPathfindingComponent>> AgentMap;
 
-    /** 비동기 회피 계산 작업 */
     FAsyncTask<FParallelAvoidanceTask>* AsyncTask;
-
-    /** 워커 스레드에서 계산된 결과 */
-    // >> 변경: 저장하는 결과의 타입이 FThreadAvoidanceResult로 변경됩니다.
     TMap<uint32, FThreadAvoidanceResult> AvoidanceResults;
-
-    /** 결과 맵에 대한 스레드 안전 접근을 위한 크리티컬 섹션 */
     FCriticalSection ResultsCriticalSection;
-
-    /** 작업이 현재 실행 중인지 여부 */
     bool bIsTaskRunning;
 
-    /** 정적 복셀 장애물에 대한 ORCA 제약 조건을 생성합니다. (게임 스레드에서 호출) */
-    void GenerateVoxelConstraints(UPathfindingComponent* CurrentAgent, const FVector& DesiredVelocity, TArray<FPlane>& OutConstraints);
+    // --- REMOVED ---: 이 함수는 스레드 안전한 static 함수로 대체됩니다.
+    // void GenerateVoxelConstraints(UPathfindingComponent* CurrentAgent, const FVector& DesiredVelocity, TArray<FPlane>& OutConstraints);
 
-    /** ORCA 제약 조건들을 기반으로 최종 최적 속도를 계산합니다. (게임 스레드에서 호출) */
     FVector SolveOptimalVelocity(const TArray<FPlane>& Constraints, const FVector& PreferredVelocity) const;
-
-    /** 회피 관련 속도 벡터들을 시각화하여 디버깅합니다. */
-    // >> 변경: FAvoidanceResult 대신 FThreadAvoidanceResult를 받습니다.
     void DebugVisualizeVelocities(const UPathfindingComponent* Agent, const FThreadAvoidanceResult& Result, const FVector& FinalOptimalVelocity) const;
 };
