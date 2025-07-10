@@ -26,10 +26,7 @@ void UJPSPlusStrategy::Initialize(AVoxelVolumeBase* InVolume)
 					if (x != 0 || y != 0 || z != 0)
 						AllDirections.Emplace(x, y, z);
 	}
-	if (!NodePool.IsValid())
-	{
-		NodePool = MakeUnique<FPathNodeMemoryPool>(100000);
-	}
+
 	DirectionToIndexMap.Empty();
 	for (int32 i = 0; i < AllDirections.Num(); ++i)
 	{
@@ -61,7 +58,7 @@ bool UJPSPlusStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest
 	WalkabilityGrid.ObstacleBitmasks_X = Volume->ObstacleBitmasks_X;
 
 	// 3. '일꾼' 객체 생성 및 작업 위임
-	FJPSPlusPathfinder Pathfinder(InRequest, *NodePool, WalkabilityGrid, AllDirections, DirectionToIndexMap, ActualGoalIndex);
+	FJPSPlusPathfinder Pathfinder(InRequest, WalkabilityGrid, AllDirections, DirectionToIndexMap, ActualGoalIndex);
 
 	const EPathfindingResult Result = Pathfinder.FindPath(OutPath);
 
@@ -111,29 +108,32 @@ FName UJPSPlusStrategy::GetStrategyName() const
 // =======================================================================
 // FJPSPlusPathfinder: 순수 C++ '일꾼' 클래스 구현
 // =======================================================================
+thread_local static FPathNodeMemoryPool ThreadLocalPool(1024);
 
-FJPSPlusPathfinder::FJPSPlusPathfinder(const FPathfindingRequest& InRequest, FPathNodeMemoryPool& InNodePool,
-                                       const FThreadSafeBitmaskGrid& InGrid, const TArray<FIntVector>& InAllDirections,
-                                       const TMap<FIntVector, int32>& InDirectionToIndexMap, FIntVector InActualGoal)
-	: Request(InRequest)
-	  , NodePool(InNodePool)
-	  , WalkabilityGrid(InGrid)
-	  , AllDirections(InAllDirections)
-	  , DirectionToIndexMap(InDirectionToIndexMap)
-	  , ActualGoalIndex(InActualGoal)
-	  , AgentRadiusInVoxels(InRequest.AgentRadiusInVoxels)
+FJPSPlusPathfinder::FJPSPlusPathfinder(const FPathfindingRequest& InRequest,
+									   const FThreadSafeBitmaskGrid& InGrid,
+									   const TArray<FIntVector>& InAllDirections,
+									   const TMap<FIntVector, int32>& InDirectionToIndexMap,
+									   FIntVector InActualGoal)
+  : Request(InRequest)
+  , WalkabilityGrid(InGrid)
+  , AllDirections(InAllDirections)
+  , DirectionToIndexMap(InDirectionToIndexMap)
+  , ActualGoalIndex(InActualGoal)
+  , AgentRadiusInVoxels(InRequest.AgentRadiusInVoxels)
 {
 }
 
 EPathfindingResult FJPSPlusPathfinder::FindPath(TArray<FIntVector>& OutPath)
 {
 	SCOPE_LOG_TIME_FUNC()
-	NodePool.Reset();
+	
+	ThreadLocalPool.Reset();
 	OpenSet.Empty();
 	OpenSetLookup.Empty();
 	ClosedSet.Empty();
 
-	FPathNode* StartNode = NodePool.NewNode(Request.StartIndex);
+	FPathNode* StartNode = ThreadLocalPool.NewNode(Request.StartIndex);
 	if (!StartNode) return EPathfindingResult::Failed_OutOfMemory;
 
 	
@@ -319,7 +319,11 @@ void FJPSPlusPathfinder::IdentifySuccessors(FPathNode* Node, TArray<FPathNode*>&
 	for (const FIntVector& Point : AllJumpPoints)
 	{
 		// NodePool access is now safely back on the main thread.
-		OutSuccessors.Add(NodePool.NewNode(Point));
+		FPathNode* node = ThreadLocalPool.NewNode(Point);
+		if (node)
+		{
+			OutSuccessors.Add(node);
+		}
 	}
 }
 

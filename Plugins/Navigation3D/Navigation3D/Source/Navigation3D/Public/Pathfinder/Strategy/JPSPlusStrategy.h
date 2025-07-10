@@ -137,7 +137,12 @@ class FJPSPlusPathfinder
 {
 public:
 	// 생성자: 길찾기에 필요한 모든 데이터를 안전하게 복사/참조합니다.
-	FJPSPlusPathfinder(const FPathfindingRequest& InRequest,FPathNodeMemoryPool& InNodePool, const FThreadSafeBitmaskGrid& InGrid, const TArray<FIntVector>& InAllDirections, const TMap<FIntVector, int32>& InDirectionToIndexMap, FIntVector InActualGoal);
+
+	FJPSPlusPathfinder(const FPathfindingRequest& InRequest,
+										   const FThreadSafeBitmaskGrid& InGrid,
+										   const TArray<FIntVector>& InAllDirections,
+										   const TMap<FIntVector, int32>& InDirectionToIndexMap,
+										   FIntVector InActualGoal);
 	// 실제 길찾기를 수행하는 메인 함수
 	EPathfindingResult FindPath(TArray<FIntVector>& OutPath);
 
@@ -164,7 +169,7 @@ private:
 	
 	int32 AgentRadiusInVoxels;
 
-	FPathNodeMemoryPool& NodePool;
+	//FPathNodeMemoryPool& NodePool;
 	TArray<FPathNode*> OpenSet;
 	TMap<FIntVector, FPathNode*> OpenSetLookup;
 	TMap<FIntVector, FPathNode*> ClosedSet;
@@ -190,7 +195,7 @@ private:
 	TWeakObjectPtr<AFenwickVoxelVolume> Volume;
     
 	// 이 데이터는 한 번만 계산하고 모든 '일꾼'에게 공유합니다.
-	TUniquePtr<FPathNodeMemoryPool> NodePool;
+	//TUniquePtr<FPathNodeMemoryPool> NodePool;
 	TArray<FIntVector> AllDirections;
 	TMap<FIntVector, int32> DirectionToIndexMap;
 };

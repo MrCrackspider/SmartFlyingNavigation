@@ -1,26 +1,48 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Pathfinder/Utility/MemoryPool.h"
-#include "Pathfinder/Utility/StrategyUtils.h"
+#include "Pathfinder/Utility/StrategyUtils.h" // For FPathNode definition
 
-FPathNodeMemoryPool::FPathNodeMemoryPool(int32 MaxNodes)
-	: NumUsedNodes(0)
+FPathNodeMemoryPool::FPathNodeMemoryPool(int32 InSlabSize)
+	: SlabSize(InSlabSize),
+	  CurrentSlabIndex(0),
+	  IndexInCurrentSlab(0)
 {
-	// 생성자에서 미리 메모리를 할당하고 초기화해 둡니다.
-	// TArray의 Reserve가 아니라, 실제 메모리를 할당하고 기본 생성자를 호출하는 SetNum를 사용합니다.
-	NodeMemory.SetNum(MaxNodes);
-	UE_LOG(LogTemp, Log, TEXT("PathNodeMemoryPool initialized with %d nodes."), MaxNodes);
+	check(SlabSize > 0);
+	UE_LOG(LogTemp, Log, TEXT("FPathNodeMemoryPool created with slab size %d."), SlabSize);
+	// Allocate the first slab immediately to simplify the NewNode logic.
+	AllocateNewSlab();
 }
 
 FPathNodeMemoryPool::~FPathNodeMemoryPool()
 {
+	// TArray's destructor will handle freeing all memory automatically.
+	// Slabs.Empty(); // This would also work but is redundant.
+	UE_LOG(LogTemp, Log, TEXT("FPathNodeMemoryPool destroyed, freeing %d slabs."), Slabs.Num());
 }
 
 void FPathNodeMemoryPool::Reset()
 {
-	// 사용 카운터만 0으로 되돌립니다.
-	// 할당된 메모리는 그대로 유지되며, 다음 길찾기 때 재사용됩니다.
-	// 이것이 이 방식의 핵심적인 속도 비결입니다.
-	FScopeLock Lock(&Mutex);
-	NumUsedNodes = 0;
+	// Reset the counters to point to the start of the first slab.
+	// This makes all allocated memory available for reuse without deallocation.
+	CurrentSlabIndex = 0;
+	IndexInCurrentSlab = 0;
+}
+
+void FPathNodeMemoryPool::AllocateNewSlab()
+{
+	// If we are trying to allocate past the end of our current slab list, add a new one.
+	if (CurrentSlabIndex >= Slabs.Num())
+	{
+		UE_LOG(LogTemp, Log, TEXT("Allocating new slab #%d for PathNodeMemoryPool."), Slabs.Num() + 1);
+		// Add a new TArray (slab) to our list of slabs.
+		Slabs.Emplace();
+		// Allocate the memory for the nodes within the new slab.
+		Slabs.Last().SetNum(SlabSize);
+	}
+	
+	// Move to the next slab in the list.
+	CurrentSlabIndex++;
+	// Reset the node index to the beginning of this new slab.
+	IndexInCurrentSlab = 0;
 }

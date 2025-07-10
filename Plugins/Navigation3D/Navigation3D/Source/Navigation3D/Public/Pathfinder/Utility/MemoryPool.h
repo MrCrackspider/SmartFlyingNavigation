@@ -3,61 +3,78 @@
 #pragma once
 
 #include "CoreMinimal.h"
-// #include "MemoryPool.generated.h"
+#include "StrategyUtils.h"
 
 struct FPathNode;
 
-// USTRUCT()
+/**
+ * A memory pool for FPathNode using slab allocation.
+ * This pool allocates memory in chunks (slabs) on demand, avoiding large upfront
+ * memory allocation while maintaining high performance through bump allocation and an O(1) reset.
+ */
 struct NAVIGATION3D_API FPathNodeMemoryPool
 {
 public:
-	// GENERATED_BODY()
 	/**
-	 * @param MaxNodes 풀이 최대로 가질 수 있는 노드의 개수.
+	 * @param InSlabSize The number of nodes to allocate in each memory slab.
 	 */
-	explicit FPathNodeMemoryPool(int32 MaxNodes = 8192);
+	explicit FPathNodeMemoryPool(int32 InSlabSize = 1024);
 	~FPathNodeMemoryPool();
-	
-	//복사 및 이동 하지말것
-	// 복사 및 이동을 금지하여 메모리 소유권 문제를 방지
+
+	// Disallow copying and moving to prevent complex memory ownership issues.
 	FPathNodeMemoryPool(const FPathNodeMemoryPool&) = delete;
 	FPathNodeMemoryPool& operator=(const FPathNodeMemoryPool&) = delete;
-	mutable FCriticalSection Mutex;
+
 	/**
-	 * 풀에서 새로운 노드를 할당받습니다.
-	 * @return 새로 할당된 노드를 가리키는 로우 포인터.
+	 * Allocates a new node from the pool. If the current slab is full, a new one is allocated.
+	 * @return A raw pointer to the newly constructed node, or nullptr if allocation fails.
 	 */
 	template<typename... Args>
 	FPathNode* NewNode(Args&&... args)
 	{
-		FScopeLock Lock(&Mutex);
-		if (NumUsedNodes >= NodeMemory.Num())
+		// Check if the current slab is full or if this is the first allocation.
+		if (CurrentSlabIndex >= Slabs.Num() || IndexInCurrentSlab >= SlabSize)
 		{
-			UE_LOG(LogTemp, Error, TEXT("PathNodeMemoryPool is out of memory! Consider increasing the pool size."));
+			AllocateNewSlab();
+		}
+
+		// If slab allocation failed (e.g., out of memory), return nullptr.
+		if (CurrentSlabIndex >= Slabs.Num())
+		{
 			return nullptr;
 		}
 
-		FPathNode* NewNodePtr = &NodeMemory[NumUsedNodes];
-		NumUsedNodes++;
+		// Get the pointer to the memory location in the current slab.
+		FPathNode* NewNodePtr = &Slabs[CurrentSlabIndex][IndexInCurrentSlab];
+		IndexInCurrentSlab++;
 
-		// Placement New: 할당된 메모리 위치에 직접 객체를 생성합니다.
-		// FPathNode의 생성자를 호출하여 즉시 초기화합니다.
+		// Use placement new to construct the object directly in the allocated memory.
 		new (NewNodePtr) FPathNode(Forward<Args>(args)...);
 
 		return NewNodePtr;
 	}
 
 	/**
-	 * 풀을 초기 상태로 리셋합니다. 메모리를 해제하지 않고 사용 카운트만 0으로 만듭니다.
-	 * 길찾기가 끝날 때마다 호출됩니다.
+	 * Resets the pool to its initial state for reuse.
+	 * This is an O(1) operation that does not deallocate memory.
 	 */
 	void Reset();
 
 private:
-	// 모든 노드를 저장할 연속적인 메모리 블록
-	TArray<FPathNode> NodeMemory;
+	/**
+	 * Allocates a new slab of memory and prepares it for use.
+	 */
+	void AllocateNewSlab();
 
-	// 현재까지 몇 개의 노드를 사용했는지 나타내는 카운터
-	int32 NumUsedNodes;
-	
+	// A list of memory blocks (slabs). Each slab is a TArray of nodes.
+	TArray<TArray<FPathNode>> Slabs;
+
+	// The number of nodes contained within each slab.
+	int32 SlabSize;
+
+	// The index of the slab we are currently allocating from.
+	int32 CurrentSlabIndex;
+
+	// The index of the next available node within the current slab.
+	int32 IndexInCurrentSlab;
 };
