@@ -153,8 +153,7 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Filter", meta=(AllowPrivateAccess="true"))
 	TObjectPtr<UVoxelObstacleFilter> ObstacleFilterProfile;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Baking",
-		meta = (EditCondition = "bUseBakedStaticData"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Baking")
 	TMap<FIntVector, TObjectPtr<UStaticVoxelChunkData>> BakedStaticDataAssets;
 
 	TMap<FIntVector, int32> ChunkObstacleCounter;
@@ -171,10 +170,6 @@ private:
 	/** Size of a bitmask chunk along one axis. Must be 64. */
 	static constexpr uint32 CHUNK_SIZE = 64;
 
-	/** Bitmasks for fast obstacle checks, organized with X-axis as the inner loop. */
-	TArray<uint64> ObstacleBitmasks_X;
-	// TArray<uint64> ObstacleBitmasks_Y;
-	// TArray<uint64> ObstacleBitmasks_Z;
 
 	/** Set of voxels occupied by static geometry. */
 	TSet<FIntVector> StaticObstacleVoxels;
@@ -183,6 +178,11 @@ private:
 	TMap<FIntVector, int32> DynamicObstacleVoxelCounts;
 
 	TMap<FIntVector, TObjectPtr<UStaticVoxelChunkData>> ActiveChunks;
+public:
+	/** Bitmasks for fast obstacle checks, organized with X-axis as the inner loop. */
+	TArray<uint64> ObstacleBitmasks_X;
+	// TArray<uint64> ObstacleBitmasks_Y;
+	// TArray<uint64> ObstacleBitmasks_Z;
 protected:
 	//~=============================================================================
 	// STREAMING & BAKING PROPERTIES (Configurable in Editor)

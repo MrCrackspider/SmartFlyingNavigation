@@ -278,7 +278,7 @@ void AFenwickVoxelVolume::FenwUpdate(const FIntVector& Index, int32 Delta)
 void AFenwickVoxelVolume::FenwUpdateCuboid(const FIntVector& MinCorner, const FIntVector& MaxCorner, int32 Delta)
 {
 	const FIntVector MaxPlusOne = MaxCorner + FIntVector(1, 1, 1);
-
+	TRACE_CPUPROFILER_EVENT_SCOPE(JPS_FenwUpdateCuboid);
 	FenwUpdate(FIntVector(MinCorner.X, MinCorner.Y, MinCorner.Z), +Delta);
 	FenwUpdate(FIntVector(MaxPlusOne.X, MinCorner.Y, MinCorner.Z), -Delta);
 	FenwUpdate(FIntVector(MinCorner.X, MaxPlusOne.Y, MinCorner.Z), -Delta);

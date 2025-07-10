@@ -21,5 +21,6 @@ void FPathNodeMemoryPool::Reset()
 	// 사용 카운터만 0으로 되돌립니다.
 	// 할당된 메모리는 그대로 유지되며, 다음 길찾기 때 재사용됩니다.
 	// 이것이 이 방식의 핵심적인 속도 비결입니다.
+	FScopeLock Lock(&Mutex);
 	NumUsedNodes = 0;
 }

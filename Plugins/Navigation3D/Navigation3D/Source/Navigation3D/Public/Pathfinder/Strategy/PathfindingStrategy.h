@@ -18,7 +18,8 @@ enum class EPathfindingResult : uint8
 	Failed_Unreachable,
 	Failed_InvalidStart,
 	Failed_InvalidGoal,
-	Failed_Timeout
+	Failed_Timeout,
+	Failed_OutOfMemory
 };
 
 /**

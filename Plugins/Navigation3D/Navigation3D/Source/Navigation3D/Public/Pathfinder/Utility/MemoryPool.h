@@ -22,7 +22,7 @@ public:
 	// 복사 및 이동을 금지하여 메모리 소유권 문제를 방지
 	FPathNodeMemoryPool(const FPathNodeMemoryPool&) = delete;
 	FPathNodeMemoryPool& operator=(const FPathNodeMemoryPool&) = delete;
-
+	mutable FCriticalSection Mutex;
 	/**
 	 * 풀에서 새로운 노드를 할당받습니다.
 	 * @return 새로 할당된 노드를 가리키는 로우 포인터.
@@ -30,6 +30,7 @@ public:
 	template<typename... Args>
 	FPathNode* NewNode(Args&&... args)
 	{
+		FScopeLock Lock(&Mutex);
 		if (NumUsedNodes >= NodeMemory.Num())
 		{
 			UE_LOG(LogTemp, Error, TEXT("PathNodeMemoryPool is out of memory! Consider increasing the pool size."));

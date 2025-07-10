@@ -16,6 +16,9 @@ AUniformGridVolume::AUniformGridVolume()
 		SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("DefaultSceneRoot")));
 	}
 
+	MapSize = FIntVector(64, 64, 64);
+	VoxelExtent = 100.f;
+	
 	// 볼륨 범위 시각화용 Static Mesh 컴포넌트 생성
 	VolumeBoundsVisualizer = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VolumeBoundsVisualizer"));
 	VolumeBoundsVisualizer->SetupAttachment(RootComponent);
@@ -46,8 +49,6 @@ void AUniformGridVolume::OnConstruction(const FTransform& Transform)
 		UE_LOG(LogTemp, Warning, TEXT("AYourActor::OnConstruction - Failed to load debug mesh."));
 	}
 	// Set as default
-	MapSize = FIntVector(64, 64, 64);
-	VoxelExtent = 100.f;
 	
 	if (VolumeBoundsVisualizer)
 	{
