@@ -80,7 +80,6 @@ struct FThreadSafeBitmaskGrid
 
 	bool IsRegionWalkable(const FIntVector& VoxelIndex, int32 AgentRadiusInVoxels) const
 	{
-		TRACE_CPUPROFILER_EVENT_SCOPE(JPS_IsRegionWalkable);
 		if (AgentRadiusInVoxels < 0) return false;
 
 		const FIntVector AgentRadius(AgentRadiusInVoxels);
