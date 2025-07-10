@@ -144,7 +144,14 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 	Owner->SetActorLocation(CurrentLocation + AdjustedVelocity);
 	if (!FinalVelocity.IsNearlyZero())
 	{
-		Owner->SetActorRotation(FinalVelocity.GetSafeNormal().ToOrientationQuat());
+		const FRotator ActorRotation = Owner->GetActorRotation();
+		FRotator FinalRotation = FinalVelocity.GetSafeNormal().ToOrientationRotator();
+
+		FinalRotation.Roll = RotationAxisLock[0] ? ActorRotation.Roll : FinalRotation.Roll;
+		FinalRotation.Pitch = RotationAxisLock[1] ? ActorRotation.Pitch : FinalRotation.Pitch;
+		FinalRotation.Yaw = RotationAxisLock[2] ? ActorRotation.Yaw : FinalRotation.Yaw;
+		
+		Owner->SetActorRotation(FinalRotation);
 	}
 
 	AdjustProgressToSpline(AdjustedVelocity);
