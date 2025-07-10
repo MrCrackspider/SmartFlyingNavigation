@@ -137,10 +137,8 @@ void AFenwickVoxelVolume::RequestChunkLoad(const FIntVector& ChunkCoords)
 		return;
 	}
 
-	const FString AssetPrefix = GetUniqueAssetPrefix();
-	const FString AssetName = FString::Printf(TEXT("%s%d_%d_%d"), *AssetPrefix, ChunkCoords.X, ChunkCoords.Y,
-	                                          ChunkCoords.Z);
-	FString AssetPath = FPaths::Combine(BakedDataSaveDirectory, AssetName) + TEXT(".") + AssetName;
+
+	const FString AssetPath = GetChunkAssetPath(ChunkCoords, true);
 	FSoftObjectPath SoftPath(AssetPath);
 
 	PendingLoadChunks.Add(ChunkCoords);
@@ -688,26 +686,23 @@ void AFenwickVoxelVolume::BakeStaticDataToChunks()
 	FScopedSlowTask BakeTask(5, FText::FromString(TEXT("Baking Voxel Data...")));
 	BakeTask.MakeDialog();
 
-	// 2. 베이크에서 제외할 복셀 목록 수집
+	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Cleaning up chunk assets...")));
+	CleanUpAllChunkAssets();
+	
 	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Gathering bake exclusions...")));
 	TSet<FIntVector> ExcludedVoxels;
 	GatherBakeExclusionVoxels(ExcludedVoxels);
 
-	// 3. 월드를 스캔하여 모든 정적 장애물 복셀 탐색
 	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Scanning for static obstacles...")));
 	TSet<FIntVector> AllStaticObstacles;
 	ScanForAllStaticObstacles(ExcludedVoxels, AllStaticObstacles);
 
-	// 4. 탐색된 장애물을 청크 단위로 그룹화
+	// 탐색된 장애물을 청크 단위로 그룹화
 	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Grouping obstacles into chunks...")));
 	TMap<FIntVector, TArray<FIntVector>> ObstaclesByChunk;
 	GroupObstaclesIntoChunks(AllStaticObstacles, ObstaclesByChunk);
 
-	// 5. 더 이상 사용되지 않는 오래된 청크 애셋 정리
-	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Cleaning up stale chunk assets...")));
-	CleanUpStaleChunkAssets(ObstaclesByChunk);
-
-	// 6. 청크 데이터 애셋 생성 또는 업데이트 및 저장
+	// 청크 데이터 애셋 생성 또는 업데이트 및 저장
 	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Creating or updating chunk assets...")));
 	CreateOrUpdateChunkAssets(ObstaclesByChunk);
 
@@ -760,19 +755,7 @@ bool AFenwickVoxelVolume::IsVoxelIndexValid(const FIntVector& VoxelIndex) const
 
 FString AFenwickVoxelVolume::GetUniqueAssetPrefix() const
 {
-	const FString WorldName = GetWorld()->GetName();
-	FString SanitizedWorldName = WorldName;
-	SanitizedWorldName.ReplaceInline(TEXT(" "), TEXT("_"));
-	SanitizedWorldName.ReplaceInline(TEXT("/"), TEXT("_"));
-	SanitizedWorldName.ReplaceInline(TEXT("."), TEXT("_"));
-
-	const FString ActorName = GetName();
-	FString SanitizedActorName = ActorName;
-	SanitizedActorName.ReplaceInline(TEXT(" "), TEXT("_"));
-	SanitizedActorName.ReplaceInline(TEXT("/"), TEXT("_"));
-	SanitizedActorName.ReplaceInline(TEXT("."), TEXT("_"));
-
-	return FString::Printf(TEXT("DA_%s_%s_VoxelChunk_"), *SanitizedWorldName, *SanitizedActorName);
+	return TEXT("DA_Chunk_");
 }
 
 
@@ -894,26 +877,28 @@ void AFenwickVoxelVolume::GroupObstaclesIntoChunks(const TSet<FIntVector>& AllOb
 }
 
 // 헬퍼 함수 5: 오래된 애셋 정리
-void AFenwickVoxelVolume::CleanUpStaleChunkAssets(
-	const TMap<FIntVector, TArray<FIntVector>>& ActiveObstacleChunks) const
+void AFenwickVoxelVolume::CleanUpAllChunkAssets() const
 {
-	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(
-		FName("AssetRegistry"));
-	TArray<FAssetData> ExistingAssets;
-	AssetRegistryModule.Get().GetAssetsByPath(FName(*BakedDataSaveDirectory), ExistingAssets, true);
+	// 1. 이 볼륨의 데이터가 저장된 최종 디렉토리 경로를 가져옵니다.
+	const FString FinalSaveDirectory = GetFinalSaveDirectory();
 
-	const FString AssetPrefix = GetUniqueAssetPrefix();
-	TSet<FName> KeepPackageNames;
-	for (const auto& Pair : ActiveObstacleChunks)
+	// 2. 에셋 레지스트리를 통해 해당 디렉토리에 있는 모든 애셋을 찾습니다.
+	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(FName("AssetRegistry"));
+	TArray<FAssetData> AssetsInDirectory;
+	AssetRegistryModule.Get().GetAssetsByPath(FName(*FinalSaveDirectory), AssetsInDirectory, true);
+
+	if (AssetsInDirectory.Num() == 0)
 	{
-		const FString AssetName = FString::Printf(TEXT("%s%d_%d_%d"), *AssetPrefix, Pair.Key.X, Pair.Key.Y, Pair.Key.Z);
-		KeepPackageNames.Add(*FPaths::Combine(BakedDataSaveDirectory, AssetName));
+		// 지울 애셋이 없으면 아무것도 하지 않습니다.
+		return;
 	}
 
+	// 3. (선택적이지만 안전함) 만약의 경우를 대비해, 청크 애셋 접두사로 시작하는 파일만 삭제하도록 필터링합니다.
 	TArray<FAssetData> AssetsToDelete;
-	for (const FAssetData& Asset : ExistingAssets)
+	const FString AssetPrefix = GetUniqueAssetPrefix(); // "DA_Chunk_"
+	for (const FAssetData& Asset : AssetsInDirectory)
 	{
-		if (Asset.AssetName.ToString().StartsWith(AssetPrefix) && !KeepPackageNames.Contains(Asset.PackageName))
+		if (Asset.AssetName.ToString().StartsWith(AssetPrefix))
 		{
 			AssetsToDelete.Add(Asset);
 		}
@@ -921,8 +906,12 @@ void AFenwickVoxelVolume::CleanUpStaleChunkAssets(
 
 	if (AssetsToDelete.Num() > 0)
 	{
-		UE_LOG(LogTemp, Log, TEXT("Found %d stale chunk assets to delete."), AssetsToDelete.Num());
+		UE_LOG(LogTemp, Log, TEXT("Cleaning up %d existing chunk assets from %s before baking."), AssetsToDelete.Num(), *FinalSaveDirectory);
+        
+		// ObjectTools를 사용해 찾은 애셋들을 삭제합니다.
+		// bShowConfirmation를 false로 설정하면 사용자에게 일일이 확인하지 않고 바로 삭제합니다.
 		ObjectTools::DeleteAssets(AssetsToDelete, /*bShowConfirmation=*/true);
+		CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
 	}
 }
 
@@ -946,9 +935,8 @@ void AFenwickVoxelVolume::CreateOrUpdateChunkAssets(const TMap<FIntVector, TArra
 		const FIntVector& ChunkCoord = Pair.Key;
 		const TArray<FIntVector>& ObstaclesInThisChunk = Pair.Value;
 
-		const FString AssetName = FString::Printf(TEXT("%s%d_%d_%d"), *AssetPrefix, ChunkCoord.X, ChunkCoord.Y,
-		                                          ChunkCoord.Z);
-		const FString PackagePath = FPaths::Combine(BakedDataSaveDirectory, AssetName);
+		const FString PackagePath = GetChunkAssetPath(ChunkCoord, false);
+		const FString AssetName = FPackageName::GetShortName(PackagePath);
 
 		UPackage* Package = CreatePackage(*PackagePath);
 		Package->FullyLoad();
@@ -986,3 +974,40 @@ void AFenwickVoxelVolume::CreateOrUpdateChunkAssets(const TMap<FIntVector, TArra
 }
 
 #endif // WITH_EDITOR
+
+
+FString AFenwickVoxelVolume::GetFinalSaveDirectory() const
+{
+	// 월드(레벨) 이름을 가져와서 파일 경로에 안전한 형태로 만듭니다.
+	// 에디터에서는 GetWorld()가 유효하지만, 런타임에서는 상황에 따라 다를 수 있으므로 유효성 검사 추가
+	if (!GetWorld())
+	{
+		UE_LOG(LogTemp, Error, TEXT("GetFinalSaveDirectory: GetWorld() returned null. Cannot determine level name."));
+		return BakedDataSaveDirectory; // 실패 시 기본 경로 반환
+	}
+	const FString LevelName = FPackageName::GetShortName(GetWorld()->GetName());
+
+	// 이 볼륨 액터의 이름을 가져옵니다.
+	const FString ActorName = GetName();
+
+	// 기본 저장 경로와 월드, 액터 이름을 조합하여 최종 경로를 만듭니다.
+	return FPaths::Combine(BakedDataSaveDirectory, LevelName, ActorName);
+}
+
+FString AFenwickVoxelVolume::GetChunkAssetPath(const FIntVector& ChunkCoords, bool bIsSoftPath) const
+{
+	const FString FinalSaveDirectory = GetFinalSaveDirectory();
+	const FString AssetPrefix = GetUniqueAssetPrefix(); // 이제 "DA_Chunk_"를 반환
+
+	const FString AssetName = FString::Printf(TEXT("%s%d_%d_%d"), *AssetPrefix, ChunkCoords.X, ChunkCoords.Y, ChunkCoords.Z);
+	const FString PackagePath = FPaths::Combine(FinalSaveDirectory, AssetName);
+
+	if (bIsSoftPath)
+	{
+		// UObject 경로 형식: /Game/Path/AssetName.AssetName
+		return PackagePath + TEXT(".") + AssetName;
+	}
+    
+	// 패키지 경로 형식: /Game/Path/AssetName
+	return PackagePath;
+}

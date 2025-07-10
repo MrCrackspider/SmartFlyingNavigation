@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Pathfinder/ThreadSafeBitmask.h"
 #include "PathfindingRequest.generated.h"
 
 DECLARE_DYNAMIC_DELEGATE_TwoParams(FPathfindingResultDelegate, const TArray<FIntVector>&, Path, bool, bSuccess);
@@ -41,4 +42,6 @@ struct FPathfindingRequest
 	TWeakObjectPtr<UObject> RequestingObject;
 	
 	FPathfindingResultDelegate OnPathfindingComplete;
+
+	FThreadSafeBitmaskGrid WalkabilityGrid;
 };

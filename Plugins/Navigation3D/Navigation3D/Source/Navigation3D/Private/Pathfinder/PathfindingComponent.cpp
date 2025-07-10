@@ -64,7 +64,7 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 		World->GetTimerManager().ClearTimer(RepathCooldownTimer);
 	}
 
-	AUniformGridVolume* GridVolume = Cast<AUniformGridVolume>(TargetVolume);
+	AFenwickVoxelVolume* GridVolume = Cast<AFenwickVoxelVolume>(TargetVolume);
 	if (!GridVolume)
 	{
 		UE_LOG(LogTemp, Error, TEXT("RequestPathToLocation failed: Strategy or TargetVolume is not set."));
@@ -81,6 +81,10 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	Request.StartIndex = GridVolume->WorldToVoxelIndex(GetOwner()->GetActorLocation());
 	Request.EndIndex = GridVolume->WorldToVoxelIndex(TargetLocation);
 	Request.AgentRadiusInVoxels = FMath::CeilToInt((AgentRadius / GridVolume->VoxelExtent) - 0.5f);
+	Request.WalkabilityGrid.GridSize = GridVolume->MapSize;
+	Request.WalkabilityGrid.ObstacleBitmasks_X = GridVolume->ObstacleBitmasks_X;
+	
+	
 
 	//    결과를 받을 콜백 함수를 지정합니다.
 	Request.OnPathfindingComplete.BindDynamic(this, &UPathfindingComponent::OnPathfindingCompleted);

@@ -141,13 +141,18 @@ private:
 	/** 모든 장애물 복셀을 청크 좌표에 따라 그룹화합니다. */
 	void GroupObstaclesIntoChunks(const TSet<FIntVector>& AllObstacles, TMap<FIntVector, TArray<FIntVector>>& OutObstaclesByChunk) const;
 
-	/** 현재 장애물이 없는 오래된 청크 데이터 애셋을 삭제합니다. */
-	void CleanUpStaleChunkAssets(const TMap<FIntVector, TArray<FIntVector>>& ActiveObstacleChunks) const;
+	/** 청크 데이터 애셋을 전부 삭제합니다. */
+	void CleanUpAllChunkAssets() const;
 
 	/** 청크 데이터를 기반으로 데이터 애셋을 생성하거나 업데이트합니다. */
 	void CreateOrUpdateChunkAssets(const TMap<FIntVector, TArray<FIntVector>>& ObstaclesByChunk);
 #endif
 
+	FString GetFinalSaveDirectory() const;
+	
+	FString GetChunkAssetPath(const FIntVector& ChunkCoords, bool bIsSoftPath) const;
+
+	
 	
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Filter", meta=(AllowPrivateAccess="true"))

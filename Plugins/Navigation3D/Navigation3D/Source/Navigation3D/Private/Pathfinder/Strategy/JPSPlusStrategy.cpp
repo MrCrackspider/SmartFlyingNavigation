@@ -52,13 +52,9 @@ bool UJPSPlusStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest
 			ActualGoalIndex = NearestWalkableVoxel;
 		}
 	}
-
-	FThreadSafeBitmaskGrid WalkabilityGrid;
-	WalkabilityGrid.GridSize = Volume->MapSize;
-	WalkabilityGrid.ObstacleBitmasks_X = Volume->ObstacleBitmasks_X;
-
+	
 	// 3. '일꾼' 객체 생성 및 작업 위임
-	FJPSPlusPathfinder Pathfinder(InRequest, WalkabilityGrid, AllDirections, DirectionToIndexMap, ActualGoalIndex);
+	FJPSPlusPathfinder Pathfinder(InRequest, AllDirections, DirectionToIndexMap, ActualGoalIndex);
 
 	const EPathfindingResult Result = Pathfinder.FindPath(OutPath);
 
@@ -111,12 +107,11 @@ FName UJPSPlusStrategy::GetStrategyName() const
 thread_local static FPathNodeMemoryPool ThreadLocalPool(1024);
 
 FJPSPlusPathfinder::FJPSPlusPathfinder(const FPathfindingRequest& InRequest,
-									   const FThreadSafeBitmaskGrid& InGrid,
 									   const TArray<FIntVector>& InAllDirections,
 									   const TMap<FIntVector, int32>& InDirectionToIndexMap,
 									   FIntVector InActualGoal)
   : Request(InRequest)
-  , WalkabilityGrid(InGrid)
+  , WalkabilityGrid(InRequest.WalkabilityGrid)
   , AllDirections(InAllDirections)
   , DirectionToIndexMap(InDirectionToIndexMap)
   , ActualGoalIndex(InActualGoal)
