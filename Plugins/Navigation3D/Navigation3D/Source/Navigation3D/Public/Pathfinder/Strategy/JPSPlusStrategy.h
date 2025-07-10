@@ -77,7 +77,7 @@ class NAVIGATION3D_API UJPSPlusStrategy : public UPathfindingStrategy
 
 public:
 	// UObject로서의 역할만 수행합니다.
-	virtual void Initialize(AVoxelVolumeBase* InVolume) override;
+	virtual void Initialize() override;
 	virtual bool FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FIntVector>& OutPath) override;
 	virtual bool ShouldRepathForOptimization(const FVector& CurrentAgentLocation, const TArray<FVector>& CurrentPath,
 	                                         int32 CurrentPathIndex, const FVector& GoalLocation,
@@ -85,9 +85,7 @@ public:
 	virtual FName GetStrategyName() const override;
 
 private:
-	// 멤버 변수들이 대폭 줄어듭니다.
-	TWeakObjectPtr<AFenwickVoxelVolume> Volume;
-
+	
 	// 이 데이터는 한 번만 계산하고 모든 '일꾼'에게 공유합니다.
 	//TUniquePtr<FPathNodeMemoryPool> NodePool;
 	TArray<FIntVector> AllDirections;

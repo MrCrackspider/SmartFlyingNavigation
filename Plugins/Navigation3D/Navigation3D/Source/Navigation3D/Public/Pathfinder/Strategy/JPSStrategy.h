@@ -20,7 +20,7 @@ class NAVIGATION3D_API UJPSStrategy final : public UPathfindingStrategy
     GENERATED_BODY()
 
 public:
-    virtual void Initialize(AVoxelVolumeBase* InVolume) override;
+    virtual void Initialize() override;
     virtual bool FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FIntVector>& OutPath) override;
     virtual FName GetStrategyName() const override;
 

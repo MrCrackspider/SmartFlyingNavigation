@@ -31,7 +31,7 @@ class NAVIGATION3D_API UPathfindingStrategy : public UObject
 	GENERATED_BODY()
 
 public:
-	virtual void Initialize(AVoxelVolumeBase* InVolume);
+	virtual void Initialize();
 
 	virtual bool FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FIntVector>& OutPath);
 	

@@ -30,7 +30,7 @@ struct FPathfindingRequest
 
 	UPROPERTY()
 	FIntVector EndIndex;
-
+	
 	UPROPERTY()
 	int32 AgentRadiusInVoxels = 0;
 

@@ -341,7 +341,7 @@ void UPathfindingComponent::BeginPlay()
 		PathfindingStrategy = NewObject<UPathfindingStrategy>(this, PathfindingStrategyClass);
 		if (PathfindingStrategy)
 		{
-			PathfindingStrategy->Initialize(TargetVolume);
+			PathfindingStrategy->Initialize();
 		}
 	}
 	else

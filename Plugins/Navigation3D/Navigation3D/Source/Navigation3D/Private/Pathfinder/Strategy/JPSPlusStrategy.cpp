@@ -1,23 +1,14 @@
 ﻿// JPSStrategy.cpp
 #include "Pathfinder/Strategy/JPSPlusStrategy.h"
-#include "Pathfinder/FenwickVoxelVolume.h"
 #include "Pathfinder/Utility/StrategyUtils.h"
 #include "Algo/Reverse.h"
 #include "DrawDebugHelpers.h"
 
 
-#include "Pathfinder/Utility/StrategyUtils.h"
-
-void UJPSPlusStrategy::Initialize(AVoxelVolumeBase* InVolume)
+void UJPSPlusStrategy::Initialize()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(JPS_Initialize);
-
-	Volume = Cast<AFenwickVoxelVolume>(InVolume);
-	if (Volume.IsValid() == false)
-	{
-		UE_LOG(LogTemp, Error, TEXT("UJPSPlusStrategy: The volume is invalid, Need AUniformGridVolume!! "));
-	}
-
+	
 	if (AllDirections.Num() == 0)
 	{
 		for (int32 x = -1; x <= 1; ++x)
@@ -34,25 +25,18 @@ void UJPSPlusStrategy::Initialize(AVoxelVolumeBase* InVolume)
 	}
 }
 
+
 bool UJPSPlusStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FIntVector>& OutPath)
 {
-	if (!Volume.IsValid())
-	{
-		UE_LOG(LogTemp, Error, TEXT("UJPSPlusStrategy: VoxelVolume is not valid. Pathfinding aborted."));
-		OutPath.Empty();
-		return false;
-	}
-
 	FIntVector ActualGoalIndex = InRequest.EndIndex;
-	if (!Volume->IsRegionWalkable(InRequest.EndIndex, InRequest.AgentRadiusInVoxels))
+	if (InRequest.WalkabilityGrid.IsRegionWalkable(InRequest.EndIndex, InRequest.AgentRadiusInVoxels))
 	{
 		FIntVector NearestWalkableVoxel;
-		if (Volume->FindNearestWalkableVoxel(InRequest.EndIndex, InRequest.AgentRadiusInVoxels, 50, NearestWalkableVoxel))
+		if (InRequest.WalkabilityGrid.FindNearestWalkableVoxel_Bitmask26(InRequest.EndIndex, InRequest.AgentRadiusInVoxels,50, NearestWalkableVoxel))
 		{
 			ActualGoalIndex = NearestWalkableVoxel;
 		}
 	}
-	
 	// 3. '일꾼' 객체 생성 및 작업 위임
 	FJPSPlusPathfinder Pathfinder(InRequest, AllDirections, DirectionToIndexMap, ActualGoalIndex);
 

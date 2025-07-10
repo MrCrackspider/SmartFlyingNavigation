@@ -52,7 +52,6 @@ public:
 	virtual void GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const override;
 	//~ End AUniformGridVolume Interface
 
-	bool FindNearestWalkableVoxel(const FIntVector& TargetVoxel, int32 AgentRadiusInVoxels, int32 SearchRadiusInVoxels, FIntVector& OutNearestWalkableVoxel) const;
 	void UpdateStreamingState();
 	void RequestChunkLoad(const FIntVector& ChunkCoords);
 	void OnChunkLoadCompleted(FSoftObjectPath LoadedAssetPath, FIntVector ChunkCoords);
