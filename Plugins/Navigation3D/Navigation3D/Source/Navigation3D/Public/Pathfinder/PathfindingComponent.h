@@ -161,6 +161,9 @@ private:
 	float MovementSpeed = 500.f;
 
 	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+	float RotationInterpSpeed = 5.0f; 
+
+	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
 	TArray<bool> RotationAxisLock = {false, false, false};
 	
 	// --- 동적 재탐색 설정 ---

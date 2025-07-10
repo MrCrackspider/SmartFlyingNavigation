@@ -128,31 +128,40 @@ FVector UPathfindingComponent::GetPreferredVelocity() const
 
 	return PreferredVelocity;
 }
-
 void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float DeltaTime)
 {
 	AActor* Owner = GetOwner();
 	if (!Owner || !PathSplinePtr.IsValid() || FoundPath.IsEmpty()) return;
 
-	// 1. 실제 이동 및 회전 (기존과 동일)
+	// 1. 실제 이동 (기존과 동일)
 	const FVector CurrentLocation = Owner->GetActorLocation();
-
 	CurrentVelocity = FinalVelocity;
-
 	const FVector AdjustedVelocity = FinalVelocity * DeltaTime;
-
 	Owner->SetActorLocation(CurrentLocation + AdjustedVelocity);
+
+	// --- 회전 로직 수정 ---
 	if (!FinalVelocity.IsNearlyZero())
 	{
-		const FRotator ActorRotation = Owner->GetActorRotation();
-		FRotator FinalRotation = FinalVelocity.GetSafeNormal().ToOrientationRotator();
+		// 현재 회전값 가져오기
+		const FRotator CurrentRotation = Owner->GetActorRotation();
+        
+		// 목표 회전값 계산 (이동 방향을 바라보도록)
+		FRotator TargetRotation = FinalVelocity.GetSafeNormal().ToOrientationRotator();
 
-		FinalRotation.Roll = RotationAxisLock[0] ? ActorRotation.Roll : FinalRotation.Roll;
-		FinalRotation.Pitch = RotationAxisLock[1] ? ActorRotation.Pitch : FinalRotation.Pitch;
-		FinalRotation.Yaw = RotationAxisLock[2] ? ActorRotation.Yaw : FinalRotation.Yaw;
-		
-		Owner->SetActorRotation(FinalRotation);
+		// [중요] 축 잠금(Axis Lock)을 목표 회전값에 먼저 적용
+		// 잠긴 축은 현재 회전값을 그대로 유지하도록 하여, 해당 축으로는 회전 보간이 일어나지 않게 함
+		TargetRotation.Roll = RotationAxisLock[0] ? CurrentRotation.Roll : TargetRotation.Roll;
+		TargetRotation.Pitch = RotationAxisLock[1] ? CurrentRotation.Pitch : TargetRotation.Pitch;
+		TargetRotation.Yaw = RotationAxisLock[2] ? CurrentRotation.Yaw : TargetRotation.Yaw;
+
+		// [핵심] RInterpTo를 사용하여 현재 회전에서 목표 회전으로 부드럽게 보간
+		// 이 함수는 두 회전값 사이의 최단 경로를 자동으로 계산해 줍니다.
+		FRotator NewRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, RotationInterpSpeed);
+
+		// 최종적으로 계산된 부드러운 회전값 적용
+		Owner->SetActorRotation(NewRotation);
 	}
+	// --- 회전 로직 수정 끝 ---
 
 	AdjustProgressToSpline(AdjustedVelocity);
 }
