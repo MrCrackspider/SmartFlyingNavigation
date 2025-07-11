@@ -7,6 +7,7 @@
 #include "Engine/StreamableManager.h"
 #include "Pathfinder/PathfindingComponent.h"
 #include "Pathfinder/StaticVoxelChunkData.h"
+#include "Pathfinder/ChunkDataHolder.h"
 
 
 #if WITH_EDITOR

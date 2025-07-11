@@ -3,11 +3,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "ChunkDataHolder.h"
 #include "UniformGridVolume.h"
 #include "StaticVoxelChunkData.h"
 #include "Navigation3D/VoxelObstacleFilter.h"
 #include "FenwickVoxelVolume.generated.h"
+
+class AChunkDataHolder;
 
 USTRUCT()
 struct FActiveFenwickChunk
