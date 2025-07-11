@@ -1,7 +1,9 @@
 ﻿#include "Pathfinder/FenwickVoxelVolume.h"
 
+#include "EditorLevelUtils.h"
 #include "ObjectTools.h"
 #include "Engine/AssetManager.h"
+#include "Engine/LevelStreamingDynamic.h"
 #include "Engine/StreamableManager.h"
 #include "Pathfinder/PathfindingComponent.h"
 #include "Pathfinder/StaticVoxelChunkData.h"
@@ -29,10 +31,10 @@ void AFenwickVoxelVolume::BeginPlay()
 	Super::BeginPlay();
 	InitializeDataStructures();
 
-	GetWorldTimerManager().SetTimer(StreamingUpdateTimer, this, &AFenwickVoxelVolume::UpdateStreamingState, 1.0f, true,
+	GetWorldTimerManager().SetTimer(StreamingUpdateTimer, this, &AFenwickVoxelVolume::UpdateStreamingState, 0.05f, true,
 	                                0.5f);
-	GetWorldTimerManager().SetTimer(DynamicObstacleTimer, this, &AFenwickVoxelVolume::UpdateDynamicObstacles, 0.3f,
-	                                true, 0.1f);
+	// GetWorldTimerManager().SetTimer(DynamicObstacleTimer, this, &AFenwickVoxelVolume::UpdateDynamicObstacles, 0.3f,
+	//                                 true, 0.1f);
 
 	bIsReady = true;
 	UE_LOG(LogTemp, Log, TEXT("FenwickVoxelVolume streaming system initialized."));
@@ -87,10 +89,8 @@ void AFenwickVoxelVolume::UpdateStreamingState()
 
 	for (auto It = StreamingAgents.CreateIterator(); It; ++It)
 	{
-		TWeakObjectPtr<AActor> AgentPtr = *It;
-		if (AgentPtr.IsValid())
+		if (AActor* Agent = It->Get())
 		{
-			AActor* Agent = AgentPtr.Get();
 			const FIntVector AgentChunkCoords = WorldToChunkCoords(Agent->GetActorLocation());
 			for (int32 z = -StreamingRangeInChunks.Z; z <= StreamingRangeInChunks.Z; ++z)
 			{
@@ -132,131 +132,57 @@ void AFenwickVoxelVolume::UpdateStreamingState()
 
 void AFenwickVoxelVolume::RequestChunkLoad(const FIntVector& ChunkCoords)
 {
-	if (PendingLoadChunks.Contains(ChunkCoords) || ActiveChunks.Contains(ChunkCoords))
+	if (PendingStreamingLevels.Contains(ChunkCoords) || ActiveStreamingLevels.Contains(ChunkCoords))
 	{
 		return;
 	}
 
 
-	const FString AssetPath = GetChunkAssetPath(ChunkCoords, true);
-	FSoftObjectPath SoftPath(AssetPath);
+	const FString LevelToLoadPath = GetChunkAssetPath(ChunkCoords);
+	bool bSuccess = false;
 
-	PendingLoadChunks.Add(ChunkCoords);
-	UAssetManager::Get().GetStreamableManager().RequestAsyncLoad(
-		SoftPath, FStreamableDelegate::CreateUObject(this, &AFenwickVoxelVolume::OnChunkLoadCompleted, SoftPath,
-		                                             ChunkCoords));
-}
+	ULevelStreamingDynamic* StreamingLevel = ULevelStreamingDynamic::LoadLevelInstanceBySoftObjectPtr(
+		this, TSoftObjectPtr<UWorld>(FSoftObjectPath(LevelToLoadPath)), FVector::ZeroVector, FRotator::ZeroRotator,
+		bSuccess);
 
-void AFenwickVoxelVolume::OnChunkLoadCompleted(FSoftObjectPath LoadedAssetPath, FIntVector ChunkCoords)
-{
-	PendingLoadChunks.Remove(ChunkCoords);
-	if (!RequiredChunks.Contains(ChunkCoords)) return;
-
-	UStaticVoxelChunkData* LoadedData = Cast<UStaticVoxelChunkData>(LoadedAssetPath.ResolveObject());
-	if (LoadedData)
+	if (bSuccess && StreamingLevel)
 	{
-		ActiveChunks.Add(ChunkCoords, LoadedData);
-		const FIntVector ChunkOriginGlobal = ChunkCoords * FIntVector(CHUNK_SIZE);
-
-		for (int32 i = 0; i < LoadedData->ObstacleBitmasks_X.Num(); ++i)
-		{
-			uint64 Mask = LoadedData->ObstacleBitmasks_X[i];
-			if (Mask == 0) continue;
-
-			const int32 LocalZ = i / CHUNK_SIZE;
-			const int32 LocalY = i % CHUNK_SIZE;
-
-			while (Mask != 0)
-			{
-				unsigned long StartBitIndex;
-				_BitScanForward64(&StartBitIndex, Mask);
-				uint64 TempMask = Mask >> StartBitIndex;
-				unsigned long EndBitOffset;
-				_BitScanForward64(&EndBitOffset, ~TempMask);
-				if (EndBitOffset == 0 && TempMask != 1) EndBitOffset = 64;
-
-				const uint32 RunLength = (EndBitOffset == 0) ? 1 : EndBitOffset;
-				const uint32 EndBitIndex = StartBitIndex + RunLength - 1;
-
-				const FIntVector WorldMin = ChunkOriginGlobal + FIntVector(StartBitIndex, LocalY, LocalZ);
-				const FIntVector WorldMax = ChunkOriginGlobal + FIntVector(EndBitIndex, LocalY, LocalZ);
-
-				FenwUpdateCuboid(WorldMin, WorldMax, 1);
-				ChunkObstacleCounter.FindOrAdd(ChunkCoords, 0) += RunLength;
-
-				const uint64 ProcessedMask = (~0ULL >> (64 - RunLength)) << StartBitIndex;
-				Mask &= ~ProcessedMask;
-
-				for (uint32 x = StartBitIndex; x <= EndBitIndex; ++x)
-				{
-					const FIntVector ObstacleIndex = ChunkOriginGlobal + FIntVector(x, LocalY, LocalZ);
-					StaticObstacleVoxels.Add(ObstacleIndex);
-					UpdateVoxelObstacleState(ObstacleIndex, true);
-				}
-			}
-		}
+		PendingStreamingLevels.Add(ChunkCoords);
+		ActiveStreamingLevels.Add(ChunkCoords, StreamingLevel);
+		//StreamingLevel->OnLevelLoaded.AddDynamic(this, &AFenwickVoxelVolume::OnLevelLoadCompleted);
 	}
 	else
 	{
-		ActiveChunks.Add(ChunkCoords, nullptr);
+		// 파일이 없는 경우 (장애물이 없는 빈 청크)는 정상적인 상황이므로, 에러 로그를 남기지 않습니다.
+		// UE_LOG(LogTemp, Warning, TEXT("Failed to request chunk load for %s. The .umap asset might not exist."), *ChunkCoords.ToString());
 	}
 }
 
 void AFenwickVoxelVolume::UnloadChunk(const FIntVector& ChunkCoords)
 {
-	TObjectPtr<UStaticVoxelChunkData> DataAsset;
-	ChunkObstacleCounter.Remove(ChunkCoords);
-	if (ActiveChunks.RemoveAndCopyValue(ChunkCoords, DataAsset))
+	// 1. 활성화된 스트리밍 레벨 맵에서 해당 청크를 찾습니다.
+	if (auto* StreamingLevelPtr = ActiveStreamingLevels.Find(ChunkCoords))
 	{
-		if (DataAsset)
+		if (ULevelStreamingDynamic* StreamingLevel = *StreamingLevelPtr)
 		{
-			const FIntVector ChunkOriginGlobal = ChunkCoords * FIntVector(CHUNK_SIZE);
-
-			for (int32 i = 0; i < DataAsset->ObstacleBitmasks_X.Num(); ++i)
-			{
-				uint64 Mask = DataAsset->ObstacleBitmasks_X[i];
-				if (Mask == 0) continue;
-
-				const int32 LocalZ = i / CHUNK_SIZE;
-				const int32 LocalY = i % CHUNK_SIZE;
-
-				while (Mask != 0)
-				{
-					unsigned long StartBitIndex;
-					_BitScanForward64(&StartBitIndex, Mask);
-					uint64 TempMask = Mask >> StartBitIndex;
-					unsigned long EndBitOffset;
-					_BitScanForward64(&EndBitOffset, ~TempMask);
-					if (EndBitOffset == 0 && TempMask != 1) EndBitOffset = 64;
-
-					const uint32 RunLength = (EndBitOffset == 0) ? 1 : EndBitOffset;
-					const uint32 EndBitIndex = StartBitIndex + RunLength - 1;
-
-					const FIntVector WorldMin = ChunkOriginGlobal + FIntVector(StartBitIndex, LocalY, LocalZ);
-					const FIntVector WorldMax = ChunkOriginGlobal + FIntVector(EndBitIndex, LocalY, LocalZ);
-
-					FenwUpdateCuboid(WorldMin, WorldMax, -1);
-
-					const uint64 ProcessedMask = (~0ULL >> (64 - RunLength)) << StartBitIndex;
-					Mask &= ~ProcessedMask;
-
-					for (uint32 x = StartBitIndex; x <= EndBitIndex; ++x)
-					{
-						const FIntVector ObstacleIndex = ChunkOriginGlobal + FIntVector(x, LocalY, LocalZ);
-						if (IsIndexValid(ObstacleIndex))
-						{
-							StaticObstacleVoxels.Remove(ObstacleIndex);
-							if (!DynamicObstacleVoxelCounts.Contains(ObstacleIndex))
-							{
-								UpdateVoxelObstacleState(ObstacleIndex, false);
-							}
-						}
-					}
-				}
-			}
-			UE_LOG(LogTemp, Verbose, TEXT("Chunk %s unloaded and removed from Fenwick Tree."), *ChunkCoords.ToString());
+			// 2. 레벨 스트리머에게 이 레벨이 더 이상 로드될 필요가 없다고 알립니다.
+			StreamingLevel->SetShouldBeLoaded(false);
+			// 3. 언로드가 완료되면 메모리에서 완전히 제거하도록 요청합니다.
+			StreamingLevel->SetIsRequestingUnloadAndRemoval(true);
 		}
+
+		// 4. 우리 관리 목록에서 해당 청크를 제거합니다.
+		ActiveStreamingLevels.Remove(ChunkCoords);
+		UE_LOG(LogTemp, Log, TEXT("Requested unload for chunk %s."), *ChunkCoords.ToString());
 	}
+}
+
+void AFenwickVoxelVolume::OnLevelLoadCompleted()
+{
+	// 이 콜백은 레벨이 로드되었다는 신호입니다.
+	// 실제 데이터 처리는 해당 레벨의 AChunkDataHolder가 BeginPlay에서 RegisterChunkFromLevel을 호출할 때 이루어집니다.
+	// 여기서는 Pending 상태를 제거하는 등의 관리 작업만 하면 됩니다.
+	// 어떤 청크가 로드되었는지 식별하는 로직이 필요하지만, 지금은 단순하게 둡니다.
 }
 
 void AFenwickVoxelVolume::FenwUpdate(const FIntVector& Index, int32 Delta)
@@ -275,6 +201,7 @@ void AFenwickVoxelVolume::FenwUpdate(const FIntVector& Index, int32 Delta)
 
 void AFenwickVoxelVolume::FenwUpdateCuboid(const FIntVector& MinCorner, const FIntVector& MaxCorner, int32 Delta)
 {
+	return;
 	const FIntVector MaxPlusOne = MaxCorner + FIntVector(1, 1, 1);
 	TRACE_CPUPROFILER_EVENT_SCOPE(JPS_FenwUpdateCuboid);
 	FenwUpdate(FIntVector(MinCorner.X, MinCorner.Y, MinCorner.Z), +Delta);
@@ -588,6 +515,136 @@ void AFenwickVoxelVolume::UnregisterStreamingAgent(AActor* Agent)
 	if (Agent) StreamingAgents.Remove(Agent);
 }
 
+void AFenwickVoxelVolume::RegisterChunkFromLevel(AChunkDataHolder* ChunkHolder)
+{
+	if (!ChunkHolder || !ChunkHolder->VoxelChunkData)
+	{
+		UE_LOG(LogTemp, Warning,
+		       TEXT("RegisterChunkFromLevel: Received an invalid ChunkHolder or it has no VoxelChunkData."));
+		return;
+	}
+
+	const FIntVector& ChunkCoords = ChunkHolder->ChunkCoords;
+	UStaticVoxelChunkData* LoadedData = ChunkHolder->VoxelChunkData;
+
+	// 로드 대기 목록에서 제거
+	PendingStreamingLevels.Remove(ChunkCoords);
+
+	const FIntVector ChunkOriginGlobal = ChunkCoords * CHUNK_SIZE;
+
+	// 청크 데이터에 포함된 모든 장애물 복셀을 순회하며 시스템에 등록합니다.
+	for (int32 i = 0; i < LoadedData->ObstacleBitmasks_X.Num(); ++i)
+	{
+		uint64 Mask = LoadedData->ObstacleBitmasks_X[i];
+		if (Mask == 0) continue;
+
+		const int32 LocalZ = i / CHUNK_SIZE;
+		const int32 LocalY = i % CHUNK_SIZE;
+
+		// 비트마스크에서 연속된 '1' (장애물 덩어리)을 찾아 한 번에 처리합니다.
+		while (Mask != 0)
+		{
+			unsigned long StartBitIndex;
+			_BitScanForward64(&StartBitIndex, Mask);
+
+			uint64 TempMask = Mask >> StartBitIndex;
+			unsigned long EndBitOffset;
+			_BitScanForward64(&EndBitOffset, ~TempMask);
+
+			// 64비트가 모두 1인 경우 EndBitOffset이 0으로 나올 수 있어 예외 처리
+			if (EndBitOffset == 0 && TempMask != 1) EndBitOffset = 64;
+
+			const uint32 RunLength = (EndBitOffset == 0) ? 1 : EndBitOffset;
+			const uint32 EndBitIndex = StartBitIndex + RunLength - 1;
+
+			// 펜윅 트리를 업데이트하기 위한 월드 좌표 계산
+			const FIntVector WorldMin = ChunkOriginGlobal + FIntVector(StartBitIndex, LocalY, LocalZ);
+			const FIntVector WorldMax = ChunkOriginGlobal + FIntVector(EndBitIndex, LocalY, LocalZ);
+
+			// 펜윅 트리에 장애물 개수(Delta=1)를 더합니다.
+			FenwUpdateCuboid(WorldMin, WorldMax, 1);
+
+			// 처리된 비트를 마스크에서 제거합니다.
+			const uint64 ProcessedMask = (~0ULL >> (64 - RunLength)) << StartBitIndex;
+			Mask &= ~ProcessedMask;
+
+			// 각 복셀에 대해 개별 상태를 업데이트합니다.
+			for (uint32 x = StartBitIndex; x <= EndBitIndex; ++x)
+			{
+				const FIntVector ObstacleIndex = ChunkOriginGlobal + FIntVector(x, LocalY, LocalZ);
+				StaticObstacleVoxels.Add(ObstacleIndex);
+				UpdateVoxelObstacleState(ObstacleIndex, true);
+			}
+		}
+	}
+	UE_LOG(LogTemp, Log, TEXT("Chunk %s registered from loaded level."), *ChunkCoords.ToString());
+}
+
+void AFenwickVoxelVolume::UnregisterChunkFromLevel(AChunkDataHolder* ChunkHolder)
+{
+	if (!ChunkHolder || !ChunkHolder->VoxelChunkData)
+	{
+		UE_LOG(LogTemp, Warning,
+		       TEXT("UnregisterChunkFromLevel: Received an invalid ChunkHolder or it has no VoxelChunkData."));
+		return;
+	}
+
+	const FIntVector& ChunkCoords = ChunkHolder->ChunkCoords;
+	UStaticVoxelChunkData* DataAsset = ChunkHolder->VoxelChunkData;
+
+	const FIntVector ChunkOriginGlobal = ChunkCoords * CHUNK_SIZE;
+
+	// 청크 데이터에 포함된 모든 장애물 복셀을 순회하며 시스템에서 등록 해제합니다.
+	for (int32 i = 0; i < DataAsset->ObstacleBitmasks_X.Num(); ++i)
+	{
+		uint64 Mask = DataAsset->ObstacleBitmasks_X[i];
+		if (Mask == 0) continue;
+
+		const int32 LocalZ = i / CHUNK_SIZE;
+		const int32 LocalY = i % CHUNK_SIZE;
+
+		while (Mask != 0)
+		{
+			unsigned long StartBitIndex;
+			_BitScanForward64(&StartBitIndex, Mask);
+
+			uint64 TempMask = Mask >> StartBitIndex;
+			unsigned long EndBitOffset;
+			_BitScanForward64(&EndBitOffset, ~TempMask);
+
+			if (EndBitOffset == 0 && TempMask != 1) EndBitOffset = 64;
+
+			const uint32 RunLength = (EndBitOffset == 0) ? 1 : EndBitOffset;
+			const uint32 EndBitIndex = StartBitIndex + RunLength - 1;
+
+			const FIntVector WorldMin = ChunkOriginGlobal + FIntVector(StartBitIndex, LocalY, LocalZ);
+			const FIntVector WorldMax = ChunkOriginGlobal + FIntVector(EndBitIndex, LocalY, LocalZ);
+
+			// 펜윅 트리에 장애물 개수(Delta=-1)를 뺍니다.
+			FenwUpdateCuboid(WorldMin, WorldMax, -1);
+
+			const uint64 ProcessedMask = (~0ULL >> (64 - RunLength)) << StartBitIndex;
+			Mask &= ~ProcessedMask;
+
+			// 각 복셀에 대해 개별 상태를 업데이트합니다.
+			for (uint32 x = StartBitIndex; x <= EndBitIndex; ++x)
+			{
+				const FIntVector ObstacleIndex = ChunkOriginGlobal + FIntVector(x, LocalY, LocalZ);
+				if (IsIndexValid(ObstacleIndex))
+				{
+					StaticObstacleVoxels.Remove(ObstacleIndex);
+					// 동적 장애물이 해당 위치를 점유하고 있지 않은 경우에만 복셀 상태를 '걸을 수 있음'으로 변경합니다.
+					if (!DynamicObstacleVoxelCounts.Contains(ObstacleIndex))
+					{
+						UpdateVoxelObstacleState(ObstacleIndex, false);
+					}
+				}
+			}
+		}
+	}
+	UE_LOG(LogTemp, Log, TEXT("Chunk %s unregistered from unloaded level."), *ChunkCoords.ToString());
+}
+
 //======================================================================
 // --- EDITOR BAKING ---
 //======================================================================
@@ -595,19 +652,17 @@ void AFenwickVoxelVolume::UnregisterStreamingAgent(AActor* Agent)
 
 void AFenwickVoxelVolume::BakeStaticDataToChunks()
 {
-	// 1. 베이크 사전 조건 확인 (예: 맵 크기, 저장 경로 유효성)
-	if (!ValidateBakePrerequisites())
-	{
-		return;
-	}
+	if (!ValidateBakePrerequisites()) return;
 
-	// 전체 베이크 과정을 위한 FScopedSlowTask
+	const FString FinalSaveDirectory = GetFinalSaveDirectory();
+
+	
 	FScopedSlowTask BakeTask(5, FText::FromString(TEXT("Baking Voxel Data...")));
 	BakeTask.MakeDialog();
 
-	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Cleaning up chunk assets...")));
+	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Cleaning up old chunk assets...")));
 	CleanUpAllChunkAssets();
-	
+
 	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Gathering bake exclusions...")));
 	TSet<FIntVector> ExcludedVoxels;
 	GatherBakeExclusionVoxels(ExcludedVoxels);
@@ -616,17 +671,15 @@ void AFenwickVoxelVolume::BakeStaticDataToChunks()
 	TSet<FIntVector> AllStaticObstacles;
 	ScanForAllStaticObstacles(ExcludedVoxels, AllStaticObstacles);
 
-	// 탐색된 장애물을 청크 단위로 그룹화
 	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Grouping obstacles into chunks...")));
 	TMap<FIntVector, TArray<FIntVector>> ObstaclesByChunk;
 	GroupObstaclesIntoChunks(AllStaticObstacles, ObstaclesByChunk);
 
-	// 청크 데이터 애셋 생성 또는 업데이트 및 저장
-	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Creating or updating chunk assets...")));
-	CreateOrUpdateChunkAssets(ObstaclesByChunk);
-
+	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Creating new chunk assets...")));
+	CreateOrUpdateChunkAssets(ObstaclesByChunk, FinalSaveDirectory);
 	UE_LOG(LogTemp, Log, TEXT("Static data baking process completed successfully."));
 }
+
 #endif
 
 //======================================================================
@@ -635,10 +688,11 @@ void AFenwickVoxelVolume::BakeStaticDataToChunks()
 FIntVector AFenwickVoxelVolume::WorldToChunkCoords(const FVector& WorldPos) const
 {
 	const FVector LocalPos = GetTransform().InverseTransformPosition(WorldPos);
+	const float ChunkWorldSize = CHUNK_SIZE * VoxelExtent;
 	return FIntVector(
-		FMath::FloorToInt(LocalPos.X / (CHUNK_SIZE * VoxelExtent)),
-		FMath::FloorToInt(LocalPos.Y / (CHUNK_SIZE * VoxelExtent)),
-		FMath::FloorToInt(LocalPos.Z / (CHUNK_SIZE * VoxelExtent))
+		FMath::FloorToInt(LocalPos.X / ChunkWorldSize),
+		FMath::FloorToInt(LocalPos.Y / ChunkWorldSize),
+		FMath::FloorToInt(LocalPos.Z / ChunkWorldSize)
 	);
 }
 
@@ -788,145 +842,187 @@ void AFenwickVoxelVolume::GroupObstaclesIntoChunks(const TSet<FIntVector>& AllOb
 	OutObstaclesByChunk.Empty();
 	for (const FIntVector& ObstacleVoxel : AllObstacles)
 	{
-		const FIntVector ChunkCoord(ObstacleVoxel.X / CHUNK_SIZE, ObstacleVoxel.Y / CHUNK_SIZE,
-		                            ObstacleVoxel.Z / CHUNK_SIZE);
+		const FIntVector ChunkCoord(
+			FMath::FloorToInt(static_cast<float>(ObstacleVoxel.X) / CHUNK_SIZE),
+			FMath::FloorToInt(static_cast<float>(ObstacleVoxel.Y) / CHUNK_SIZE),
+			FMath::FloorToInt(static_cast<float>(ObstacleVoxel.Z) / CHUNK_SIZE)
+		);
 		OutObstaclesByChunk.FindOrAdd(ChunkCoord).Add(ObstacleVoxel);
 	}
-	UE_LOG(LogTemp, Log, TEXT("Grouped obstacles into %d chunks."), OutObstaclesByChunk.Num());
+	UE_LOG(LogTemp, Log, TEXT("Grouped obstacles into %d non-empty chunks."), OutObstaclesByChunk.Num());
 }
 
-// 헬퍼 함수 5: 오래된 애셋 정리
 void AFenwickVoxelVolume::CleanUpAllChunkAssets() const
 {
-	// 1. 이 볼륨의 데이터가 저장된 최종 디렉토리 경로를 가져옵니다.
-	const FString FinalSaveDirectory = GetFinalSaveDirectory();
+    // 1. 에디터 월드 컨텍스트 획득
+    UWorld* EditorWorld = GetWorld();
+    if (!EditorWorld || !EditorWorld->IsEditorWorld())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("CleanUpAllChunkAssets: Editor world context is not available. Aborting cleanup."));
+        return;
+    }
 
-	// 2. 에셋 레지스트리를 통해 해당 디렉토리에 있는 모든 애셋을 찾습니다.
-	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(FName("AssetRegistry"));
-	TArray<FAssetData> AssetsInDirectory;
-	AssetRegistryModule.Get().GetAssetsByPath(FName(*FinalSaveDirectory), AssetsInDirectory, true);
+    // 2. 청크(.umap) 및 데이터 애셋(.uasset) 디렉토리 경로
+    const FString ChunksDirectory = FPaths::Combine(GetFinalSaveDirectory(), TEXT("Chunks"));
+    const FString DataDirectory   = FPaths::Combine(GetFinalSaveDirectory(), TEXT("Data"));
 
-	if (AssetsInDirectory.Num() == 0)
-	{
-		// 지울 애셋이 없으면 아무것도 하지 않습니다.
-		return;
-	}
+    UE_LOG(LogTemp, Log, TEXT("Starting cleanup for directories: %s and %s"), *ChunksDirectory, *DataDirectory);
 
-	// 3. (선택적이지만 안전함) 만약의 경우를 대비해, 청크 애셋 접두사로 시작하는 파일만 삭제하도록 필터링합니다.
-	TArray<FAssetData> AssetsToDelete;
-	const FString AssetPrefix = GetUniqueAssetPrefix(); // "DA_Chunk_"
-	for (const FAssetData& Asset : AssetsInDirectory)
-	{
-		if (Asset.AssetName.ToString().StartsWith(AssetPrefix))
-		{
-			AssetsToDelete.Add(Asset);
-		}
-	}
+    // 3. 애셋 레지스트리를 통해 삭제할 모든 애셋 수집
+    FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+    IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+    
+    TArray<FString> PathsToScan;
+    PathsToScan.Add(ChunksDirectory);
+    PathsToScan.Add(DataDirectory);
+    AssetRegistry.ScanPathsSynchronous(PathsToScan, /*bForceRescan=*/true);
 
-	if (AssetsToDelete.Num() > 0)
-	{
-		UE_LOG(LogTemp, Log, TEXT("Cleaning up %d existing chunk assets from %s before baking."), AssetsToDelete.Num(), *FinalSaveDirectory);
+    TArray<FAssetData> AssetsToDelete;
+    AssetRegistry.GetAssetsByPath(FName(*ChunksDirectory), AssetsToDelete, /*bRecursive=*/ true);
+    TArray<FAssetData> DataAssetsToDelete;
+    AssetRegistry.GetAssetsByPath(FName(*DataDirectory), DataAssetsToDelete, /*bRecursive=*/ true);
+    AssetsToDelete.Append(DataAssetsToDelete);
+
+    if (AssetsToDelete.IsEmpty())
+    {
+        UE_LOG(LogTemp, Log, TEXT("No chunk assets found to clean up."));
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Found %d assets to delete. Attempting to delete..."), AssetsToDelete.Num());
+
+    const int32 DeletedCount = ObjectTools::DeleteAssets(AssetsToDelete, /*bShowConfirmation=*/ false);
+
+    if (DeletedCount > 0)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Successfully deleted %d assets."), DeletedCount);
         
-		// ObjectTools를 사용해 찾은 애셋들을 삭제합니다.
-		// bShowConfirmation를 false로 설정하면 사용자에게 일일이 확인하지 않고 바로 삭제합니다.
-		ObjectTools::DeleteAssets(AssetsToDelete, /*bShowConfirmation=*/true);
-		CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
-	}
+        // ** (중요) 가비지 컬렉션을 동기식으로 강제 실행하여 메모리에서 완전히 제거합니다. **
+        // 이것이 이름 중복 및 "부분 로드" 문제를 해결하는 핵심입니다.
+        CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS, true);
+
+        AssetRegistry.ScanPathsSynchronous(PathsToScan, /*bForceRescan=*/ true);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ObjectTools::DeleteAssets did not delete any assets, though %d were found. They might be in use or read-only."), AssetsToDelete.Num());
+    }
 }
 
-// 헬퍼 함수 6: 애셋 생성 및 업데이트
-void AFenwickVoxelVolume::CreateOrUpdateChunkAssets(const TMap<FIntVector, TArray<FIntVector>>& ObstaclesByChunk)
+void AFenwickVoxelVolume::CreateOrUpdateChunkAssets(const TMap<FIntVector, TArray<FIntVector>>& ObstaclesByChunk, const FString& InFinalSaveDirectory)
 {
-	if (ObstaclesByChunk.Num() == 0)
-	{
-		UE_LOG(LogTemp, Log, TEXT("No obstacles found, skipping asset creation."));
-		return;
-	}
+    if (ObstaclesByChunk.Num() == 0) return;
+    check(GEditor);
 
-	FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
-	UDataAssetFactory* DataAssetFactory = NewObject<UDataAssetFactory>();
-	DataAssetFactory->DataAssetClass = UStaticVoxelChunkData::StaticClass();
-	const FString AssetPrefix = GetUniqueAssetPrefix();
-	TArray<UPackage*> PackagesToSave;
+    const FString DataAssetDirectory = FPaths::Combine(InFinalSaveDirectory, TEXT("Data"));
+    const FString ChunksDirectory = FPaths::Combine(InFinalSaveDirectory, TEXT("Chunks"));
+    
+    FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
+    IAssetTools& AssetTools = AssetToolsModule.Get();
+ 
+    TArray<UObject*> ObjectsToSave;
 
-	for (const auto& Pair : ObstaclesByChunk)
-	{
-		const FIntVector& ChunkCoord = Pair.Key;
-		const TArray<FIntVector>& ObstaclesInThisChunk = Pair.Value;
+    for (const auto& Pair : ObstaclesByChunk)
+    {
+        const FIntVector& ChunkCoord = Pair.Key;
+        
+        // --- 데이터 애셋 생성 ---
+        const FString DataAssetName = FString::Printf(TEXT("DA_ChunkData_%d_%d_%d"), ChunkCoord.X, ChunkCoord.Y, ChunkCoord.Z);
+        
+        UStaticVoxelChunkData* ChunkAsset = Cast<UStaticVoxelChunkData>(
+            AssetTools.CreateAsset(DataAssetName, DataAssetDirectory, UStaticVoxelChunkData::StaticClass(), nullptr)
+        );
 
-		const FString PackagePath = GetChunkAssetPath(ChunkCoord, false);
-		const FString AssetName = FPackageName::GetShortName(PackagePath);
+        if (!ChunkAsset)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Failed to create Data Asset: %s"), *DataAssetName);
+            continue;
+        }
 
-		UPackage* Package = CreatePackage(*PackagePath);
-		Package->FullyLoad();
+        ChunkAsset->ChunkCoords = ChunkCoord;
+        const int32 BitmaskArraySize = CHUNK_SIZE * CHUNK_SIZE;
+        ChunkAsset->ObstacleBitmasks_X.Init(0, BitmaskArraySize);
 
-		UStaticVoxelChunkData* ChunkAsset = FindObject<UStaticVoxelChunkData>(Package, *AssetName);
-		if (!ChunkAsset)
-		{
-			ChunkAsset = Cast<UStaticVoxelChunkData>(DataAssetFactory->FactoryCreateNew(
-				UStaticVoxelChunkData::StaticClass(), Package, *AssetName, RF_Public | RF_Standalone, nullptr, GWarn));
-			if (ChunkAsset) FAssetRegistryModule::AssetCreated(ChunkAsset);
-		}
+        for (const FIntVector& ObstacleVoxel : Pair.Value)
+        {
+            const int32 LocalX = ObstacleVoxel.X % CHUNK_SIZE;
+            const int32 LocalY = ObstacleVoxel.Y % CHUNK_SIZE;
+            const int32 LocalZ = ObstacleVoxel.Z % CHUNK_SIZE;
+            ChunkAsset->ObstacleBitmasks_X[(LocalZ * CHUNK_SIZE) + LocalY] |= (1ULL << LocalX);
+        }
+        
+        // 데이터 애셋은 저장이 필요하므로 목록에 추가합니다.
+        ChunkAsset->MarkPackageDirty();
+        ObjectsToSave.Add(ChunkAsset);
 
-		if (ChunkAsset)
-		{
-			ChunkAsset->ChunkCoords = ChunkCoord;
-			const int32 BitmaskArraySize = CHUNK_SIZE * CHUNK_SIZE;
-			ChunkAsset->ObstacleBitmasks_X.Init(0, BitmaskArraySize);
-			for (const FIntVector& ObstacleVoxel : ObstaclesInThisChunk)
-			{
-				const int32 LocalX = ObstacleVoxel.X % CHUNK_SIZE;
-				const int32 LocalY = ObstacleVoxel.Y % CHUNK_SIZE;
-				const int32 LocalZ = ObstacleVoxel.Z % CHUNK_SIZE;
-				ChunkAsset->ObstacleBitmasks_X[(LocalZ * CHUNK_SIZE) + LocalY] |= (1ULL << LocalX);
-			}
-			Package->MarkPackageDirty();
-			PackagesToSave.Add(Package);
-		}
-	}
+        // --- 서브 레벨 생성 및 저장 ---
+        const FString LevelAssetName = FString::Printf(TEXT("Chunk_%d_%d_%d"), ChunkCoord.X, ChunkCoord.Y, ChunkCoord.Z);
+        const FString LevelPackagePath = FPaths::Combine(ChunksDirectory, LevelAssetName);
+        
+        UWorld* SubLevelWorld = UEditorLoadingAndSavingUtils::NewBlankMap(false);
+        if (!SubLevelWorld)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Failed to create new blank map for %s"), *LevelAssetName);
+            continue;
+        }
 
-	if (PackagesToSave.Num() > 0)
-	{
-		UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, true);
-		UE_LOG(LogTemp, Log, TEXT("Successfully created/updated and saved %d chunk assets."), PackagesToSave.Num());
-	}
+        FActorSpawnParameters Params;
+        Params.OverrideLevel = SubLevelWorld->PersistentLevel;
+        Params.ObjectFlags = RF_Transactional;
+        AChunkDataHolder* Holder = SubLevelWorld->SpawnActor<AChunkDataHolder>(AChunkDataHolder::StaticClass(), FTransform::Identity, Params);
+
+        if (Holder)
+        {
+            Holder->ChunkCoords = ChunkCoord;
+            Holder->VoxelChunkData = ChunkAsset;
+        }
+
+        // SaveMap 함수가 맵을 디스크에 저장하는 작업을 이미 완료합니다.
+        if (UEditorLoadingAndSavingUtils::SaveMap(SubLevelWorld, LevelPackagePath))
+        {
+            // ** (수정) 이미 저장된 월드를 다시 저장할 필요가 없으므로 이 줄을 제거/주석 처리합니다. **
+            // ObjectsToSave.Add(SubLevelWorld); 
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("Failed to save sublevel: %s"), *LevelPackagePath);
+        }
+    }
+
+    // 생성/수정된 모든 '데이터 애셋'들을 한 번에 저장합니다.
+    if (ObjectsToSave.Num() > 0)
+    {
+        TSet<UPackage*> UniquePackagesToSave;
+        for (UObject* ObjToSave : ObjectsToSave)
+        {
+            if (ObjToSave)
+            {
+                UniquePackagesToSave.Add(ObjToSave->GetPackage());
+            }
+        }
+        UEditorLoadingAndSavingUtils::SavePackages(UniquePackagesToSave.Array(), true);
+    }
 }
-
 #endif // WITH_EDITOR
 
 
 FString AFenwickVoxelVolume::GetFinalSaveDirectory() const
 {
-	// 월드(레벨) 이름을 가져와서 파일 경로에 안전한 형태로 만듭니다.
-	// 에디터에서는 GetWorld()가 유효하지만, 런타임에서는 상황에 따라 다를 수 있으므로 유효성 검사 추가
 	if (!GetWorld())
 	{
 		UE_LOG(LogTemp, Error, TEXT("GetFinalSaveDirectory: GetWorld() returned null. Cannot determine level name."));
-		return BakedDataSaveDirectory; // 실패 시 기본 경로 반환
+		return BakedDataSaveDirectory;
 	}
 	const FString LevelName = FPackageName::GetShortName(GetWorld()->GetName());
-
-	// 이 볼륨 액터의 이름을 가져옵니다.
 	const FString ActorName = GetName();
-
-	// 기본 저장 경로와 월드, 액터 이름을 조합하여 최종 경로를 만듭니다.
 	return FPaths::Combine(BakedDataSaveDirectory, LevelName, ActorName);
 }
 
-FString AFenwickVoxelVolume::GetChunkAssetPath(const FIntVector& ChunkCoords, bool bIsSoftPath) const
+
+FString AFenwickVoxelVolume::GetChunkAssetPath(const FIntVector& ChunkCoords) const
 {
-	const FString FinalSaveDirectory = GetFinalSaveDirectory();
-	const FString AssetPrefix = GetUniqueAssetPrefix(); // 이제 "DA_Chunk_"를 반환
-
-	const FString AssetName = FString::Printf(TEXT("%s%d_%d_%d"), *AssetPrefix, ChunkCoords.X, ChunkCoords.Y, ChunkCoords.Z);
-	const FString PackagePath = FPaths::Combine(FinalSaveDirectory, AssetName);
-
-	if (bIsSoftPath)
-	{
-		// UObject 경로 형식: /Game/Path/AssetName.AssetName
-		return PackagePath + TEXT(".") + AssetName;
-	}
-    
-	// 패키지 경로 형식: /Game/Path/AssetName
-	return PackagePath;
+	const FString ChunksDirectory = FPaths::Combine(GetFinalSaveDirectory(), TEXT("Chunks"));
+	const FString AssetName = FString::Printf(TEXT("Chunk_%d_%d_%d"), ChunkCoords.X, ChunkCoords.Y, ChunkCoords.Z);
+	return FPaths::Combine(ChunksDirectory, AssetName);
 }
+ 

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "ChunkDataHolder.h"
 #include "UniformGridVolume.h"
 #include "StaticVoxelChunkData.h"
 #include "Navigation3D/VoxelObstacleFilter.h"
@@ -20,7 +21,7 @@ struct FActiveFenwickChunk
 	TObjectPtr<UStaticVoxelChunkData> SourceAsset = nullptr;
 };
 
-
+class ULevelStreamingDynamic;
 UCLASS()
 class NAVIGATION3D_API AFenwickVoxelVolume : public AUniformGridVolume
 {
@@ -52,10 +53,26 @@ public:
 	virtual void GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const override;
 	//~ End AUniformGridVolume Interface
 
-	void UpdateStreamingState();
+
+protected:
+	//======================================================================
+	// --- CHUNK STREAMING INTERNALS ---
+	//======================================================================
+
+	/** 등록된 에이전트들의 위치를 기반으로 필요한 청크를 로드/언로드하는 주기적인 함수입니다. */
+	virtual void UpdateStreamingState();
+
+	/** 특정 좌표의 청크(서브레벨)에 대한 로드를 요청합니다. */
 	void RequestChunkLoad(const FIntVector& ChunkCoords);
-	void OnChunkLoadCompleted(FSoftObjectPath LoadedAssetPath, FIntVector ChunkCoords);
+
+	/** 특정 좌표의 청크(서브레벨)를 언로드합니다. */
 	void UnloadChunk(const FIntVector& ChunkCoords);
+
+	/** 서브레벨이 비동기적으로 로드 완료되었을 때 호출되는 콜백 함수입니다. */
+	UFUNCTION()
+	void OnLevelLoadCompleted();
+
+public:
 	/** Calculates the total number of obstacles within a rectangular region using the Fenwick Tree. */
 	int32 FenwRangeSum(const FIntVector& Min, const FIntVector& Max) const;
 
@@ -72,6 +89,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Voxel|Streaming")
 	virtual void UnregisterStreamingAgent(AActor* Agent) override;
 
+	/** 로드된 서브레벨의 ChunkDataHolder가 자신을 볼륨에 등록할 때 호출됩니다. */
+	void RegisterChunkFromLevel(AChunkDataHolder* ChunkHolder);
+
+	/** 언로드되는 서브레벨의 ChunkDataHolder가 자신을 볼륨에서 해제할 때 호출됩니다. */
+	void UnregisterChunkFromLevel(AChunkDataHolder* ChunkHolder);
+	
 	/**
 	 * Uses bitmasks to perform a very fast check if a region contains any obstacles.
 	 * This is a broad-phase check; a `false` return means the region *might* have an obstacle,
@@ -125,8 +148,7 @@ private:
 	FORCEINLINE uint32 GetFlatIndex_Z(uint32 ChunkZ, uint32 X, uint32 Y) const;
 
 	FORCEINLINE bool IsVoxelIndexValid(const FIntVector& VoxelIndex) const;
-	
-	FIntVector WorldToChunkCoords(const FVector& WorldPos) const;
+
 #if WITH_EDITOR
 	/** 베이크 전 맵 크기, 저장 경로 등의 유효성을 검사합니다. */
 	bool ValidateBakePrerequisites() const;
@@ -144,15 +166,23 @@ private:
 	void CleanUpAllChunkAssets() const;
 
 	/** 청크 데이터를 기반으로 데이터 애셋을 생성하거나 업데이트합니다. */
-	void CreateOrUpdateChunkAssets(const TMap<FIntVector, TArray<FIntVector>>& ObstaclesByChunk);
+	void CreateOrUpdateChunkAssets(const TMap<FIntVector, TArray<FIntVector>>& ObstaclesByChunk, const FString& InFinalSaveDirectory);
 #endif
 
-	FString GetFinalSaveDirectory() const;
-	
-	FString GetChunkAssetPath(const FIntVector& ChunkCoords, bool bIsSoftPath) const;
+private:
+	//======================================================================
+	// --- CHUNK HELPER FUNCTIONS ---
+	//======================================================================
 
-	
-	
+	/** 월드 좌표를 청크 좌표로 변환합니다. */
+	FIntVector WorldToChunkCoords(const FVector& WorldPos) const;
+
+	/** 이 볼륨의 베이크된 데이터가 저장될 최종 디렉토리 경로를 반환합니다. (월드/액터 이름 포함) */
+	FString GetFinalSaveDirectory() const;
+
+	/** 특정 청크 좌표에 대한 서브레벨(.umap) 애셋의 패키지 경로를 반환합니다. */
+	FString GetChunkAssetPath(const FIntVector& ChunkCoords) const;
+
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Filter", meta=(AllowPrivateAccess="true"))
 	TObjectPtr<UVoxelObstacleFilter> ObstacleFilterProfile;
@@ -173,8 +203,7 @@ private:
 
 	/** Size of a bitmask chunk along one axis. Must be 64. */
 	static constexpr uint32 CHUNK_SIZE = 64;
-
-
+	
 	/** Set of voxels occupied by static geometry. */
 	TSet<FIntVector> StaticObstacleVoxels;
 
@@ -194,27 +223,26 @@ protected:
 
 	/** 플레이어 주변으로 스트리밍할 청크의 반경입니다. (X, Y, Z) */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|Streaming")
-	FIntVector StreamingRangeInChunks = FIntVector(3, 3, 1);
+	FIntVector StreamingRangeInChunks = FIntVector(2, 2, 2);
 
 	/** 베이킹된 데이터 애셋을 저장하고 찾아올 경로입니다. */
 	UPROPERTY(EditAnywhere, Category = "Voxel|Baking", meta = (ContentDir))
 	FString BakedDataSaveDirectory = TEXT("/Game/Pathfinding/BakedData");
 	
-	/** 
-	 * 현재 비동기 로딩이 진행 중인 청크들의 좌표 집합입니다. 
-	 * 중복 로드 요청을 방지하는 데 사용됩니다.
-	 */
-	TSet<FIntVector> PendingLoadChunks;
+	/** 스트리밍의 중심이 되는 에이전트(플레이어 등) 목록입니다. */
 	TSet<TWeakObjectPtr<AActor>> StreamingAgents;
 private:
-	//~=============================================================================
-	// RUNTIME STATE VARIABLES (Internal use only)
-	//~=============================================================================
-    
-	/** 스트리밍 상태를 주기적으로 업데이트하는 타이머의 핸들입니다. */
+	/** 스트리밍 상태를 업데이트하는 타이머 핸들입니다. */
 	FTimerHandle StreamingUpdateTimer;
 	FTimerHandle DynamicObstacleTimer;
-
-	/** 현재 플레이어 주변에 로드되어 있어야 할 청크 좌표의 집합입니다. */
+	
+	/** 현재 로드되어 있어야 하는 청크 좌표의 집합입니다. */
 	TSet<FIntVector> RequiredChunks;
+
+	/** 현재 로드 중인(스트리밍 중인) 서브레벨 목록입니다. */
+	UPROPERTY()
+	TMap<FIntVector, TObjectPtr<ULevelStreamingDynamic>> ActiveStreamingLevels;
+
+	/** 로드를 요청했지만 아직 완료되지 않은 청크 좌표의 집합입니다. */
+	TSet<FIntVector> PendingStreamingLevels;
 };

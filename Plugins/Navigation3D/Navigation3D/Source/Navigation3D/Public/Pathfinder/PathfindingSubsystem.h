@@ -59,7 +59,7 @@ protected:
 private:
 	
 	UPROPERTY(Config)
-	int32 NumWorkerThreads = 5;
+	int32 NumWorkerThreads = 10;
 
 	/** 길찾기 전용 스레드 풀 */
 	FQueuedThreadPool* PathfindingThreadPool = nullptr;
