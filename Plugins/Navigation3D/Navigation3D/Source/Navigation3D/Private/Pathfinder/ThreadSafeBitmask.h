@@ -49,6 +49,11 @@ struct FThreadSafeBitmaskGrid
 			return true;
 		}
 
+		if (ObstacleBitmasks_X.Num() == 0)
+		{
+			return true; 
+		}
+
 		// Z, Y 축을 순회하며 각 X-세그먼트를 TConstSetBitIterator로 검사합니다.
 		for (int32 z = ClampedMin.Z; z <= ClampedMax.Z; ++z)
 		{
