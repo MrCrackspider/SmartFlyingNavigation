@@ -9,11 +9,14 @@
 #include "DrawDebugHelpers.h"
 #include "Pathfinder/PathActor.h"
 
+#include "Pathfinder/Strategy/JPSPlusStrategy.h"
+
 UPathfindingComponent::UPathfindingComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
-}
 
+	PathfindingStrategyClass = UJPSPlusStrategy::StaticClass();
+}
 
 void UPathfindingComponent::OnPathfindingCompleted(
 	const TArray<FIntVector>& PathIndices, bool bSuccess)
@@ -339,6 +342,7 @@ void UPathfindingComponent::BeginPlay()
 	if (PathfindingStrategyClass)
 	{
 		PathfindingStrategy = NewObject<UPathfindingStrategy>(this, PathfindingStrategyClass);
+
 		if (PathfindingStrategy)
 		{
 			PathfindingStrategy->Initialize();
