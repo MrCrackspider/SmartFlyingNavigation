@@ -3,6 +3,7 @@
 
 #include "UniformGridVolume.h"
 
+#include "Components/BoxComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 
 // Sets default values
@@ -11,21 +12,23 @@ AUniformGridVolume::AUniformGridVolume()
 	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
-	if (!GetRootComponent())
-	{
-		SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("DefaultSceneRoot")));
-	}
+	// 2) Pivot Component (이게 최종 피벗)
+	PivotComponent = CreateDefaultSubobject<USceneComponent>(TEXT("PivotComponent"));
+	PivotComponent->SetupAttachment(RootComponent);
 
-	MapSize = FIntVector(64, 64, 64);
+	// 3) BoxComponent 는 PivotComponent 의 자식으로
+	VolumeBox = CreateDefaultSubobject<UBoxComponent>(TEXT("SelectionVolume"));
+	VolumeBox->SetupAttachment(PivotComponent);
+
+	// 에디터 클릭용 세팅
+	VolumeBox->SetHiddenInGame(true);
+	VolumeBox->bIsEditorOnly = true;
+	VolumeBox->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	VolumeBox->SetCollisionResponseToAllChannels(ECR_Ignore);
+	VolumeBox->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+
+	MapSize = FIntVector(128, 128, 128);
 	VoxelExtent = 100.f;
-	
-	// 볼륨 범위 시각화용 Static Mesh 컴포넌트 생성
-	VolumeBoundsVisualizer = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VolumeBoundsVisualizer"));
-	VolumeBoundsVisualizer->SetupAttachment(RootComponent);
-	
-	// 생성자에서는 경로만 지정해 둡니다. (또는 에디터에서 할당)
-	static const FSoftObjectPath VisualVolumeMeshPath(TEXT("/Script/Engine.StaticMesh'/Navigation3D/PathfinderPlugin/Debug/SM_DebugVoxel.SM_DebugVoxel'"));
-	VisualVolumeMeshAsset = VisualVolumeMeshPath;
 }
 
 // Called when the game starts or when spawned
@@ -37,40 +40,39 @@ void AUniformGridVolume::BeginPlay()
 void AUniformGridVolume::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
-	
-	// 이 시점에서 메시를 로드하고 설정합니다.
-	if (UStaticMesh* LoadedMesh = VisualVolumeMeshAsset.LoadSynchronous())
-	{
-		VolumeBoundsVisualizer->SetStaticMesh(LoadedMesh);
-		VolumeBoundsVisualizer->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	}
-	else
-	{
-		UE_LOG(LogTemp, Warning, TEXT("AYourActor::OnConstruction - Failed to load debug mesh."));
-	}
-	// Set as default
-	
-	if (VolumeBoundsVisualizer)
-	{
-		const FVector TotalVolumeDimensions = FVector(MapSize) * VoxelExtent;
 
-		// 2. 메시의 위치를 볼륨의 정중앙으로 설정합니다.
-		// 액터 위치가 볼륨의 (0,0,0) 모서리이므로, 중심은 전체 크기의 절반만큼 이동해야 합니다.
-		const FVector LocalCenterOffset = TotalVolumeDimensions * 0.5f;
-		VolumeBoundsVisualizer->SetRelativeLocation(LocalCenterOffset);
 
-		// 3. 메시의 크기를 조절합니다.
-		if (TotalVolumeDimensions.IsNearlyZero() || VoxelExtent <= 0.f)
-		{
-			VolumeBoundsVisualizer->SetRelativeScale3D(FVector::ZeroVector);
-		}
-		else
-		{
-			const FVector Scale = TotalVolumeDimensions / 100.0f;
-			VolumeBoundsVisualizer->SetRelativeScale3D(Scale);
-		}
+	if (!GetActorScale3D().Equals(FVector::OneVector, 0.001f))
+	{
+		// 즉시 (1,1,1)로 되돌립니다.
+		SetActorScale3D(FVector::OneVector);
+
+		// 사용자에게 왜 스케일이 되돌아갔는지 알려주면 더 좋습니다.
+		UE_LOG(LogTemp, Warning, TEXT("AUniformGridVolume: 스케일은 직접 조절할 수 없습니다. 'MapSize'와 'VoxelExtent' 프로퍼티를 사용하세요."));
 	}
+	
+	FVector TotalSize  = FVector(MapSize) * VoxelExtent;  
+	FVector HalfExtent = TotalSize * 0.5f;
+
+	// +X 축(정면)에서 볼 때 가장 가까운 ‘앞면 Front’ 좌표 = +HalfExtent.X
+	// 왼쪽은 –Y, 아래는 –Z 이므로…
+	FVector CustomPivotOffset = FVector(
+		HalfExtent.X,   // Front
+		HalfExtent.Y,   // Left
+		HalfExtent.Z    // Bottom
+	);
+
+	// 1) PivotComponent 를 볼륨의 ‘앞면 좌측하단’으로 이동
+	PivotComponent->SetRelativeLocation(CustomPivotOffset);
+
+	// 2) SelectionVolume 은 PivotComponent 기준 중앙에 박스(extent)만 지정
+	VolumeBox->SetBoxExtent(HalfExtent);
+	VolumeBox->SetLineThickness(DebugLineWidth * 10);
+	VolumeBox->SetRelativeLocation(FVector::ZeroVector);
+	
 	UpdateDebugObstacleVisualization();
+
+
 }
 
 // Called every frame
@@ -211,18 +213,10 @@ void AUniformGridVolume::UpdateDebugObstacleVisualization()
 		{
 			DebugObstaclesComponent->ClearInstances();
 		}
-		if (VolumeBoundsVisualizer)
-		{
-			VolumeBoundsVisualizer->SetVisibility(false);
-		}
+	
 		return;
 	}
-
-	if (VolumeBoundsVisualizer)
-	{
-		VolumeBoundsVisualizer->SetVisibility(true);
-	}
-
+	
 	bIsUpdatingVisualization = true;
 
 	// 1) 컴포넌트 월드 트랜스폼 스냅샷

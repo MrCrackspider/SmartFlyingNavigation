@@ -11,7 +11,10 @@ AVoxelVolumeBase::AVoxelVolumeBase()
  	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 	bDrawDebugBox = true; // Default to on, can be changed in editor
-
+	if (!GetRootComponent())
+	{
+		SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("Root")));
+	}
 	DebugObstaclesComponent = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("DebugObstaclesComponent"));
 	DebugObstaclesComponent->SetupAttachment(RootComponent);
 	

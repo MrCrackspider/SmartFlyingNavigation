@@ -36,10 +36,10 @@ public:
 
 	virtual void OnConstruction(const FTransform& Transform) override;
 	
-	UPROPERTY(EditAnywhere, Category="Baking")
+	UPROPERTY(EditAnywhere, Category="Voxel|Baking")
 	TArray<AActor*> BakeExcludeActors;
 #if WITH_EDITOR
-	UFUNCTION(CallInEditor, Category="★ Bake Actions", meta=(DisplayName="Bake Static Data"))
+	UFUNCTION(CallInEditor, Category="==== Bake Static Data =====", meta=(DisplayName="Bake Static Data"))
 	virtual void BakeStaticDataToChunks();
 
 #endif
@@ -48,10 +48,10 @@ public:
 
 	virtual EVolumeDataStructure GetStructureType() const PURE_VIRTUAL(AVoxelVolumeBase::GetStructureType, return EVolumeDataStructure::NONE;);
 
-	UFUNCTION(BlueprintPure, Category = "VoxelVolume")
+	UFUNCTION(BlueprintPure, Category = "Voxel")
 	virtual FVector GetLocationFromIndex(const FIntVector& Index) const PURE_VIRTUAL(AVoxelVolumeBase::GetLocationFromIndex, return FVector::ZeroVector;);
     
-	UFUNCTION(BlueprintPure, Category = "VoxelVolume")
+	UFUNCTION(BlueprintPure, Category = "Voxel")
 	virtual FIntVector GetIndexFromLocation(const FVector& WorldPosition) const PURE_VIRTUAL(AVoxelVolumeBase::GetIndexFromLocation, return FIntVector::ZeroValue;);
 
 	virtual bool IsLocationWalkable(const FVector& WorldPosition) const PURE_VIRTUAL(AVoxelVolumeBase::IsLocationWalkable, return false;);
@@ -66,13 +66,15 @@ public:
 
 	virtual void UnregisterStreamingAgent(AActor* Agent) ;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug", meta = (DisplayPriority = "10"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug")
 	bool bDrawDebugBox;
+	UPROPERTY(EditAnywhere,BlueprintReadOnly, Category = "Voxel|Debug", meta=(ClampMin = 10.f))
+	float DebugLineWidth  = 40.0f;
 
 #if WITH_EDITORONLY_DATA
 	TObjectPtr<UInstancedStaticMeshComponent> DebugObstaclesComponent;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Setup")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug|Setup")
 	TSoftObjectPtr<UStaticMesh> DebugMeshAsset;
 #endif
 	

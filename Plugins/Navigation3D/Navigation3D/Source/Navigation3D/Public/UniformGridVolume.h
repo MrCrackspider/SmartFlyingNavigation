@@ -7,7 +7,8 @@
 #include "GameFramework/Actor.h"
 #include "UniformGridVolume.generated.h"
 
-UCLASS(Abstract)
+class UBoxComponent;
+UCLASS()
 class NAVIGATION3D_API AUniformGridVolume : public AVoxelVolumeBase
 {
 	GENERATED_BODY()
@@ -27,15 +28,18 @@ public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VoxelVolume|UniformGrid")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel")
 	float VoxelExtent;
 	// --- 균일 격자 공통 프로퍼티가 여기에 위치! ---
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VoxelVolume|UniformGrid")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel")
 	FIntVector MapSize;
 
 	const int CHUNK_SIZE = 64;
 
+	UPROPERTY()
+	USceneComponent* PivotComponent;
 	
+	UBoxComponent* VolumeBox;
 	
 	// --- 공통 기능 구현 ---
 	virtual EVolumeDataStructure GetStructureType() const override { return EVolumeDataStructure::UniformGrid; }
@@ -69,12 +73,6 @@ public:
 	virtual bool IsRegionWalkable(const FIntVector& CenterIndex, int32 AgentRadiusInVoxels) const PURE_VIRTUAL(AUniformGridVolume::IsRegionWalkable, return false;);
 
 protected:
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Setup")
-	TObjectPtr<UStaticMeshComponent> VolumeBoundsVisualizer;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Setup")
-	TSoftObjectPtr<UStaticMesh> VisualVolumeMeshAsset;
-	
 	/** 현재 디버그 메쉬로 표시되고 있는 복셀의 인덱스 집합 */
 	TSet<FIntVector> DisplayedVoxelIndices;
 
