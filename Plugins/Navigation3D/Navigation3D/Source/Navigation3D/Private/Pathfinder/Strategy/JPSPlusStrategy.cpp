@@ -4,7 +4,6 @@
 #include "Algo/Reverse.h"
 #include "DrawDebugHelpers.h"
 
-
 void UJPSPlusStrategy::Initialize()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(JPS_Initialize);

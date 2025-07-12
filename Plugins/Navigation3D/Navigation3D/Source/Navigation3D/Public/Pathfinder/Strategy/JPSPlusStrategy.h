@@ -54,10 +54,10 @@ private:
 	int32 GetMoveCost(const FIntVector& A, const FIntVector& B) const;
 
 	// UJPSPlusStrategy에 있던 모든 상태 변수들을 이곳으로 이동시킵니다.
-	const FPathfindingRequest& Request;
-	const FThreadSafeBitmaskGrid& WalkabilityGrid;
-	const TArray<FIntVector>& AllDirections;
-	const TMap<FIntVector, int32>& DirectionToIndexMap;
+	const FPathfindingRequest Request;
+	const FThreadSafeBitmaskGrid WalkabilityGrid;
+	const TArray<FIntVector> AllDirections;
+	const TMap<FIntVector, int32> DirectionToIndexMap;
 
 	FIntVector ActualGoalIndex;
 
@@ -76,7 +76,6 @@ class NAVIGATION3D_API UJPSPlusStrategy : public UPathfindingStrategy
 	GENERATED_BODY()
 
 public:
-	// UObject로서의 역할만 수행합니다.
 	virtual void Initialize() override;
 	virtual bool FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FIntVector>& OutPath) override;
 	virtual bool ShouldRepathForOptimization(const FVector& CurrentAgentLocation, const TArray<FVector>& CurrentPath,

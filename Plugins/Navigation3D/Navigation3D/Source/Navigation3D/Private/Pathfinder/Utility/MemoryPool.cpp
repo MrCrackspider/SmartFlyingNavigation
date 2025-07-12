@@ -23,26 +23,26 @@ FPathNodeMemoryPool::~FPathNodeMemoryPool()
 
 void FPathNodeMemoryPool::Reset()
 {
-	// Reset the counters to point to the start of the first slab.
-	// This makes all allocated memory available for reuse without deallocation.
 	CurrentSlabIndex = 0;
 	IndexInCurrentSlab = 0;
+	if (Slabs.Num() > 1)
+	{
+		Slabs.SetNum(1);
+		Slabs[0].SetNum(SlabSize);
+	}
 }
 
 void FPathNodeMemoryPool::AllocateNewSlab()
 {
-	// If we are trying to allocate past the end of our current slab list, add a new one.
-	if (CurrentSlabIndex >= Slabs.Num())
-	{
-		UE_LOG(LogTemp, Log, TEXT("Allocating new slab #%d for PathNodeMemoryPool."), Slabs.Num() + 1);
-		// Add a new TArray (slab) to our list of slabs.
-		Slabs.Emplace();
-		// Allocate the memory for the nodes within the new slab.
-		Slabs.Last().SetNum(SlabSize);
-	}
+	// 새 슬래브 크기 결정
+	int32 NewSlabSize = (Slabs.Num() == 0) ? SlabSize : SlabSize << Slabs.Num();
 	
-	// Move to the next slab in the list.
-	CurrentSlabIndex++;
-	// Reset the node index to the beginning of this new slab.
+	Slabs.Emplace();
+	Slabs.Last().SetNum(NewSlabSize);
+
+	// 다음 확장에 대비해 SlabSize 업데이트
+	SlabSize = NewSlabSize;
+
+	CurrentSlabIndex = Slabs.Num() - 1;
 	IndexInCurrentSlab = 0;
 }

@@ -77,4 +77,5 @@ private:
 
 	// The index of the next available node within the current slab.
 	int32 IndexInCurrentSlab;
+	
 };
