@@ -80,6 +80,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Pathfinding|Avoidance")
 	float GetAgentRadius() const { return AgentRadius; }
 
+	/** 회피 시스템을 위한 에이전트의 반경 Getter 입니다. */
+	UFUNCTION(BlueprintPure, Category = "Pathfinding|Avoidance")
+	float GetAvoidanceRadius() const { return AvoidanceRadius; }
+
 	/** 현재 경로보다 더 효율적인 경로가 있는지 주기적으로 검사합니다. */
 	void CheckForPathOptimization();
 
@@ -156,6 +160,9 @@ private:
 
 	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
 	float AgentRadius = 50.f;
+
+	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+	float AvoidanceRadius = 150.f;
 
 	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
 	float MovementSpeed = 500.f;

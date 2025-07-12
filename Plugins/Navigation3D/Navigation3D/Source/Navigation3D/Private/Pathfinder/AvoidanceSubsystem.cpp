@@ -3,12 +3,12 @@
 #include "GameFramework/Actor.h"
 #include "Stats/Stats.h"
 #include "DrawDebugHelpers.h"
-#include "Algo/Sort.h" // 부분 정렬 대신 전체 정렬을 위해 Sort 헤더를 사용합니다.
+#include "Algo/Sort.h"
 #include "Pathfinder/Utility/Parallel/ParallelAvoidanceTask.h"
 
 DECLARE_CYCLE_STAT(TEXT("AvoidanceSubsystem Tick"), STAT_AvoidanceSubsystem_Tick, STATGROUP_Game);
 
-static void GenerateVoxelConstraints_ThreadSafe(const UWorld* World, const FAgentThreadData& CurrentAgent, const FVector& DesiredVelocity, TArray<FPlane>& OutConstraints, float TimeHorizon, float CollisionRadiusMultiplier);
+static void GenerateVoxelConstraints_ThreadSafe(const UWorld* World, const FAgentThreadData& CurrentAgent, const FVector& DesiredVelocity, TArray<FPlane>& OutConstraints, float TimeHorizon);
 static void GenerateAgentConstraints_ThreadSafe(const FAgentThreadData& CurrentAgent, const FVector& ActualPreferredVelocity, const TArray<const FAgentThreadData*>& NearbyAgents, TArray<FPlane>& OutConstraints, float TimeHorizon);
 static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadData& CurrentAgent, const FVector& PreferredVelocity, const TArray<const FAgentThreadData*>& NearbyAgents, float SymmetryBreakingRangeMultiplier, float SideBiasMagnitude);
 
@@ -26,7 +26,6 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     SolverIterations = 5;
     SideBiasMagnitude = 1.f;
     InterpSpeed = 10.f;
-    CollisionRadiusMultiplier = 1.5f;
 }
 
 void UAvoidanceSubsystem::PostInitialize()
@@ -100,7 +99,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
                 const FVector AgentLocation = Agent->GetOwner()->GetActorLocation();
                 const FVector MoveDelta = FinalVelocity * DeltaTime;
 
-                FCollisionShape OverlapSphere = FCollisionShape::MakeSphere(Agent->GetAgentRadius() * CollisionRadiusMultiplier);
+                FCollisionShape OverlapSphere = FCollisionShape::MakeSphere(Agent->GetAvoidanceRadius());
                 FCollisionQueryParams OverlapParams(TEXT("PenetrationCheck"), false);
                 if (Agent->GetOwner())
                 {
@@ -180,8 +179,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
                     AgentComponent->GetOwner()->GetActorLocation(),
                     AgentComponent->GetCurrentVelocity(),
                     AgentComponent->GetPreferredVelocity(),
-                    AgentComponent->GetAgentRadius(),
-                    AgentComponent->GetAgentRadius() * CollisionRadiusMultiplier,
+                    AgentComponent->GetAvoidanceRadius(),
                     AgentComponent->GetMovementSpeed(),
                     AgentComponent->GetUniqueID()
                     });
@@ -193,7 +191,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
             AvoidanceResults.Empty();
         }
 
-        AsyncTask = new FAsyncTask<FParallelAvoidanceTask>(GetWorld(), MoveTemp(AgentDataForThread), AvoidanceResults, ResultsCriticalSection, TimeHorizon, MaxNeighbors, GridCellSize, SymmetryBreakingRangeMultiplier, SideBiasMagnitude, CollisionRadiusMultiplier);
+        AsyncTask = new FAsyncTask<FParallelAvoidanceTask>(GetWorld(), MoveTemp(AgentDataForThread), AvoidanceResults, ResultsCriticalSection, TimeHorizon, MaxNeighbors, GridCellSize, SymmetryBreakingRangeMultiplier, SideBiasMagnitude);
         AsyncTask->StartBackgroundTask();
         bIsTaskRunning = true;
     }
@@ -207,8 +205,7 @@ void UAvoidanceSubsystem::RunAvoidanceCalculation(
     const int32 InMaxNeighbors,
     const float InGridCellSize,
     const float InSymmetryBreakingRangeMultiplier,
-    const float InSideBiasMagnitude,
-    const float InCollisionRadiusMultiplier)
+    const float InSideBiasMagnitude)
 {
     if (!World || AgentData.Num() < 1 || InGridCellSize <= 0) return;
 
@@ -265,18 +262,18 @@ void UAvoidanceSubsystem::RunAvoidanceCalculation(
         GenerateAgentConstraints_ThreadSafe(Agent, ActualPreferredVelocity, NearbyAgents, AgentConstraints, InTimeHorizon);
 
         TArray<FPlane> VoxelConstraints;
-        GenerateVoxelConstraints_ThreadSafe(World, Agent, ActualPreferredVelocity, VoxelConstraints, InTimeHorizon, InCollisionRadiusMultiplier);
+        GenerateVoxelConstraints_ThreadSafe(World, Agent, ActualPreferredVelocity, VoxelConstraints, InTimeHorizon);
 
         OutResults.Add(Agent.AgentId, { Agent.AgentId, AgentConstraints, VoxelConstraints, Agent.PreferredVelocity, ActualPreferredVelocity });
     }
 }
 
-static void GenerateVoxelConstraints_ThreadSafe(const UWorld* World, const FAgentThreadData& CurrentAgent, const FVector& DesiredVelocity, TArray<FPlane>& OutConstraints, float TimeHorizon, float CollisionRadiusMultiplier)
+static void GenerateVoxelConstraints_ThreadSafe(const UWorld* World, const FAgentThreadData& CurrentAgent, const FVector& DesiredVelocity, TArray<FPlane>& OutConstraints, float TimeHorizon)
 {
     if (!World) return;
 
     const FVector PositionA = CurrentAgent.Position;
-    const float RadiusA = CurrentAgent.AgentRadius * CollisionRadiusMultiplier;
+    const float RadiusA = CurrentAgent.AvoidanceRadius;
     const FVector VelocityA = DesiredVelocity;
     const FVector EndPoint = PositionA + VelocityA * TimeHorizon;
 
@@ -429,11 +426,11 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
     bool bShouldYield = false;
     if (ObstacleAgent)
     {
-        if (CurrentAgent.AgentRadius < ObstacleAgent->AgentRadius)
+        if (CurrentAgent.AvoidanceRadius < ObstacleAgent->AvoidanceRadius)
         {
             bShouldYield = true;
         }
-        else if (FMath::IsNearlyEqual(CurrentAgent.AgentRadius, ObstacleAgent->AgentRadius) && CurrentAgent.UniqueID > ObstacleAgent->UniqueID)
+        else if (FMath::IsNearlyEqual(CurrentAgent.AvoidanceRadius, ObstacleAgent->AvoidanceRadius) && CurrentAgent.UniqueID > ObstacleAgent->UniqueID)
         {
             bShouldYield = true;
         }
@@ -449,11 +446,11 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
         }
         SideVector.Normalize();
 
-        //FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
-        //return ActualPreferredVelocity.GetSafeNormal() * CurrentAgent.MovementSpeed;
+        FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
+        return ActualPreferredVelocity.GetSafeNormal() * CurrentAgent.MovementSpeed;
 
-        FVector ActualPreferredVelocity = SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
-        return ActualPreferredVelocity;
+        //FVector ActualPreferredVelocity = SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
+        //return ActualPreferredVelocity;
     }
 
     return PreferredVelocity;

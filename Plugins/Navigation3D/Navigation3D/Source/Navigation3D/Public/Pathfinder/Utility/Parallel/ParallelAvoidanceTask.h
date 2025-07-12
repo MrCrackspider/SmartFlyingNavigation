@@ -1,6 +1,4 @@
-﻿// --- START OF FILE ParallelAvoidanceTask.h ---
-
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "Async/AsyncWork.h"
@@ -9,7 +7,6 @@
 class FParallelAvoidanceTask : public FNonAbandonableTask
 {
 public:
-    // --- CHANGED ---: 생성자 시그니처 변경
     FParallelAvoidanceTask(
         UWorld* InWorld,
         TArray<FAgentThreadData>&& InAgentData,
@@ -19,8 +16,7 @@ public:
         const int32 InMaxNeighbors,
         const float InGridCellSize,
         const float InSymmetryBreakingRangeMultiplier,
-        const float InSideBiasMagnitude,
-        const float InCollisionRadiusMultiplier
+        const float InSideBiasMagnitude
     );
 
     void DoWork();
@@ -31,7 +27,6 @@ public:
     }
 
 private:
-    // --- ADDED ---: 스레드에서 사용할 World 포인터
     UWorld* World;
 
     TArray<FAgentThreadData> AgentData;
@@ -43,6 +38,4 @@ private:
     const float GridCellSize;
     const float SymmetryBreakingRangeMultiplier;
     const float SideBiasMagnitude;
-    // --- ADDED ---
-    const float CollisionRadiusMultiplier;
 };

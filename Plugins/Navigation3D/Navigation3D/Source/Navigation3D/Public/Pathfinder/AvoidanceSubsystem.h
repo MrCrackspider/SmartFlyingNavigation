@@ -14,7 +14,6 @@ struct FAgentThreadData
     FVector Position;
     FVector CurrentVelocity;
     FVector PreferredVelocity;
-    float AgentRadius;
     float AvoidanceRadius;
     float MovementSpeed;
     uint32 UniqueID;
@@ -25,7 +24,6 @@ struct FThreadAvoidanceResult
 {
     uint32 AgentId;
     TArray<FPlane> AgentConstraints;
-    // --- ADDED ---: 스레드에서 계산된 Voxel 제약 조건을 저장할 배열
     TArray<FPlane> VoxelConstraints;
     FVector PreferredVelocity;
     FVector ActualPreferredVelocity;
@@ -49,7 +47,6 @@ public:
     void RegisterAgent(UPathfindingComponent* AgentComponent);
     void UnregisterAgent(UPathfindingComponent* AgentComponent);
 
-    // --- CHANGED ---: 스레드에서 World에 접근하기 위해 UWorld 포인터를 받도록 수정
     static void RunAvoidanceCalculation(
         const UWorld* World,
         const TArray<FAgentThreadData>& AgentData,
@@ -58,8 +55,7 @@ public:
         const int32 InMaxNeighbors,
         const float InGridCellSize,
         const float InSymmetryBreakingRangeMultiplier,
-        const float InSideBiasMagnitude,
-        const float InCollisionRadiusMultiplier
+        const float InSideBiasMagnitude
     );
 
 protected:
@@ -85,9 +81,6 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Avoidance|Tuning")
     float InterpSpeed;
 
-    // --- ADDED ---: 하드코딩된 값을 UPROPERTY로 만들어 튜닝이 용이하게 함
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Avoidance|Tuning", meta = (ClampMin = "1.0"))
-    float CollisionRadiusMultiplier;
     // ~ End Tuning Parameters
 
 private:
@@ -101,9 +94,6 @@ private:
     TMap<uint32, FThreadAvoidanceResult> AvoidanceResults;
     FCriticalSection ResultsCriticalSection;
     bool bIsTaskRunning;
-
-    // --- REMOVED ---: 이 함수는 스레드 안전한 static 함수로 대체됩니다.
-    // void GenerateVoxelConstraints(UPathfindingComponent* CurrentAgent, const FVector& DesiredVelocity, TArray<FPlane>& OutConstraints);
 
     FVector SolveOptimalVelocity(const TArray<FPlane>& Constraints, const FVector& PreferredVelocity) const;
     void DebugVisualizeVelocities(const UPathfindingComponent* Agent, const FThreadAvoidanceResult& Result, const FVector& FinalOptimalVelocity) const;

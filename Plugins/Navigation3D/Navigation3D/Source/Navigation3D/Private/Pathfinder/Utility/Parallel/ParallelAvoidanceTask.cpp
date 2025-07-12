@@ -1,8 +1,5 @@
-﻿// --- START OF FILE ParallelAvoidanceTask.cpp ---
+﻿#include "Pathfinder/Utility/Parallel/ParallelAvoidanceTask.h"
 
-#include "Pathfinder/Utility/Parallel/ParallelAvoidanceTask.h"
-
-// --- CHANGED ---: 생성자 구현 변경
 FParallelAvoidanceTask::FParallelAvoidanceTask(
     UWorld* InWorld,
     TArray<FAgentThreadData>&& InAgentData,
@@ -12,8 +9,7 @@ FParallelAvoidanceTask::FParallelAvoidanceTask(
     const int32 InMaxNeighbors,
     const float InGridCellSize,
     const float InSymmetryBreakingRangeMultiplier,
-    const float InSideBiasMagnitude,
-    const float InCollisionRadiusMultiplier)
+    const float InSideBiasMagnitude)
     : World(InWorld)
     , AgentData(MoveTemp(InAgentData))
     , Results(InResults)
@@ -23,7 +19,6 @@ FParallelAvoidanceTask::FParallelAvoidanceTask(
     , GridCellSize(InGridCellSize)
     , SymmetryBreakingRangeMultiplier(InSymmetryBreakingRangeMultiplier)
     , SideBiasMagnitude(InSideBiasMagnitude)
-    , CollisionRadiusMultiplier(InCollisionRadiusMultiplier)
 {
 }
 
@@ -31,7 +26,6 @@ void FParallelAvoidanceTask::DoWork()
 {
     TMap<uint32, FThreadAvoidanceResult> TempResults;
 
-    // --- CHANGED ---: World와 CollisionRadiusMultiplier를 계산 함수에 전달
     UAvoidanceSubsystem::RunAvoidanceCalculation(
         World,
         AgentData,
@@ -40,8 +34,7 @@ void FParallelAvoidanceTask::DoWork()
         MaxNeighbors,
         GridCellSize,
         SymmetryBreakingRangeMultiplier,
-        SideBiasMagnitude,
-        CollisionRadiusMultiplier
+        SideBiasMagnitude
     );
 
     FScopeLock Lock(&ResultsLock);
