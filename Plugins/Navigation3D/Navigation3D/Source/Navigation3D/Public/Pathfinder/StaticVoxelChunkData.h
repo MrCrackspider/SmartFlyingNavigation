@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "Containers/BitArray.h"
 #include "StaticVoxelChunkData.generated.h"
 
 /**
@@ -19,12 +20,11 @@ public:
 	/** The coordinates of the chunk this data belongs to. */
 	UPROPERTY(VisibleAnywhere, Category = "Voxel Chunk Data")
 	FIntVector ChunkCoords;
-
-	/** A bitmask representing the locations of static obstacles within this chunk. */
-	UPROPERTY(VisibleAnywhere, Category = "Voxel Chunk Data")
-	TArray<uint64> ObstacleBitmasks_X;
 	
-	/** The Summed-Area Table (SAT) for O(1) queries of obstacle counts within this chunk.  */
 	UPROPERTY(VisibleAnywhere, Category = "Voxel Chunk Data")
 	TArray<int32> SummedAreaTable;
+
+	TBitArray<> ObstacleBitmasks_X;
+
+	virtual void Serialize(FStructuredArchive::FRecord Record) override;
 };

@@ -1,7 +1,5 @@
 #include "Pathfinder/ChunkDataHolder.h"
-
 #include "EngineUtils.h"
-#include "ThreadSafeBitmask.h"
 #include "Pathfinder/FenwickVoxelVolume.h"
 
 
@@ -30,10 +28,12 @@ void AChunkDataHolder::BeginPlay()
 			AFenwickVoxelVolume* FoundVolume = *It;
 			if (FoundVolume)
 			{
+                const int32 AFenwickVoxelVolume_CHUNK_SIZE = FoundVolume->GetChunkSize();
+
 				const FIntVector VolumeMapSizeInChunks(
-					FoundVolume->MapSize.X / FThreadSafeBitmaskGrid::CHUNK_SIZE,
-					FoundVolume->MapSize.Y / FThreadSafeBitmaskGrid::CHUNK_SIZE,
-					FoundVolume->MapSize.Z / FThreadSafeBitmaskGrid::CHUNK_SIZE
+					FoundVolume->MapSize.X / AFenwickVoxelVolume_CHUNK_SIZE,
+					FoundVolume->MapSize.Y / AFenwickVoxelVolume_CHUNK_SIZE,
+					FoundVolume->MapSize.Z / AFenwickVoxelVolume_CHUNK_SIZE
 				);
 
 				if (ChunkCoords.X >= 0 && ChunkCoords.X < VolumeMapSizeInChunks.X &&
@@ -42,11 +42,18 @@ void AChunkDataHolder::BeginPlay()
 				{
 					// 이 볼륨이 나를 관리하는 볼륨이다!
 					OwningVolume = FoundVolume;
-					OwningVolume->RegisterChunkFromLevel(this);
 					break; // 찾았으므로 루프 종료
 				}
 			}
 		}
+	}
+	if (OwningVolume.IsValid())
+	{
+		OwningVolume->RegisterChunkFromLevel(this);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ChunkDataHolder (%s) could not find its OwningVolume. Make sure a FenwickVoxelVolume exists and its MapSize is a multiple of CHUNK_SIZE."), *ChunkCoords.ToString());
 	}
 }
 

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "UniformGridVolume.h"
 #include "StaticVoxelChunkData.h"
+#include "Containers/BitArray.h"
 #include "Navigation3D/VoxelObstacleFilter.h"
 #include "FenwickVoxelVolume.generated.h"
 
@@ -102,7 +103,7 @@ public:
 	 * while `true` guarantees it is empty.
 	 */
 	bool IsRegionEmpty_Bitmask(const FIntVector& MinCorner, const FIntVector& MaxCorner) const;
-
+	uint32 GetChunkSize() {return CHUNK_SIZE; }
 private:
 	/** Initializes the core data structures like the Fenwick Tree and Bitmasks. */
 	void InitializeDataStructures();
@@ -140,17 +141,19 @@ private:
 	
 	/** Calculates the flattened 1D index for a 3D coordinate in the Fenwick Tree array. */
 	FORCEINLINE int32 GetFenwickFlatIndex(int32 x, int32 y, int32 z) const;
-
-	/** Calculates the flattened index for the X-axis-major bitmask array. */
-	FORCEINLINE uint32 GetFlatIndex_X(uint32 ChunkX, uint32 Y, uint32 Z) const;
-	/** Calculates the flattened index for the Y-axis-major bitmask array. */
-	FORCEINLINE uint32 GetFlatIndex_Y(uint32 ChunkY, uint32 X, uint32 Z) const;
-	/** Calculates the flattened index for the Z-axis-major bitmask array. */
-	FORCEINLINE uint32 GetFlatIndex_Z(uint32 ChunkZ, uint32 X, uint32 Y) const;
+	FORCEINLINE int32 GetVoxelFlatIndex(const FIntVector& Index) const;
+	// /** Calculates the flattened index for the X-axis-major bitmask array. */
+	// FORCEINLINE uint32 GetFlatIndex_X(uint32 ChunkX, uint32 Y, uint32 Z) const;
+	// /** Calculates the flattened index for the Y-axis-major bitmask array. */
+	// FORCEINLINE uint32 GetFlatIndex_Y(uint32 ChunkY, uint32 X, uint32 Z) const;
+	// /** Calculates the flattened index for the Z-axis-major bitmask array. */
+	// FORCEINLINE uint32 GetFlatIndex_Z(uint32 ChunkZ, uint32 X, uint32 Y) const;
 
 	FORCEINLINE bool IsVoxelIndexValid(const FIntVector& VoxelIndex) const;
 
 #if WITH_EDITOR
+	bool SaveCurrentWorld(UPackage* WorldPackage);
+	
 	/** 베이크 전 맵 크기, 저장 경로 등의 유효성을 검사합니다. */
 	bool ValidateBakePrerequisites() const;
 
@@ -203,7 +206,7 @@ private:
 	TAtomic<bool> bIsReady;
 
 	/** Size of a bitmask chunk along one axis. Must be 64. */
-	static constexpr uint32 CHUNK_SIZE = 64;
+	static constexpr uint32 CHUNK_SIZE = 128;
 	
 	/** Set of voxels occupied by static geometry. */
 	TSet<FIntVector> StaticObstacleVoxels;
@@ -214,7 +217,7 @@ private:
 	TMap<FIntVector, TObjectPtr<UStaticVoxelChunkData>> ActiveChunks;
 public:
 	/** Bitmasks for fast obstacle checks, organized with X-axis as the inner loop. */
-	TArray<uint64> ObstacleBitmasks_X;
+	TBitArray<> ObstacleBitmasks_X;
 	// TArray<uint64> ObstacleBitmasks_Y;
 	// TArray<uint64> ObstacleBitmasks_Z;
 protected:
