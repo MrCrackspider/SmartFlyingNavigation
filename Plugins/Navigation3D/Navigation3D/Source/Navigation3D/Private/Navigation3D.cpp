@@ -3,7 +3,7 @@
 #include "Navigation3D.h"
 #include "LevelEditor.h"
 #include "Widgets/Docking/SDockTab.h"
-#include "Navigation3D/SPathfindingTuner.h"
+#include "Pathfinder/UI/PathfindingTuner.h"
 
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
