@@ -18,8 +18,7 @@ UPathfindingComponent::UPathfindingComponent()
 	PathfindingStrategyClass = UJPSPlusStrategy::StaticClass();
 }
 
-void UPathfindingComponent::OnPathfindingCompleted(
-	const TArray<FIntVector>& PathIndices, bool bSuccess)
+void UPathfindingComponent::OnPathfindingCompleted(const TArray<FIntVector>& PathIndices, bool bSuccess)
 {
 	if (bSuccess && PathIndices.Num() > 0)
 	{
@@ -32,7 +31,7 @@ void UPathfindingComponent::OnPathfindingCompleted(
 		UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed. State changed to Idle."));
 	}
 
-	if (PeriodicRepathOpt)
+	if (bPeriodicRepath)
 	{
 		//도착하지 않았으면
 		if (!bIsReachDestination)
@@ -232,7 +231,8 @@ void UPathfindingComponent::ProgressNextPoint()
 
 	if (CurrentPathDestinationIndex >= FoundPath.Num())
 	{
-		ReachDestination();
+		OnDestinationReached.Broadcast();
+		bIsReachDestination = true;
 		UE_LOG(LogTemp, Log, TEXT("Spline movement finished."));
 		return;
 	}
@@ -551,13 +551,6 @@ void UPathfindingComponent::UpdateSplinePreferredVelocity(float DeltaTime)
 		DistanceAlongSpline, ESplineCoordinateSpace::World);
 
 	PreferredVelocity = SplineDirection * MovementSpeed;
-}
-
-void UPathfindingComponent::ReachDestination()
-{
-	UE_LOG(LogTemp, Warning, TEXT("Reach the Destination!"));
-	// PreferredVelocity = FVector::ZeroVector;
-	bIsReachDestination = true;
 }
 
 bool UPathfindingComponent::IsSplinePathSafe() const
