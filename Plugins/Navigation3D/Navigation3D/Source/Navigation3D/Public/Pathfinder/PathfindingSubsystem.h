@@ -27,14 +27,13 @@ public:
 	// IQueuedWork 인터페이스
 	virtual void DoThreadedWork() override;
 	virtual void Abandon() override;
-
 private:
 	FPathfindingRequest Request;
 	TWeakObjectPtr<UPathfindingSubsystem> OwnerSubsystem;
 };
 
 UCLASS(Config=Game)
-class NAVIGATION3D_API UPathfindingSubsystem : public UWorldSubsystem
+class NAVIGATION3D_API UPathfindingSubsystem : public UWorldSubsystem, public FTickableGameObject
 {
 	GENERATED_BODY()
 
@@ -49,7 +48,24 @@ public:
 	int32 RequestPath(FPathfindingRequest& Request);
 
 	void OnPathfindingCompleted(FPathfindingRequest Result, TArray<FIntVector> Path, bool bSuccess);
-	
+
+	UFUNCTION(BlueprintPure, Category = "Pathfinding|Debug")
+	int32 GetNumWorkerThreads() const;
+
+	/** 워커 스레드의 수를 변경하고 스레드 풀을 재시작합니다. */
+	UFUNCTION(BlueprintCallable, Category = "Pathfinding|Debug")
+	void SetNumWorkerThreads(int32 NewNumThreads);
+
+	/** 매 프레임 호출될 틱 함수입니다. */
+	virtual void Tick(float DeltaTime) override;
+	/** 이 객체가 틱을 돌릴 수 있는지 여부를 반환합니다. 에디터에서도 틱을 돌리려면 true를 반환해야 합니다. */
+	virtual bool IsTickableInEditor() const override { return true; }
+
+	/** 이 객체가 틱을 돌릴 수 있는지 여부를 반환합니다. */
+	virtual bool IsTickable() const override { return true; }
+
+	/** 틱 그룹을 반환합니다. 보통 TG_PrePhysics 또는 TG_PostPhysics를 사용합니다. */
+	virtual TStatId GetStatId() const override {return TStatId(); };
 protected:
 	// --- Subsystem Lifecycle ---
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
@@ -59,7 +75,7 @@ protected:
 private:
 	
 	UPROPERTY(Config)
-	int32 NumWorkerThreads = 5;
+	int32 CurrentNumWorkerThreads;
 
 	/** 길찾기 전용 스레드 풀 */
 	FQueuedThreadPool* PathfindingThreadPool = nullptr;
