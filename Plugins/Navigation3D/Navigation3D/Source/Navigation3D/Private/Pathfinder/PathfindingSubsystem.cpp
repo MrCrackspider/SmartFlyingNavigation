@@ -15,34 +15,43 @@ void FPathfindingAsyncTasks::DoThreadedWork()
 	}
 
 	// 결과 처리를 게임 스레드로 넘김
+	FPathfindingResult Result;
+	Result.Request = Request;
+	Result.Path = PathIndices;
+	Result.bSuccess = bSuccess;
+
+	// 서브시스템의 완료 큐에 결과를 추가
 	if (OwnerSubsystem.IsValid())
 	{
-		// AsyncTask를 사용해 게임 스레드에서 OnPathfindingCompleted를 호출하도록 예약
-		AsyncTask(ENamedThreads::GameThread, [Owner = OwnerSubsystem, Req = Request, Path = PathIndices, bOk = bSuccess]()
-		{
-			if (Owner.IsValid())
-			{
-				Owner->OnPathfindingCompleted(Req, Path, bOk);
-			}
-		});
+		OwnerSubsystem->QueueCompletedResult(Result);
 	}
+	delete this;
 }
 
 void FPathfindingAsyncTasks::Abandon()
 {
-	// 스레드 풀이 파괴될 때 아직 처리되지 않은 작업은 이 함수가 호출됨
-	// 필요하다면 요청자에게 실패를 알릴 수 있음
+	// // 스레드 풀이 파괴될 때 아직 처리되지 않은 작업은 이 함수가 호출됨
+	// // 필요하다면 요청자에게 실패를 알릴 수 있음
+	// if (OwnerSubsystem.IsValid())
+	// {
+	// 	AsyncTask(ENamedThreads::GameThread, [Owner = OwnerSubsystem, Req = Request]()
+	// 	{
+	// 		if (Owner.IsValid())
+	// 		{
+	// 			// 빈 경로와 실패 플래그로 완료 콜백 호출
+	// 			Owner->OnPathfindingCompleted(Req, {}, false);
+	// 		}
+	// 	});
+	// }
+
 	if (OwnerSubsystem.IsValid())
 	{
-		AsyncTask(ENamedThreads::GameThread, [Owner = OwnerSubsystem, Req = Request]()
-		{
-			if (Owner.IsValid())
-			{
-				// 빈 경로와 실패 플래그로 완료 콜백 호출
-				Owner->OnPathfindingCompleted(Req, {}, false);
-			}
-		});
+		FPathfindingResult Result;
+		Result.Request = Request;
+		Result.bSuccess = false; // 실패로 처리
+		OwnerSubsystem->QueueCompletedResult(Result);
 	}
+	delete this;
 }
 
 
@@ -166,34 +175,35 @@ void UPathfindingSubsystem::SetNumWorkerThreads(int32 NewNumThreads)
 
 void UPathfindingSubsystem::Tick(float DeltaTime)
 {
-	// 1. PathfindingThreadPool 포인터가 유효한지 먼저 확인합니다.
-	if (PathfindingThreadPool)
+	// 디버그 메시지
+	if (GEngine && PathfindingThreadPool)
 	{
-		// 2. GetNumThreads() 함수를 호출하여 실제 스레드 수를 가져옵니다.
-		const int32 ActualThreadCount = PathfindingThreadPool->GetNumThreads();
-        
-		// 3. 화면에 디버그 메시지를 출력합니다.
-		if (GEngine)
+		const FString DebugMessage = FString::Printf(TEXT("Pathfinding Threads: %d"), CurrentNumWorkerThreads);
+		GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Cyan, DebugMessage);
+	}
+
+	// 처리할 작업들을 담을 임시 배열
+	TArray<FPathfindingResult> TasksToProcessThisFrame;
+    
+	// 큐에서 N개만큼만 꺼내옵니다.
+	{
+		FScopeLock Lock(&QueueLock);
+		for (int32 i = 0; i < MaxCallbacksPerFrame && !CompletedTasksQueue.IsEmpty(); ++i)
 		{
-			const FString DebugMessage = FString::Printf(
-				TEXT("Pathfinding Threads (Actual/Current): %d / %d"), 
-				ActualThreadCount, 
-				CurrentNumWorkerThreads
-			);
-			// -1 키는 같은 메시지가 계속 덮어쓰여지도록 합니다.
-			GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Cyan, DebugMessage);
+			FPathfindingResult TempResult;
+			if (CompletedTasksQueue.Dequeue(TempResult))
+			{
+				TasksToProcessThisFrame.Add(TempResult);
+			}
 		}
 	}
-	else
+
+	// 이제 락이 풀린 상태에서 안전하게 콜백을 실행합니다.
+	for (const FPathfindingResult& Result : TasksToProcessThisFrame)
 	{
-		// 스레드 풀이 없는 경우
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Red, TEXT("Pathfinding Threads: POOL NOT INITIALIZED"));
-		}
+		OnPathfindingCompleted(Result.Request, Result.Path, Result.bSuccess);
 	}
 }
-
 // --- 3. 길찾기 요청 접수 (Public API) ---
 // PathfindingComponent에서 이 함수를 호출합니다.
 int32 UPathfindingSubsystem::RequestPath(FPathfindingRequest& Request)
@@ -217,6 +227,12 @@ int32 UPathfindingSubsystem::RequestPath(FPathfindingRequest& Request)
 
 	UE_LOG(LogTemp, Log, TEXT("Pathfinding request #%d queued to dedicated pool."), Request.RequestID);
 	return Request.RequestID;
+}
+
+void UPathfindingSubsystem::QueueCompletedResult(const FPathfindingResult& Result)
+{
+	FScopeLock Lock(&QueueLock);
+	CompletedTasksQueue.Enqueue(Result);
 }
 
 void UPathfindingSubsystem::OnPathfindingCompleted(FPathfindingRequest Result, TArray<FIntVector> Path, bool bSuccess)

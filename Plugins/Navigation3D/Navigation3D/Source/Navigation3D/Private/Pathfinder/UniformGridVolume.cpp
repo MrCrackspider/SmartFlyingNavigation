@@ -137,6 +137,22 @@ bool AUniformGridVolume::ClampVoxelIndicesToVolume(FIntVector& MinVoxelIndex, FI
 		MaxVoxelIndex.Z >= MinVoxelIndex.Z);
 }
 
+bool AUniformGridVolume::ClampVoxelIndicesToVolume(const FIntVector& InMinVoxelIndex, const FIntVector& InMaxVoxelIndex,
+	FIntVector& OutClampedMin, FIntVector& OutClampedMax) const
+{
+	OutClampedMin.X = FMath::Max(InMinVoxelIndex.X, 0);
+	OutClampedMin.Y = FMath::Max(InMinVoxelIndex.Y, 0);
+	OutClampedMin.Z = FMath::Max(InMinVoxelIndex.Z, 0);
+
+	OutClampedMax.X = FMath::Min(InMaxVoxelIndex.X, MapSize.X - 1);
+	OutClampedMax.Y = FMath::Min(InMaxVoxelIndex.Y, MapSize.Y - 1);
+	OutClampedMax.Z = FMath::Min(InMaxVoxelIndex.Z, MapSize.Z - 1);
+
+	return (OutClampedMax.X >= OutClampedMin.X &&
+		OutClampedMax.Y >= OutClampedMin.Y &&
+		OutClampedMax.Z >= OutClampedMin.Z);
+}
+
 bool AUniformGridVolume::GetOverlappingComponentsInVolume(const FCollisionObjectQueryParams& ObjectQueryParams,
                                                           TArray<FOverlapResult>& OutResults) const
 {

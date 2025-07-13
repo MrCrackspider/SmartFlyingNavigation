@@ -31,7 +31,7 @@ bool UJPSPlusStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest
 	if (InRequest.WalkabilityGrid.IsRegionWalkable(InRequest.EndIndex, InRequest.AgentRadiusInVoxels))
 	{
 		FIntVector NearestWalkableVoxel;
-		if (InRequest.WalkabilityGrid.FindNearestWalkableVoxel_Bitmask26(InRequest.EndIndex, InRequest.AgentRadiusInVoxels,50, NearestWalkableVoxel))
+		if (InRequest.WalkabilityGrid.FindNearestWalkableVoxel_BFS(InRequest.EndIndex, InRequest.AgentRadiusInVoxels,50, NearestWalkableVoxel))
 		{
 			ActualGoalIndex = NearestWalkableVoxel;
 		}

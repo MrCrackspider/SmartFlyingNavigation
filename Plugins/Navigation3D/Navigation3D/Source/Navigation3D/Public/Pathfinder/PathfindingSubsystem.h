@@ -14,6 +14,13 @@ class UPathfindingStrategy;
 class FPathfindingWorker;
 class FQueuedThreadPool;
 
+struct FPathfindingResult
+{
+	FPathfindingRequest Request;
+	TArray<FIntVector> Path;
+	bool bSuccess;
+};
+
 // FAsyncTask 대신 IQueuedWork 인터페이스를 구현하는 작업 클래스
 class FPathfindingAsyncTasks : public IQueuedWork
 {
@@ -56,6 +63,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Pathfinding|Debug")
 	void SetNumWorkerThreads(int32 NewNumThreads);
 
+	void QueueCompletedResult(const FPathfindingResult& Result);
+	
 	/** 매 프레임 호출될 틱 함수입니다. */
 	virtual void Tick(float DeltaTime) override;
 	/** 이 객체가 틱을 돌릴 수 있는지 여부를 반환합니다. 에디터에서도 틱을 돌리려면 true를 반환해야 합니다. */
@@ -75,7 +84,7 @@ protected:
 private:
 	
 	UPROPERTY(Config)
-	int32 CurrentNumWorkerThreads;
+	int32 CurrentNumWorkerThreads = 4;
 
 	/** 길찾기 전용 스레드 풀 */
 	FQueuedThreadPool* PathfindingThreadPool = nullptr;
@@ -83,8 +92,19 @@ private:
 	 * 고유한 요청 ID를 발급하기 위한 스레드 안전 카운터.
 	 * 여러 스레드에서 동시에 ID를 요청해도 안전합니다.
 	 */
+	UPROPERTY(Config)
+	int32 MaxCallbacksPerFrame = 5; // 프레임당 처리할 최대 콜백 수
+	
 	FThreadSafeCounter NextRequestID;
 	
 	/** ActiveTasks 배열에 대한 동시 접근을 막기 위한 크리티컬 섹션. */
 	FCriticalSection TasksCriticalSection;
+
+	// 큐 접근을 보호할 크리티컬 섹션
+	FCriticalSection QueueLock;
+
+	/** 완료된 작업 결과를 담는 스레드 안전 큐 */
+	TQueue<FPathfindingResult> CompletedTasksQueue;
+	
+
 };

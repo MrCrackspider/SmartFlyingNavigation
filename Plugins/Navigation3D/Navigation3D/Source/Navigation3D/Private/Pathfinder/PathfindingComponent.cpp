@@ -18,34 +18,6 @@ UPathfindingComponent::UPathfindingComponent()
 	PathfindingStrategyClass = UJPSPlusStrategy::StaticClass();
 }
 
-void UPathfindingComponent::OnPathfindingCompleted(const TArray<FIntVector>& PathIndices, bool bSuccess)
-{
-	if (bSuccess && PathIndices.Num() > 0)
-	{
-		ProcessNewPath(PathIndices);
-		UE_LOG(LogTemp, Log, TEXT("Pathfinding successful. State changed to FollowPath."));
-	}
-	else
-	{
-		CurrentState = EPathfindingState::Idle;
-		UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed. State changed to Idle."));
-	}
-
-	if (bPeriodicRepath)
-	{
-		//도착하지 않았으면
-		if (!bIsReachDestination)
-		{
-			if (UWorld* World = GetWorld())
-			{
-				//재귀적으로 요청
-				World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath,
-				                                  RepathCooldown, false);
-			}
-		}
-	}
-}
-
 bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 {
 	if (PathfindingTaskFuture.IsValid())
@@ -75,6 +47,25 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 
 	CurrentTargetLocation = TargetLocation;
 	FoundPathIndices.Empty();
+	TArray<F128BitChunk> CombinedBitmask = GridVolume->StaticObstacleBitmask;
+	const TArray<F128BitChunk>& DynamicBitmask = GridVolume->DynamicObstacleBitmask;
+
+	if (CombinedBitmask.Num() == DynamicBitmask.Num())
+	{
+		for (int32 i = 0; i < CombinedBitmask.Num(); ++i)
+		{
+			// SIMD를 사용하여 OR 연산을 수행합니다.
+			const __m128i StaticData = _mm_load_si128(reinterpret_cast<const __m128i*>(&CombinedBitmask[i]));
+			const __m128i DynamicData = _mm_load_si128(reinterpret_cast<const __m128i*>(&DynamicBitmask[i]));
+			_mm_store_si128(reinterpret_cast<__m128i*>(&CombinedBitmask[i]), _mm_or_si128(StaticData, DynamicData));
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("Bitmask size mismatch between static and dynamic obstacles."));
+		return false;
+	}
+	
 
 	// 2. "요청서"를 작성합니다.
 	FPathfindingRequest Request;
@@ -84,12 +75,13 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	Request.EndIndex = GridVolume->WorldToVoxelIndex(TargetLocation);
 	Request.AgentRadiusInVoxels = FMath::CeilToInt((AgentRadius / GridVolume->VoxelExtent) - 0.5f);
 	Request.WalkabilityGrid.GridSize = GridVolume->MapSize;
-	Request.WalkabilityGrid.ObstacleBitmasks_X = GridVolume->ObstacleBitmasks_X;
+	
+	Request.WalkabilityGrid.ObstacleBitmasks = MoveTemp(CombinedBitmask);
 	
 	
 
 	//    결과를 받을 콜백 함수를 지정합니다.
-	Request.OnPathfindingComplete.BindDynamic(this, &UPathfindingComponent::OnPathfindingCompleted);
+	Request.OnPathfindingComplete.BindDynamic(this, &UPathfindingComponent::HandlePathfindingResult);
 
 	Request.RequestingObject = this;
 	
@@ -417,6 +409,27 @@ void UPathfindingComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
+void UPathfindingComponent::HandlePathfindingResult(const TArray<FIntVector>& PathIndices, bool bSuccess)
+{
+	if (bSuccess && PathIndices.Num() > 0)
+	{
+		ProcessNewPath(PathIndices); // 이 함수는 경로를 스플라인 등으로 변환
+		UE_LOG(LogTemp, Log, TEXT("Pathfinding successful for %s. State changed to FollowPath."), *GetOwner()->GetName());
+	}
+	else
+	{
+		CurrentState = EPathfindingState::Idle;
+		UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed for %s. State changed to Idle."), *GetOwner()->GetName());
+	}
+
+	if (bPeriodicRepath && !bIsReachDestination)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath, RepathCooldown, false);
+		}
+	}
+}
 
 //======================================================================================
 // Internal Logic
@@ -429,6 +442,19 @@ void UPathfindingComponent::HandlePathfindingResult()
 		TArray<FIntVector> PathIndices = PathfindingTaskFuture.Get();
 		PathfindingTaskFuture.Reset();
 		ProcessNewPath(PathIndices);
+	}
+	if (bPeriodicRepath)
+	{
+		//도착하지 않았으면
+		if (!bIsReachDestination)
+		{
+			if (UWorld* World = GetWorld())
+			{
+				//재귀적으로 요청
+				World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath,
+												  RepathCooldown, false);
+			}
+		}
 	}
 }
 
@@ -637,8 +663,7 @@ bool UPathfindingComponent::IsPathAheadValid() const
 	                                        FoundPathIndices.Num() - 2);
 	for (int32 i = CurrentPathDestinationIndex; i <= LastCheckIndex; ++i)
 	{
-		if (!FenwickVolume->IsRegionWalkable(FoundPathIndices[i], AgentRadiusInVoxels)) //테스트 필요함.
-		//if (!FenwickVolume->IsPathSegmentWalkable(FoundPathIndices[i], FoundPathIndices[i + 1], AgentRadiusInVoxels))
+		if (!FenwickVolume->IsPathSegmentWalkable(FoundPathIndices[i], FoundPathIndices[i + 1], AgentRadiusInVoxels))
 		{
 			UE_LOG(LogTemp, Warning,
 			       TEXT("Path Invalidated: A future path segment (from waypoint %d to %d) is blocked!"), i, i + 1);

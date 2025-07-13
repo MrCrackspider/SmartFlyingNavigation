@@ -10,7 +10,7 @@
 #include "FenwickVoxelVolume.generated.h"
 
 class AChunkDataHolder;
-
+struct FStreamableHandle;
 USTRUCT()
 struct FActiveFenwickChunk
 {
@@ -55,6 +55,7 @@ public:
 	virtual void GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const override;
 	//~ End AUniformGridVolume Interface
 
+	void OnChunkLoadCompleted(FIntVector ChunkCoords, FStreamableHandle* StreamableHandle);
 
 protected:
 	//======================================================================
@@ -66,17 +67,17 @@ protected:
 
 	/** 특정 좌표의 청크(서브레벨)에 대한 로드를 요청합니다. */
 	void RequestChunkLoad(const FIntVector& ChunkCoords);
-
+		
 	/** 특정 좌표의 청크(서브레벨)를 언로드합니다. */
 	void UnloadChunk(const FIntVector& ChunkCoords);
 
 	/** 서브레벨이 비동기적으로 로드 완료되었을 때 호출되는 콜백 함수입니다. */
-	UFUNCTION()
-	void OnLevelLoadCompleted();
+	// UFUNCTION()
+	// void OnLevelLoadCompleted();
 
 public:
 	/** Calculates the total number of obstacles within a rectangular region using the Fenwick Tree. */
-	int32 FenwRangeSum(const FIntVector& Min, const FIntVector& Max) const;
+	//int32 FenwRangeSum(const FIntVector& Min, const FIntVector& Max) const;
 
 public:
 	//~=============================================================================
@@ -91,11 +92,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Voxel|Streaming")
 	virtual void UnregisterStreamingAgent(AActor* Agent) override;
 
-	/** 로드된 서브레벨의 ChunkDataHolder가 자신을 볼륨에 등록할 때 호출됩니다. */
-	void RegisterChunkFromLevel(AChunkDataHolder* ChunkHolder);
-
-	/** 언로드되는 서브레벨의 ChunkDataHolder가 자신을 볼륨에서 해제할 때 호출됩니다. */
-	void UnregisterChunkFromLevel(AChunkDataHolder* ChunkHolder);
+	void RegisterChunk(UStaticVoxelChunkData* ChunkData);
+	void UnregisterChunk(const FIntVector& ChunkCoords);
 	
 	/**
 	 * Uses bitmasks to perform a very fast check if a region contains any obstacles.
@@ -111,37 +109,33 @@ private:
 	/** Scans the world for dynamic obstacles and updates the Fenwick Tree with any changes. */
 	void UpdateDynamicObstacles();
 
+	void UpdateDynamicVoxelState(const FIntVector& Index, bool bIsObstacle);
+
+	void ApplyDynamicObstacleChanges(const TSet<FIntVector>& NewFrameObstacles);
+	
 	/** Gathers all voxels currently occupied by dynamic obstacles. */
-	void GatherCurrentObstacleVoxels(TMap<FIntVector, int32>& OutVoxelCounts) const;
+	void GatherCurrentObstacleVoxels(TSet<FIntVector>& OutVoxelIndices) const;
 
 	/** Compares previous and current obstacle maps to find voxels that are no longer occupied or have a changed count. */
-	void ProcessRemovedAndChangedObstacles(const TMap<FIntVector, int32>& CurrentCounts);
+	//void ProcessRemovedAndChangedObstacles(const TMap<FIntVector, int32>& CurrentCounts);
 
 	/** Compares previous and current obstacle maps to find newly occupied voxels. */
-	void ProcessNewObstacles(const TMap<FIntVector, int32>& CurrentCounts);
+	//void ProcessNewObstacles(const TMap<FIntVector, int32>& CurrentCounts);
 
-	/**
-	 * Updates the bitmasks to mark a voxel as an obstacle or empty.
-	 * @param Index The voxel index to update.
-	 * @param bIsObstacle True to mark as an obstacle, false to mark as empty.
-	 */
-	void UpdateVoxelObstacleState(const FIntVector& Index, bool bIsObstacle);
-
-	
-	/** Adds a value (delta) to a voxel's count in the Fenwick Tree. */
-	void FenwUpdate(const FIntVector& Index, int32 Delta);
-
-	void FenwUpdateCuboid(const FIntVector& MinCorner, const FIntVector& MaxCorner, int32 Delta);
-	
-	/** Queries the Fenwick Tree for the cumulative sum from the origin to the given index. */
-	int32 FenwQuery(const FIntVector& Index) const;
+	// /** Adds a value (delta) to a voxel's count in the Fenwick Tree. */
+	// void FenwUpdate(const FIntVector& Index, int32 Delta);
+	//
+	// void FenwUpdateCuboid(const FIntVector& MinCorner, const FIntVector& MaxCorner, int32 Delta);
+	//
+	// /** Queries the Fenwick Tree for the cumulative sum from the origin to the given index. */
+	// int32 FenwQuery(const FIntVector& Index) const;
 
 
-	FString GetUniqueAssetPrefix() const;
+	//FString GetUniqueAssetPrefix() const;
 	
 	/** Calculates the flattened 1D index for a 3D coordinate in the Fenwick Tree array. */
-	FORCEINLINE int32 GetFenwickFlatIndex(int32 x, int32 y, int32 z) const;
-	FORCEINLINE int32 GetVoxelFlatIndex(const FIntVector& Index) const;
+	//FORCEINLINE int32 GetFenwickFlatIndex(int32 x, int32 y, int32 z) const;
+	//FORCEINLINE int32 GetVoxelFlatIndex(const FIntVector& Index) const;
 	// /** Calculates the flattened index for the X-axis-major bitmask array. */
 	// FORCEINLINE uint32 GetFlatIndex_X(uint32 ChunkX, uint32 Y, uint32 Z) const;
 	// /** Calculates the flattened index for the Y-axis-major bitmask array. */
@@ -188,10 +182,10 @@ private:
 	FString GetChunkAssetPath(const FIntVector& ChunkCoords) const;
 
 protected:
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Filter", meta=(AllowPrivateAccess="true"))
 	TObjectPtr<UVoxelObstacleFilter> ObstacleFilterProfile;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Baking")
 	TMap<FIntVector, TObjectPtr<UStaticVoxelChunkData>> BakedStaticDataAssets;
 
 	TMap<FIntVector, int32> ChunkObstacleCounter;
@@ -217,20 +211,21 @@ private:
 	TMap<FIntVector, TObjectPtr<UStaticVoxelChunkData>> ActiveChunks;
 public:
 	/** Bitmasks for fast obstacle checks, organized with X-axis as the inner loop. */
-	TBitArray<> ObstacleBitmasks_X;
+	TArray<F128BitChunk> StaticObstacleBitmask;
+	TArray<F128BitChunk> DynamicObstacleBitmask;
 	// TArray<uint64> ObstacleBitmasks_Y;
 	// TArray<uint64> ObstacleBitmasks_Z;
-
+protected:
 	//~=============================================================================
 	// STREAMING & BAKING PROPERTIES (Configurable in Editor)
 	//~=============================================================================
 
 	/** 플레이어 주변으로 스트리밍할 청크의 반경입니다. (X, Y, Z) */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|Streaming")
 	FIntVector StreamingRangeInChunks = FIntVector(2, 2, 2);
 
 	/** 베이킹된 데이터 애셋을 저장하고 찾아올 경로입니다. */
-	UPROPERTY(EditAnywhere, meta = (ContentDir))
+	UPROPERTY(EditAnywhere, Category = "Voxel|Baking", meta = (ContentDir))
 	FString BakedDataSaveDirectory = TEXT("/Game/Pathfinding/BakedData");
 	
 	/** 스트리밍의 중심이 되는 에이전트(플레이어 등) 목록입니다. */
@@ -242,11 +237,8 @@ private:
 	
 	/** 현재 로드되어 있어야 하는 청크 좌표의 집합입니다. */
 	TSet<FIntVector> RequiredChunks;
+	TSet<FIntVector> CurrentDynamicObstacles;
+	TMap<FIntVector, TSharedPtr<FStreamableHandle>> PendingChunkHandles;
 
-	/** 현재 로드 중인(스트리밍 중인) 서브레벨 목록입니다. */
-	UPROPERTY()
-	TMap<FIntVector, TObjectPtr<ULevelStreamingDynamic>> ActiveStreamingLevels;
-
-	/** 로드를 요청했지만 아직 완료되지 않은 청크 좌표의 집합입니다. */
-	TSet<FIntVector> PendingStreamingLevels;
+	FRWLock VolumeDataLock; 
 };
