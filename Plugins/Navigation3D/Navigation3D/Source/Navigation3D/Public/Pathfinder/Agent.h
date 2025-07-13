@@ -25,6 +25,6 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding")
 	TObjectPtr<UPathfindingComponent> PathfindingComponent;
 	
-	UFUNCTION(CallInEditor, Category = "Pathfinding|Test")
+	// UFUNCTION(CallInEditor, Category = "Pathfinding|Test")
 	void ExecuteFindPath();
 };

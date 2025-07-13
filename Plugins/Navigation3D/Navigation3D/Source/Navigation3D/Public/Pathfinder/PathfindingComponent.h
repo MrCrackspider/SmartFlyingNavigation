@@ -154,7 +154,7 @@ public:
 	bool IsOnSplineLine();
 	void DetermineMovementModeForNextPath();
 
-private:
+public:
 #pragma region Configuration Properties
 
 	// --- 기본 설정 ---

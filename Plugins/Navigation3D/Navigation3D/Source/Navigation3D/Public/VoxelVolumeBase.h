@@ -36,10 +36,10 @@ public:
 
 	virtual void OnConstruction(const FTransform& Transform) override;
 	
-	UPROPERTY(EditAnywhere, Category="Voxel|Baking")
+	UPROPERTY(EditAnywhere, Category="Baking")
 	TArray<AActor*> BakeExcludeActors;
 #if WITH_EDITOR
-	UFUNCTION(CallInEditor, Category="==== Bake Static Data =====", meta=(DisplayName="Bake Static Data"))
+	UFUNCTION()
 	virtual void BakeStaticDataToChunks();
 
 #endif
@@ -66,7 +66,7 @@ public:
 
 	virtual void UnregisterStreamingAgent(AActor* Agent) ;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VolumeProperties")
 	bool bDrawDebugBox;
 	UPROPERTY(EditAnywhere,BlueprintReadOnly, Category = "Voxel|Debug", meta=(ClampMin = 10.f))
 	float DebugLineWidth  = 40.0f;
@@ -74,7 +74,7 @@ public:
 #if WITH_EDITORONLY_DATA
 	TObjectPtr<UInstancedStaticMeshComponent> DebugObstaclesComponent;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug|Setup")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VolumeProperties")
 	TSoftObjectPtr<UStaticMesh> DebugMeshAsset;
 #endif
 	

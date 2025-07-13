@@ -28,12 +28,18 @@ public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VolumeSettings")
 	float VoxelExtent;
 	// --- 균일 격자 공통 프로퍼티가 여기에 위치! ---
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VolumeSettings")
 	FIntVector MapSize;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VolumeSettings")
+	TObjectPtr<UStaticMeshComponent> VolumeBoundsVisualizer;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VolumeSettings")
+	TSoftObjectPtr<UStaticMesh> VisualVolumeMeshAsset;
+	
 	const int CHUNK_SIZE = 64;
 
 	UPROPERTY()
@@ -73,6 +79,7 @@ public:
 	virtual bool IsRegionWalkable(const FIntVector& CenterIndex, int32 AgentRadiusInVoxels) const PURE_VIRTUAL(AUniformGridVolume::IsRegionWalkable, return false;);
 
 protected:
+	
 	/** 현재 디버그 메쉬로 표시되고 있는 복셀의 인덱스 집합 */
 	TSet<FIntVector> DisplayedVoxelIndices;
 

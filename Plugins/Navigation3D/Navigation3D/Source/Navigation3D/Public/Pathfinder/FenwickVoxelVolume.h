@@ -188,10 +188,10 @@ private:
 	FString GetChunkAssetPath(const FIntVector& ChunkCoords) const;
 
 protected:
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Filter", meta=(AllowPrivateAccess="true"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(AllowPrivateAccess="true"))
 	TObjectPtr<UVoxelObstacleFilter> ObstacleFilterProfile;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Baking")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TMap<FIntVector, TObjectPtr<UStaticVoxelChunkData>> BakedStaticDataAssets;
 
 	TMap<FIntVector, int32> ChunkObstacleCounter;
@@ -220,17 +220,17 @@ public:
 	TBitArray<> ObstacleBitmasks_X;
 	// TArray<uint64> ObstacleBitmasks_Y;
 	// TArray<uint64> ObstacleBitmasks_Z;
-protected:
+
 	//~=============================================================================
 	// STREAMING & BAKING PROPERTIES (Configurable in Editor)
 	//~=============================================================================
 
 	/** 플레이어 주변으로 스트리밍할 청크의 반경입니다. (X, Y, Z) */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|Streaming")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	FIntVector StreamingRangeInChunks = FIntVector(2, 2, 2);
 
 	/** 베이킹된 데이터 애셋을 저장하고 찾아올 경로입니다. */
-	UPROPERTY(EditAnywhere, Category = "Voxel|Baking", meta = (ContentDir))
+	UPROPERTY(EditAnywhere, meta = (ContentDir))
 	FString BakedDataSaveDirectory = TEXT("/Game/Pathfinding/BakedData");
 	
 	/** 스트리밍의 중심이 되는 에이전트(플레이어 등) 목록입니다. */

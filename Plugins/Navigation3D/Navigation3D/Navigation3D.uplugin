@@ -19,6 +19,11 @@
 			"Name": "Navigation3D",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "Navigation3DEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
 		}
 	]
 }
