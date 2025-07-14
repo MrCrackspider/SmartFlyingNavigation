@@ -23,7 +23,7 @@ AUniformGridVolume::AUniformGridVolume()
 	// 에디터 클릭용 세팅
 	VolumeBox->SetHiddenInGame(true);
 	VolumeBox->bIsEditorOnly = true;
-	VolumeBox->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	VolumeBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	VolumeBox->SetCollisionResponseToAllChannels(ECR_Ignore);
 	VolumeBox->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 

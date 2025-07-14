@@ -252,9 +252,6 @@ public:
 
 	UPROPERTY()
 	TObjectPtr<UAvoidanceSubsystem> AvoidanceSubsystem;
-
-	UPROPERTY()
-	TObjectPtr<APathActor> CurrentPathActor;
 	
 	TWeakObjectPtr<USplineComponent> PathSplinePtr;
 

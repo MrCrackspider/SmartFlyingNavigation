@@ -15,6 +15,8 @@ UPathfindingComponent::UPathfindingComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 
+	PathSplinePtr = CreateDefaultSubobject<USplineComponent>(TEXT("Spline"));
+
 	PathfindingStrategyClass = UJPSPlusStrategy::StaticClass();
 }
 
@@ -31,7 +33,7 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 		UE_LOG(LogTemp, Error, TEXT("RequestPathToLocation failed: Strategy or TargetVolume is not set."));
 		return false;
 	}
-
+	
 	// 기존에 타이머 걸어둔게 있으면 취소
 	if (UWorld* World = GetWorld())
 	{
@@ -44,7 +46,13 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 		UE_LOG(LogTemp, Error, TEXT("RequestPathToLocation failed: Strategy or TargetVolume is not set."));
 		return false;
 	}
-
+	
+	if (!PathSplinePtr.IsValid())
+	{
+		PathSplinePtr->SetupAttachment(GetOwner()->GetRootComponent());
+		PathSplinePtr->SetAbsolute(true, true, true);
+	}
+	
 	CurrentTargetLocation = TargetLocation;
 	FoundPathIndices.Empty();
 	TArray<F128BitChunk> CombinedBitmask = GridVolume->StaticObstacleBitmask;
@@ -78,8 +86,6 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	
 	Request.WalkabilityGrid.ObstacleBitmasks = MoveTemp(CombinedBitmask);
 	
-	
-
 	//    결과를 받을 콜백 함수를 지정합니다.
 	Request.OnPathfindingComplete.BindDynamic(this, &UPathfindingComponent::HandlePathfindingResult);
 
@@ -321,16 +327,6 @@ void UPathfindingComponent::BeginPlay()
 		AvoidanceSubsystem->RegisterAgent(this);
 	}
 
-	if (!CurrentPathActor)
-	{
-		CurrentPathActor = World->SpawnActor<
-			APathActor>(GetOwner()->GetActorLocation(), GetOwner()->GetActorRotation());
-		if (CurrentPathActor)
-		{
-			PathSplinePtr = CurrentPathActor->GetSplineComponent();
-		}
-	}
-
 	if (PathfindingStrategyClass)
 	{
 		PathfindingStrategy = NewObject<UPathfindingStrategy>(this, PathfindingStrategyClass);
@@ -497,13 +493,56 @@ void UPathfindingComponent::ProcessNewPath(const TArray<FIntVector>& PathIndices
 		bIsReachDestination = false;
 
 		PathSplinePtr->ClearSplinePoints();
-		UE_LOG(LogTemp, Warning, TEXT("Create Spline index"));
-		for (int i = 0; i < FoundPath.Num(); i++)
+
+		int32 NumPoints = FoundPath.Num();
+
+		// UE_LOG(LogTemp, Warning, TEXT("Create Spline index"));
+		for (int i = 0; i < NumPoints; i++)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("index: %d, Location: %.2f %.2f %.2f"), i, FoundPath[i].X, FoundPath[i].Y,
-			       FoundPath[i].Z);
+			// UE_LOG(LogTemp, Warning, TEXT("index: %d, Location: %.2f %.2f %.2f"), i, FoundPath[i].X, FoundPath[i].Y, FoundPath[i].Z);
+
 			PathSplinePtr->AddSplinePoint(FoundPath[i], ESplineCoordinateSpace::World, false);
 		}
+
+		//아래는 spline곡선이 튀지 않게 방지하는 코드
+		// const float Tension = 0.2f; // 곡선의 팽팽함. 0.5가 보통 가장 자연스러움. -> UProperty로 빼서 사용자가 지정할 수 있게 변경
+		//
+		// for (int32 i = 0; i < NumPoints; ++i)
+		// {
+		// 	FVector Tangent;
+		//
+		// 	if (i == 0)
+		// 	{
+		// 		// --- 시작점 (First Point) ---
+		// 		// 다음 포인트(1)와 현재 포인트(0)의 차이를 탄젠트로 사용합니다.
+		// 		// 이렇게 하면 곡선이 경로의 시작 방향으로 부드럽게 뻗어나갑니다.
+		// 		const FVector P0 = PathSplinePtr->GetLocationAtSplinePoint(0, ESplineCoordinateSpace::Local);
+		// 		const FVector P1 = PathSplinePtr->GetLocationAtSplinePoint(1, ESplineCoordinateSpace::Local);
+		// 		Tangent = (P1 - P0) * Tension;
+		// 	}
+		// 	else if (i == NumPoints - 1)
+		// 	{
+		// 		// --- 끝점 (Last Point) ---
+		// 		// 현재 포인트(Last)와 이전 포인트(Last-1)의 차이를 탄젠트로 사용합니다.
+		// 		// 곡선이 경로의 끝 방향으로 자연스럽게 수렴합니다.
+		// 		const FVector PN_1 = PathSplinePtr->GetLocationAtSplinePoint(i - 1, ESplineCoordinateSpace::Local);
+		// 		const FVector PN = PathSplinePtr->GetLocationAtSplinePoint(i, ESplineCoordinateSpace::Local);
+		// 		Tangent = (PN - PN_1) * Tension;
+		// 	}
+		// 	else
+		// 	{
+		// 		// --- 중간점 (Intermediate Points) ---
+		// 		// 이것이 Catmull-Rom의 핵심입니다.
+		// 		// 이전 포인트(i-1)에서 다음 포인트(i+1)를 향하는 벡터를 계산합니다.
+		// 		const FVector P_Prev = PathSplinePtr->GetLocationAtSplinePoint(i - 1, ESplineCoordinateSpace::Local);
+		// 		const FVector P_Next = PathSplinePtr->GetLocationAtSplinePoint(i + 1, ESplineCoordinateSpace::Local);
+		// 		Tangent = (P_Next - P_Prev) * Tension;
+		// 	}
+		//
+		// 	// 계산된 탄젠트를 스플라인 포인트에 설정합니다.
+		// 	PathSplinePtr->SetTangentAtSplinePoint(i, Tangent, ESplineCoordinateSpace::Local, true);
+		// }
+		
 		PathSplinePtr->UpdateSpline();
 	}
 
@@ -593,6 +632,7 @@ bool UPathfindingComponent::IsSplinePathSafe() const
 	}
 
 	FCollisionQueryParams CollisionParams(SCENE_QUERY_STAT(SplineSafetyCheck), false, GetOwner());
+	
 	FCollisionObjectQueryParams ObjectQueryParams;
 	ObjectQueryParams.AddObjectTypesToQuery(ECollisionChannel::ECC_WorldStatic);
 	ObjectQueryParams.AddObjectTypesToQuery(ECollisionChannel::ECC_WorldDynamic);
@@ -608,24 +648,10 @@ bool UPathfindingComponent::IsSplinePathSafe() const
 	for (float Distance = CurrentDistance; Distance < NextDistance; Distance += SafetyCheckStepSize)
 	{
 		// UE_LOG(LogTemp, Warning, TEXT("Checking... Distance: %f"), Distance);
-
-
+		
 		FVector StartPoint = PathSplinePtr->GetLocationAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World);
 		FVector EndPoint = PathSplinePtr->GetLocationAtDistanceAlongSpline(
 			FMath::Min(Distance + SafetyCheckStepSize, SplineLength), ESplineCoordinateSpace::World);
-
-		// 디버그 구체를 그립니다.
-		// DrawDebugSphere(
-		// 	GetWorld(),                  // 구체를 그릴 월드
-		// 	StartPoint,             // 구체의 중심 위치: StartPoint
-		// 	AgentRadius,            // 구체의 반지름: AgentRadius
-		// 	6,                     // 구체의 정밀도 (12 또는 24 정도면 충분합니다)
-		// 	FColor::Green,          // 색상: 녹색
-		// 	false,                  // 한 프레임만 표시할지 여부
-		// 	5.0f,                   // 표시 시간: 5초
-		// 	0,                      // 렌더링 우선순위
-		// 	2.0f                    // 선의 두께 (추가적인 파라미터)
-		// );
 
 		if (FVector::DistSquared(StartPoint, EndPoint) < KINDA_SMALL_NUMBER)
 		{
@@ -633,6 +659,43 @@ bool UPathfindingComponent::IsSplinePathSafe() const
 			continue;
 		}
 
+		// { //for debug
+		// 	// 디버그 구체를 그립니다.
+		// 	DrawDebugSphere(
+		// 		GetWorld(),                  // 구체를 그릴 월드
+		// 		StartPoint,             // 구체의 중심 위치: StartPoint
+		// 		AgentRadius,            // 구체의 반지름: AgentRadius
+		// 		6,                     // 구체의 정밀도 (12 또는 24 정도면 충분합니다)
+		// 		FColor::Green,          // 색상: 녹색
+		// 		false,                  // 한 프레임만 표시할지 여부
+		// 		5.0f,                   // 표시 시간: 5초
+		// 		0,                      // 렌더링 우선순위
+		// 		2.0f                    // 선의 두께 (추가적인 파라미터)
+		// 	);
+		//
+		// 	TArray<FHitResult> HitResult;
+		// 	bool bHit = GetWorld()->SweepMultiByObjectType(
+		// 		HitResult,
+		// 		StartPoint,
+		// 		EndPoint,
+		// 		FQuat::Identity,
+		// 		ObjectQueryParams,
+		// 		FCollisionShape::MakeSphere(AgentRadius),
+		// 		CollisionParams
+		// 	);
+		//
+		// 	if (bHit)
+		// 	{
+		// 		UE_LOG(LogTemp, Warning, TEXT("Obstacle detected"));
+		// 		for (FHitResult Hit : HitResult)
+		// 		{
+		// 			AActor* HitActor = Hit.GetActor();
+		// 			UE_LOG(LogTemp, Warning, TEXT("Result: %s"), *HitActor->GetName());
+		// 		}
+		// 		return false;
+		// 	}
+		// }
+		
 		if (GetWorld()->SweepTestByObjectType(StartPoint, EndPoint, FQuat::Identity, ObjectQueryParams,
 		                                      FCollisionShape::MakeSphere(AgentRadius), CollisionParams))
 		{
