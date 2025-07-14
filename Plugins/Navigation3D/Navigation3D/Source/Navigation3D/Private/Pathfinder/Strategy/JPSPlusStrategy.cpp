@@ -226,7 +226,6 @@ void FJPSPlusPathfinder::IdentifySuccessors(FPathNode* Node, TArray<FPathNode*>&
 	{
 		for (int32 i = 0; i < AllDirections.Num(); ++i)
 		{
-			// ★★★ 수정: 스레드 안전 헬퍼 함수 사용 ★★★
 			bIsCorneringMoveWalkable[i] = IsAgentMoveFeasible_ThreadSafe(
 				CurrentNode->Parent->Position, CurrentNode->Position + AllDirections[i]);
 		}
@@ -338,17 +337,17 @@ TOptional<FIntVector> FJPSPlusPathfinder::Jump(const FIntVector& StartPos, const
 		// // --- 3. 강제 이웃 검사 ---
 		// 현재 위치(CurrentPos)를 기준으로 강제 이웃이 있는지 확인합니다.
 		// 이 검사는 점프의 방향을 바꿔야 할 '코너'를 찾는 역할을 합니다.
-		for (const auto& CheckDir : AllDirections)
-		{
-			if (CheckDir == Direction || CheckDir == (Direction * -1))
-				continue;
-			// 부모 방향(Direction)을 전달하여, 현재 진행 방향을 기준으로 한 강제 이웃을 찾습니다.
-			if (HasForcedNeighbour(CurrentPos, CheckDir, Direction))
-			{
-				// 강제 이웃이 발견되면, 현재 위치는 중요한 분기점이므로 점프 포인트가 됩니다.
-				return CurrentPos;
-			}
-		}
+		// for (const auto& CheckDir : AllDirections)
+		// {
+		// 	if (CheckDir == Direction || CheckDir == (Direction * -1))
+		// 		continue;
+		// 	// 부모 방향(Direction)을 전달하여, 현재 진행 방향을 기준으로 한 강제 이웃을 찾습니다.
+		// 	if (HasForcedNeighbour(CurrentPos, CheckDir, Direction))
+		// 	{
+		// 		// 강제 이웃이 발견되면, 현재 위치는 중요한 분기점이므로 점프 포인트가 됩니다.
+		// 		return CurrentPos;
+		// 	}
+		// }
 		
 		
 		const FIntVector DirToGoal = ActualGoalIndex - CurrentPos;
@@ -383,20 +382,20 @@ TOptional<FIntVector> FJPSPlusPathfinder::Jump(const FIntVector& StartPos, const
 
 		const int32 ParentDirIndex = DirectionToIndexMap.FindRef(Direction);
 		uint64 ForcedNeighborCandidateMask = CalculateForcedNeighborMask(Walkability, ParentDirIndex);
-
+		
 		// 2c. CTZ를 사용해 강제 이웃 후보들을 빠르게 순회
 		while (ForcedNeighborCandidateMask != 0)
 		{
 			unsigned long Index;
 			// 가장 오른쪽에 있는 후보(1 비트)의 인덱스를 찾는다
 			_BitScanForward64(&Index, ForcedNeighborCandidateMask); // CTZ 명령어
-
-			return CurrentPos;
-
-			// 만약 모든 강제 이웃을 다 찾아야 한다면, 처리한 비트를 끄고 루프를 계속합니다.
-			// ForcedNeighborCandidateMask &= ForcedNeighborCandidateMask - 1;
+		
+			ForcedNeighborCandidateMask &= ForcedNeighborCandidateMask - 1;
+		
+		
 		}
-	
+		return CurrentPos;
+		
 	
 	}
 
@@ -500,6 +499,27 @@ void FJPSPlusPathfinder::OptimizePathFromJumpPoints(FPathNode* EndNode, TArray<F
 
 bool FJPSPlusPathfinder::HasLineOfSight(const FIntVector& From, const FIntVector& To) const
 {
+
+	const FIntVector AgentRadiusVector(AgentRadiusInVoxels);
+    
+	// 시작점과 끝점에서의 에이전트 바운딩 박스
+	const FIntVector FromMin = From - AgentRadiusVector;
+	const FIntVector FromMax = From + AgentRadiusVector;
+	const FIntVector ToMin = To - AgentRadiusVector;
+	const FIntVector ToMax = To + AgentRadiusVector;
+
+	// 두 박스를 모두 포함하는 스윕된(Swept) 바운딩 박스
+	const FIntVector SweptMin(FMath::Min(FromMin.X, ToMin.X), FMath::Min(FromMin.Y, ToMin.Y), FMath::Min(FromMin.Z, ToMin.Z));
+	const FIntVector SweptMax(FMath::Max(FromMax.X, ToMax.X), FMath::Max(FromMax.Y, ToMax.Y), FMath::Max(FromMax.Z, ToMax.Z));
+
+	// 이 거대한 박스 안에 장애물이 하나라도 있다면, 시야는 즉시 차단된 것으로 간주합니다.
+	// 이것은 매우 빠르고 효율적인 1차 필터링입니다.
+	if (!WalkabilityGrid.IsRegionEmpty(SweptMin, SweptMax))
+	{
+		return false;
+	}
+
+	
 	// 1. From에서 To까지 중심선을 따라 복셀 목록을 생성합니다.
 	TArray<FIntVector> CenterlineVoxels;
 	FStrategyUtils::GenerateBresenhamLine(From, To, CenterlineVoxels);
