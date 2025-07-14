@@ -336,19 +336,38 @@ TOptional<FIntVector> FJPSPlusPathfinder::Jump(const FIntVector& StartPos, const
 		}
 
 		// // --- 3. 강제 이웃 검사 ---
-		// // 현재 위치(CurrentPos)를 기준으로 강제 이웃이 있는지 확인합니다.
-		// // 이 검사는 점프의 방향을 바꿔야 할 '코너'를 찾는 역할을 합니다.
-		// for (const auto& CheckDir : AllDirections)
-		// {
-		// 	if (CheckDir == Direction || CheckDir == (Direction * -1))
-		// 		continue;
-		// 	// 부모 방향(Direction)을 전달하여, 현재 진행 방향을 기준으로 한 강제 이웃을 찾습니다.
-		// 	if (HasForcedNeighbour(CurrentPos, CheckDir, Direction))
-		// 	{
-		// 		// 강제 이웃이 발견되면, 현재 위치는 중요한 분기점이므로 점프 포인트가 됩니다.
-		// 		return CurrentPos;
-		// 	}
-		// }
+		// 현재 위치(CurrentPos)를 기준으로 강제 이웃이 있는지 확인합니다.
+		// 이 검사는 점프의 방향을 바꿔야 할 '코너'를 찾는 역할을 합니다.
+		for (const auto& CheckDir : AllDirections)
+		{
+			if (CheckDir == Direction || CheckDir == (Direction * -1))
+				continue;
+			// 부모 방향(Direction)을 전달하여, 현재 진행 방향을 기준으로 한 강제 이웃을 찾습니다.
+			if (HasForcedNeighbour(CurrentPos, CheckDir, Direction))
+			{
+				// 강제 이웃이 발견되면, 현재 위치는 중요한 분기점이므로 점프 포인트가 됩니다.
+				return CurrentPos;
+			}
+		}
+		
+		
+		const FIntVector DirToGoal = ActualGoalIndex - CurrentPos;
+		const int64 DistSqToGoal = (int64)DirToGoal.X * DirToGoal.X + (int64)DirToGoal.Y * DirToGoal.Y + (int64)
+			DirToGoal.Z * DirToGoal.Z;
+
+		// 현재 위치에서 다음 스텝까지의 거리 제곱을 직접 계산합니다. (Direction 벡터의 길이 제곱)
+		const int64 DistSqToNext = (int64)Direction.X * Direction.X + (int64)Direction.Y * Direction.Y + (int64)
+			Direction.Z * Direction.Z;
+
+		if (DistSqToNext > DistSqToGoal)
+		{
+			// 다음 스텝이 목표보다 멀리 있다면, 목표를 지나친 것입니다.
+			// 이 경우, 현재 위치에서 목표까지 직접 갈 수 있는지 최종 확인합니다.
+			if (IsAgentMoveFeasible_ThreadSafe(CurrentPos, ActualGoalIndex))
+			{
+				return ActualGoalIndex;
+			}
+		}
 
 		FNeighborWalkability Walkability;
 		const FIntVector AgentRadiusVector(AgentRadiusInVoxels);
@@ -377,26 +396,6 @@ TOptional<FIntVector> FJPSPlusPathfinder::Jump(const FIntVector& StartPos, const
 			// 만약 모든 강제 이웃을 다 찾아야 한다면, 처리한 비트를 끄고 루프를 계속합니다.
 			// ForcedNeighborCandidateMask &= ForcedNeighborCandidateMask - 1;
 		}
-		
-		const FIntVector DirToGoal = ActualGoalIndex - CurrentPos;
-		const int64 DistSqToGoal = (int64)DirToGoal.X * DirToGoal.X + (int64)DirToGoal.Y * DirToGoal.Y + (int64)
-			DirToGoal.Z * DirToGoal.Z;
-
-		// 현재 위치에서 다음 스텝까지의 거리 제곱을 직접 계산합니다. (Direction 벡터의 길이 제곱)
-		const int64 DistSqToNext = (int64)Direction.X * Direction.X + (int64)Direction.Y * Direction.Y + (int64)
-			Direction.Z * Direction.Z;
-
-		if (DistSqToNext > DistSqToGoal)
-		{
-			// 다음 스텝이 목표보다 멀리 있다면, 목표를 지나친 것입니다.
-			// 이 경우, 현재 위치에서 목표까지 직접 갈 수 있는지 최종 확인합니다.
-			if (IsAgentMoveFeasible_ThreadSafe(CurrentPos, ActualGoalIndex))
-			{
-				return ActualGoalIndex;
-			}
-		}
-
-
 	
 	
 	}

@@ -35,9 +35,7 @@ public:
 	// --- 균일 격자 공통 프로퍼티가 여기에 위치! ---
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VolumeSettings")
 	FIntVector MapSize;
-
-	const int CHUNK_SIZE = 128;
-
+	
 	UPROPERTY()
 	USceneComponent* PivotComponent;
 

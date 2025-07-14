@@ -48,24 +48,24 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	CurrentTargetLocation = TargetLocation;
 	FoundPathIndices.Empty();
 	TArray<F128BitChunk> CombinedBitmask = GridVolume->StaticObstacleBitmask;
-	const TArray<F128BitChunk>& DynamicBitmask = GridVolume->DynamicObstacleBitmask;
-
-	if (CombinedBitmask.Num() == DynamicBitmask.Num())
-	{
-		for (int32 i = 0; i < CombinedBitmask.Num(); ++i)
-		{
-			// SIMD를 사용하여 OR 연산을 수행합니다.
-			const __m128i StaticData = _mm_load_si128(reinterpret_cast<const __m128i*>(&CombinedBitmask[i]));
-			const __m128i DynamicData = _mm_load_si128(reinterpret_cast<const __m128i*>(&DynamicBitmask[i]));
-			_mm_store_si128(reinterpret_cast<__m128i*>(&CombinedBitmask[i]), _mm_or_si128(StaticData, DynamicData));
-		}
-	}
-	else
-	{
-		UE_LOG(LogTemp, Error, TEXT("Bitmask size mismatch between static and dynamic obstacles."));
-		return false;
-	}
-	
+	// const TArray<F128BitChunk>& DynamicBitmask = GridVolume->DynamicObstacleBitmask;
+	//
+	// if (CombinedBitmask.Num() == DynamicBitmask.Num())
+	// {
+	// 	for (int32 i = 0; i < CombinedBitmask.Num(); ++i)
+	// 	{
+	// 		// SIMD를 사용하여 OR 연산을 수행합니다.
+	// 		const __m128i StaticData = _mm_load_si128(reinterpret_cast<const __m128i*>(&CombinedBitmask[i]));
+	// 		const __m128i DynamicData = _mm_load_si128(reinterpret_cast<const __m128i*>(&DynamicBitmask[i]));
+	// 		_mm_store_si128(reinterpret_cast<__m128i*>(&CombinedBitmask[i]), _mm_or_si128(StaticData, DynamicData));
+	// 	}
+	// }
+	// else
+	// {
+	// 	UE_LOG(LogTemp, Error, TEXT("Bitmask size mismatch between static and dynamic obstacles."));
+	// 	return false;
+	// }
+	//
 
 	// 2. "요청서"를 작성합니다.
 	FPathfindingRequest Request;
@@ -663,7 +663,7 @@ bool UPathfindingComponent::IsPathAheadValid() const
 	                                        FoundPathIndices.Num() - 2);
 	for (int32 i = CurrentPathDestinationIndex; i <= LastCheckIndex; ++i)
 	{
-		if (!FenwickVolume->IsPathSegmentWalkable(FoundPathIndices[i], FoundPathIndices[i + 1], AgentRadiusInVoxels))
+		if (!FenwickVolume->IsRegionWalkable(FoundPathIndices[i], AgentRadiusInVoxels))
 		{
 			UE_LOG(LogTemp, Warning,
 			       TEXT("Path Invalidated: A future path segment (from waypoint %d to %d) is blocked!"), i, i + 1);
