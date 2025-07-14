@@ -886,15 +886,44 @@ void AFenwickVoxelVolume::CleanUpAllChunkAssets() const
 		return;
 	}
 
-	// 5. ObjectTools를 사용하여 찾은 애셋들을 삭제합니다.
-	UE_LOG(LogTemp, Log, TEXT("Found %d old chunk assets to delete in path %s."), ChunkAssetsToDelete.Num(), *FinalSaveDir);
-	if (ObjectTools::DeleteAssets(ChunkAssetsToDelete, false) > 0)
+	//UE_LOG(LogTemp, Log, TEXT("Found %d old chunk assets to delete in path %s."), ChunkAssetsToDelete.Num(), *FinalSaveDir);
+	//if (ObjectTools::DeleteAssets(ChunkAssetsToDelete, false) > 0)
+	//{
+	//	UE_LOG(LogTemp, Log, TEXT("Successfully deleted old chunk assets."));
+	//}
+	//else
+	//{
+	//	UE_LOG(LogTemp, Warning, TEXT("Failed to delete old chunk assets. They might be in use or have failed to load."));
+	//}
+
+	// TO-DO: Added Safety checks but not all cases are handled.
+	TArray<UObject*> LoadedAssetsToDelete;
+	for (const FAssetData& AssetData : ChunkAssetsToDelete)
 	{
-		UE_LOG(LogTemp, Log, TEXT("Successfully deleted old chunk assets."));
+		UObject* LoadedAsset=AssetData.GetAsset();
+		if (LoadedAsset)
+		{
+			LoadedAssetsToDelete.Add(LoadedAsset);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Failed to load asset for deletion (possibly corrupt): %s. Skipping."), *AssetData.GetObjectPathString());
+		}
+	}
+
+	if(LoadedAssetsToDelete.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Found %d assets in path, but none could be loaded for deletion."), ChunkAssetsToDelete.Num());
+		return;
+	}	
+	const int32 DeletedCount = ObjectTools::DeleteObjects(LoadedAssetsToDelete, false);
+	if (DeletedCount > 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("Successfully deleted %d old chunk assets."), DeletedCount);
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Failed to delete old chunk assets. They might be in use or have failed to load."));
+		UE_LOG(LogTemp, Warning, TEXT("Attempted to delete %d assets, but none were deleted. They might be in use."), LoadedAssetsToDelete.Num());
 	}
 }
 
