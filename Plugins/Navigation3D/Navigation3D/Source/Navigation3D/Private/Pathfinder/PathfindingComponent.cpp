@@ -504,44 +504,18 @@ void UPathfindingComponent::ProcessNewPath(const TArray<FIntVector>& PathIndices
 			PathSplinePtr->AddSplinePoint(FoundPath[i], ESplineCoordinateSpace::World, false);
 		}
 
-		//아래는 spline곡선이 튀지 않게 방지하는 코드
-		// const float Tension = 0.2f; // 곡선의 팽팽함. 0.5가 보통 가장 자연스러움. -> UProperty로 빼서 사용자가 지정할 수 있게 변경
-		//
-		// for (int32 i = 0; i < NumPoints; ++i)
-		// {
-		// 	FVector Tangent;
-		//
-		// 	if (i == 0)
-		// 	{
-		// 		// --- 시작점 (First Point) ---
-		// 		// 다음 포인트(1)와 현재 포인트(0)의 차이를 탄젠트로 사용합니다.
-		// 		// 이렇게 하면 곡선이 경로의 시작 방향으로 부드럽게 뻗어나갑니다.
-		// 		const FVector P0 = PathSplinePtr->GetLocationAtSplinePoint(0, ESplineCoordinateSpace::Local);
-		// 		const FVector P1 = PathSplinePtr->GetLocationAtSplinePoint(1, ESplineCoordinateSpace::Local);
-		// 		Tangent = (P1 - P0) * Tension;
-		// 	}
-		// 	else if (i == NumPoints - 1)
-		// 	{
-		// 		// --- 끝점 (Last Point) ---
-		// 		// 현재 포인트(Last)와 이전 포인트(Last-1)의 차이를 탄젠트로 사용합니다.
-		// 		// 곡선이 경로의 끝 방향으로 자연스럽게 수렴합니다.
-		// 		const FVector PN_1 = PathSplinePtr->GetLocationAtSplinePoint(i - 1, ESplineCoordinateSpace::Local);
-		// 		const FVector PN = PathSplinePtr->GetLocationAtSplinePoint(i, ESplineCoordinateSpace::Local);
-		// 		Tangent = (PN - PN_1) * Tension;
-		// 	}
-		// 	else
-		// 	{
-		// 		// --- 중간점 (Intermediate Points) ---
-		// 		// 이것이 Catmull-Rom의 핵심입니다.
-		// 		// 이전 포인트(i-1)에서 다음 포인트(i+1)를 향하는 벡터를 계산합니다.
-		// 		const FVector P_Prev = PathSplinePtr->GetLocationAtSplinePoint(i - 1, ESplineCoordinateSpace::Local);
-		// 		const FVector P_Next = PathSplinePtr->GetLocationAtSplinePoint(i + 1, ESplineCoordinateSpace::Local);
-		// 		Tangent = (P_Next - P_Prev) * Tension;
-		// 	}
-		//
-		// 	// 계산된 탄젠트를 스플라인 포인트에 설정합니다.
-		// 	PathSplinePtr->SetTangentAtSplinePoint(i, Tangent, ESplineCoordinateSpace::Local, true);
-		// }
+		{	// 스플라인이 이상하게 그려져서 리패스 처음에 뒤로가는 현상 수정용 -> 첫번째와 두번째 SplinePoint만 Spline 강직도를 올림
+			float Tension = 0.1f;
+			const FVector P0 = PathSplinePtr->GetLocationAtSplinePoint(0, ESplineCoordinateSpace::Local);
+			const FVector P1 = PathSplinePtr->GetLocationAtSplinePoint(1, ESplineCoordinateSpace::Local);
+			FVector Tangent = (P1 - P0) * Tension;
+			PathSplinePtr->SetTangentAtSplinePoint(0, Tangent, ESplineCoordinateSpace::Local, true);
+
+			const FVector P_Prev = PathSplinePtr->GetLocationAtSplinePoint(0, ESplineCoordinateSpace::Local);
+			const FVector P_Next = PathSplinePtr->GetLocationAtSplinePoint(2, ESplineCoordinateSpace::Local);
+			Tangent = (P_Next - P_Prev) * Tension;
+			PathSplinePtr->SetTangentAtSplinePoint(1, Tangent, ESplineCoordinateSpace::Local, true);
+		}
 		
 		PathSplinePtr->UpdateSpline();
 	}
