@@ -10,7 +10,7 @@ DECLARE_DYNAMIC_DELEGATE_TwoParams(FPathfindingResultDelegate, const TArray<FInt
 
 class UPathfindingComponent;
 class UPathfindingStrategy;
-
+struct FPathNodeMemoryPool;
 USTRUCT(BlueprintType)
 struct FPathfindingRequest
 {
@@ -44,4 +44,6 @@ struct FPathfindingRequest
 	FPathfindingResultDelegate OnPathfindingComplete;
 
 	FThreadSafeBitmaskGrid WalkabilityGrid;
+
+	FPathNodeMemoryPool* MemoryPool = nullptr;
 };

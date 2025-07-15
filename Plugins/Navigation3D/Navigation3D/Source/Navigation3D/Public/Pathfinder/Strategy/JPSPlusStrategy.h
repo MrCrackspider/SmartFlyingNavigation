@@ -36,23 +36,27 @@ public:
 	FJPSPlusPathfinder(const FPathfindingRequest& InRequest,
 	                   const TArray<FIntVector>& InAllDirections,
 	                   const TMap<FIntVector, int32>& InDirectionToIndexMap,
-	                   FIntVector InActualGoal);
+	                   FIntVector InActualGoal,
+	                   FPathNodeMemoryPool& InMemoryPool);
 	// 실제 길찾기를 수행하는 메인 함수
 	EPathfindingResult FindPath(TArray<FIntVector>& OutPath);
 
 private:
 	// UJPSPlusStrategy에 있던 모든 알고리즘 함수들을 이곳으로 이동시킵니다.
 	void IdentifySuccessors(FPathNode* Node, TArray<FPathNode*>& OutSuccessors);
-	TOptional<FIntVector> Jump(const FIntVector& StartPos, const FIntVector& Direction);
+	TOptional<FIntVector> Jump(const FIntVector& StartPos, const FIntVector& Direction,	const FIntVector& ParentOfStartPos, float AccumulatedPenalty = 0.0f);
 	void GetPrunedDirections(const FIntVector& Dir, TArray<FIntVector>& OutDirections) const;
 	void OptimizePathFromJumpPoints(FPathNode* EndNode, TArray<FIntVector>& OutOptimizedPath) const;
 	bool HasLineOfSight(const FIntVector& From, const FIntVector& To) const;
+	
 	bool IsAgentMoveFeasible_ThreadSafe(const FIntVector& From, const FIntVector& To) const;
-	bool HasForcedNeighbour(const FIntVector& NodePos, const FIntVector& CheckDir, const FIntVector& ParentDir) const;
+	bool HasForcedNeighbour(const FIntVector& NodePos, const FIntVector& CheckDir, const FIntVector& ParentPos) const;
 	uint64 CalculateForcedNeighborMask(const FNeighborWalkability& Neighbors, int32 ParentDirIndex) const;
 	int32 CalculateHeuristic(const FIntVector& A, const FIntVector& B) const;
 	int32 GetMoveCost(const FIntVector& A, const FIntVector& B) const;
-
+	FIntVector GetRecommendedDirection(const FIntVector& dir, const FIntVector& CurrentPos) const;
+	int         CalcPenalty(const FIntVector& from, const FIntVector& to, const FIntVector& recDir);
+  
 	// UJPSPlusStrategy에 있던 모든 상태 변수들을 이곳으로 이동시킵니다.
 	const FPathfindingRequest Request;
 	const FThreadSafeBitmaskGrid WalkabilityGrid;
@@ -62,8 +66,7 @@ private:
 	FIntVector ActualGoalIndex;
 
 	int32 AgentRadiusInVoxels;
-
-	//FPathNodeMemoryPool& NodePool;
+	FPathNodeMemoryPool& MemoryPool;
 	TArray<FPathNode*> OpenSet;
 	TMap<FIntVector, FPathNode*> OpenSetLookup;
 	TMap<FIntVector, FPathNode*> ClosedSet;

@@ -8,6 +8,7 @@
 #include "PathfindingSubsystem.generated.h"
 
 
+struct FPathNodeMemoryPool;
 class AVoxelVolumeBase;
 class UPathfindingComponent;
 class UPathfindingStrategy;
@@ -70,11 +71,19 @@ public:
 	/** 이 객체가 틱을 돌릴 수 있는지 여부를 반환합니다. 에디터에서도 틱을 돌리려면 true를 반환해야 합니다. */
 	virtual bool IsTickableInEditor() const override { return true; }
 
+	
 	/** 이 객체가 틱을 돌릴 수 있는지 여부를 반환합니다. */
 	virtual bool IsTickable() const override { return true; }
 
 	/** 틱 그룹을 반환합니다. 보통 TG_PrePhysics 또는 TG_PostPhysics를 사용합니다. */
 	virtual TStatId GetStatId() const override {return TStatId(); };
+
+	// 경로탐색 작업이 메모리 풀을 빌려갈 때 호출하는 함수입니다.
+	FPathNodeMemoryPool* LeasePool();
+
+	// 작업이 끝난 후 메모리 풀을 반납할 때 호출하는 함수입니다.
+	void ReturnPool(FPathNodeMemoryPool* PoolToReturn);
+	
 protected:
 	// --- Subsystem Lifecycle ---
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
@@ -84,7 +93,7 @@ protected:
 private:
 	
 	UPROPERTY(Config)
-	int32 CurrentNumWorkerThreads = 4;
+	int32 CurrentNumWorkerThreads = 5;
 
 	/** 길찾기 전용 스레드 풀 */
 	FQueuedThreadPool* PathfindingThreadPool = nullptr;
@@ -93,7 +102,7 @@ private:
 	 * 여러 스레드에서 동시에 ID를 요청해도 안전합니다.
 	 */
 	UPROPERTY(Config)
-	int32 MaxCallbacksPerFrame = 5; // 프레임당 처리할 최대 콜백 수
+	int32 MaxCallbacksPerFrame = 10; // 프레임당 처리할 최대 콜백 수
 	
 	FThreadSafeCounter NextRequestID;
 	
@@ -106,5 +115,11 @@ private:
 	/** 완료된 작업 결과를 담는 스레드 안전 큐 */
 	TQueue<FPathfindingResult> CompletedTasksQueue;
 	
+private:
+	// 재사용을 위해 대기 중인 유휴 메모리 풀 목록입니다.
+	TArray<FPathNodeMemoryPool*> IdlePools;
+
+	// 여러 스레드에서 동시에 풀을 빌리거나 반납할 때의 충돌을 막는 잠금 장치입니다.
+	FCriticalSection PoolLock;
 
 };

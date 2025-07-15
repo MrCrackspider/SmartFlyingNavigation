@@ -7,7 +7,7 @@
 void UJPSPlusStrategy::Initialize()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(JPS_Initialize);
-	
+
 	if (AllDirections.Num() == 0)
 	{
 		for (int32 x = -1; x <= 1; ++x)
@@ -31,13 +31,16 @@ bool UJPSPlusStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest
 	if (InRequest.WalkabilityGrid.IsRegionWalkable(InRequest.EndIndex, InRequest.AgentRadiusInVoxels))
 	{
 		FIntVector NearestWalkableVoxel;
-		if (InRequest.WalkabilityGrid.FindNearestWalkableVoxel_BFS(InRequest.EndIndex, InRequest.AgentRadiusInVoxels,50, NearestWalkableVoxel))
+		if (InRequest.WalkabilityGrid.FindNearestWalkableVoxel_BFS(InRequest.EndIndex, InRequest.AgentRadiusInVoxels,
+		                                                           50, NearestWalkableVoxel))
 		{
 			ActualGoalIndex = NearestWalkableVoxel;
 		}
 	}
+
 	// 3. '일꾼' 객체 생성 및 작업 위임
-	FJPSPlusPathfinder Pathfinder(InRequest, AllDirections, DirectionToIndexMap, ActualGoalIndex);
+	FJPSPlusPathfinder Pathfinder(InRequest, AllDirections, DirectionToIndexMap, ActualGoalIndex,
+	                              *InRequest.MemoryPool);
 
 	const EPathfindingResult Result = Pathfinder.FindPath(OutPath);
 
@@ -87,34 +90,35 @@ FName UJPSPlusStrategy::GetStrategyName() const
 // =======================================================================
 // FJPSPlusPathfinder: 순수 C++ '일꾼' 클래스 구현
 // =======================================================================
-thread_local static FPathNodeMemoryPool ThreadLocalPool(1024);
 
 FJPSPlusPathfinder::FJPSPlusPathfinder(const FPathfindingRequest& InRequest,
-									   const TArray<FIntVector>& InAllDirections,
-									   const TMap<FIntVector, int32>& InDirectionToIndexMap,
-									   FIntVector InActualGoal)
-  : Request(InRequest)
-  , WalkabilityGrid(InRequest.WalkabilityGrid)
-  , AllDirections(InAllDirections)
-  , DirectionToIndexMap(InDirectionToIndexMap)
-  , ActualGoalIndex(InActualGoal)
-  , AgentRadiusInVoxels(InRequest.AgentRadiusInVoxels)
+                                       const TArray<FIntVector>& InAllDirections,
+                                       const TMap<FIntVector, int32>& InDirectionToIndexMap,
+                                       FIntVector InActualGoal,
+                                       FPathNodeMemoryPool& InMemoryPool)
+	: Request(InRequest)
+	  , WalkabilityGrid(InRequest.WalkabilityGrid)
+	  , AllDirections(InAllDirections)
+	  , DirectionToIndexMap(InDirectionToIndexMap)
+	  , ActualGoalIndex(InActualGoal)
+	  , MemoryPool(InMemoryPool)
+	  , AgentRadiusInVoxels(InRequest.AgentRadiusInVoxels)
 {
 }
 
 EPathfindingResult FJPSPlusPathfinder::FindPath(TArray<FIntVector>& OutPath)
 {
 	SCOPE_LOG_TIME_FUNC()
-	
-	ThreadLocalPool.Reset();
+
+	MemoryPool.Reset();
 	OpenSet.Empty();
 	OpenSetLookup.Empty();
 	ClosedSet.Empty();
 
-	FPathNode* StartNode = ThreadLocalPool.NewNode(Request.StartIndex);
+	FPathNode* StartNode = MemoryPool.NewNode(Request.StartIndex);
 	if (!StartNode) return EPathfindingResult::Failed_OutOfMemory;
 
-	
+
 	StartNode->HCost = CalculateHeuristic(Request.StartIndex, ActualGoalIndex);
 	StartNode->CalculateAndSetFCost();
 
@@ -200,205 +204,147 @@ EPathfindingResult FJPSPlusPathfinder::FindPath(TArray<FIntVector>& OutPath)
 
 void FJPSPlusPathfinder::IdentifySuccessors(FPathNode* Node, TArray<FPathNode*>& OutSuccessors)
 {
-	OutSuccessors.Empty();
-	const FPathNode* CurrentNode = Node;
+    OutSuccessors.Empty();
+    const FIntVector CurrentPos = Node->Position;
 
-	const FIntVector ParentDir = CurrentNode->Parent
-		                             ? FStrategyUtils::GetNormalizedDirection(Node->Parent->Position, Node->Position)
-		                             : FIntVector::ZeroValue;
+    // 1. 부모 점프 포인트로부터 온 방향을 계산합니다. 시작 노드는 부모가 없습니다.
+    const FIntVector ParentPos = Node->Parent ? Node->Parent->Position : CurrentPos;
+    const FIntVector ParentDir = Node->Parent ? FStrategyUtils::GetNormalizedDirection(ParentPos, CurrentPos) : FIntVector::ZeroValue;
 
-	// ===================================================================================
-	// --- 1. 정보 사전 계산 (The Pre-computation Step) ---
-	// 강제 이웃 판단에 필요한 모든 정보를 여기서 한 번에 계산합니다.
-	// ===================================================================================
+    // 2. 현재 위치에서 점프를 시작할 '자연스러운 방향'만 가져옵니다.
+    //    (강제 이웃을 여기서 미리 찾으려고 할 필요가 없습니다. 그건 Jump의 역할입니다.)
+    TArray<FIntVector> DirectionsToJump;
+    GetPrunedDirections(ParentDir, DirectionsToJump);
 
-	// 정보 1: 현재 노드에서 각 방향으로의 '직선 이동' 가능 여부
-	bool bIsStraightMoveWalkable[NUM_ALL_DIRECTIONS];
-	for (int32 i = 0; i < AllDirections.Num(); ++i)
-	{
-		bIsStraightMoveWalkable[i] = IsAgentMoveFeasible_ThreadSafe(CurrentNode->Position,
-		                                                            CurrentNode->Position + AllDirections[i]);
-	}
+    // 3. 각 방향으로 Jump를 실행하여 후계자(다음 점프 포인트)를 찾습니다.
+    TArray<FIntVector> AllJumpPoints;
+    FCriticalSection JumpPointMutex;
 
-	// 정보 2: 부모 노드에서 각 방향으로의 '코너링 이동' 가능 여부
-	bool bIsCorneringMoveWalkable[NUM_ALL_DIRECTIONS] = {false};
-	if (CurrentNode->Parent)
-	{
-		for (int32 i = 0; i < AllDirections.Num(); ++i)
-		{
-			bIsCorneringMoveWalkable[i] = IsAgentMoveFeasible_ThreadSafe(
-				CurrentNode->Parent->Position, CurrentNode->Position + AllDirections[i]);
-		}
-	}
+    ParallelFor(DirectionsToJump.Num(),
+        [this, &AllJumpPoints, &JumpPointMutex, &DirectionsToJump, CurrentPos](int32 Index)
+        {
+            const FIntVector& Dir = DirectionsToJump[Index];
 
-	// ===================================================================================
-	// --- 2. 후계자(Successor) 탐색 ---
-	// ===================================================================================
-	TSet<FIntVector> DirsToSearch;
+            // Jump를 시작할 때, 첫 스텝의 부모는 '자기 자신(CurrentPos)'입니다.
+            // 이렇게 해야 Jump 함수 내부의 JumperPrevPos가 올바르게 초기화됩니다.
+            TOptional<FIntVector> JP = Jump(CurrentPos, Dir, CurrentPos);
 
-	// 2a. 자연스러운 이웃 추가: GetPrunedDirections가 제안하는 방향 중, 실제로 이동 가능한 곳만 추가합니다.
-	TArray<FIntVector> NaturalDirs;
-	GetPrunedDirections(ParentDir, NaturalDirs);
-	for (const FIntVector& Dir : NaturalDirs)
-	{
-		const int32 DirIndex = DirectionToIndexMap.FindRef(Dir);
-		if (bIsStraightMoveWalkable[DirIndex])
-		{
-			DirsToSearch.Add(Dir);
-		}
-	}
+            if (JP.IsSet())
+            {
+                FScopeLock Lock(&JumpPointMutex);
+                AllJumpPoints.Add(JP.GetValue());
+            }
+        });
 
-	// 2b. 강제 이웃 추가: 사전 계산된 정보로 초고속 판단
-	if (Node->Parent)
-	{
-		for (int32 i = 0; i < AllDirections.Num(); ++i)
-		{
-			// 새로운 판단 로직:
-			// 1. 직선 이동은 가능하고 (bIsStraightMoveWalkable == true)
-			// 2. 코너링 이동은 불가능하다면 (bIsCorneringMoveWalkable == false)
-			// => 이것이 바로 정확한 강제 이웃입니다.
-			if (bIsStraightMoveWalkable[i] && !bIsCorneringMoveWalkable[i])
-			{
-				DirsToSearch.Add(AllDirections[i]);
-			}
-		}
-	}
-
-	// ===================================================================================
-	// --- 3. 병렬로 Jump 실행 ---
-	// ===================================================================================
-	TArray<FIntVector> AllJumpPoints;
-	FCriticalSection JumpPointMutex;
-
-	const FIntVector NodePos = Node->Position;
-
-	const TArray<FIntVector> DirsToSearchArray = DirsToSearch.Array();
-
-	ParallelFor(DirsToSearchArray.Num(),
-	            [this, &AllJumpPoints, &JumpPointMutex, &DirsToSearchArray, NodePos](int32 Index)
-	            {
-		            const FIntVector& Dir = DirsToSearchArray[Index];
-
-		            // 스레드 안전 Jump 함수를 호출합니다.
-		            TOptional<FIntVector> JumpPoint = Jump(NodePos, Dir);
-
-		            if (JumpPoint.IsSet())
-		            {
-			            // 여러 스레드에서 동시에 배열에 쓰지 못하도록 반드시 잠가야 합니다.
-			            FScopeLock Lock(&JumpPointMutex);
-			            AllJumpPoints.Add(JumpPoint.GetValue());
-		            }
-	            });
-
-	// --- FIX: Process the results from the single, thread-safe array. ---
-	OutSuccessors.Reserve(AllJumpPoints.Num());
-
-	for (const FIntVector& Point : AllJumpPoints)
-	{
-		// NodePool access is now safely back on the main thread.
-		FPathNode* node = ThreadLocalPool.NewNode(Point);
-		if (node)
-		{
-			OutSuccessors.Add(node);
-		}
-	}
+    // 4. 찾은 점프 포인트들을 후계자 노드로 생성합니다.
+    OutSuccessors.Reserve(AllJumpPoints.Num());
+    for (const FIntVector& P : AllJumpPoints)
+    {
+        if (FPathNode* NewNode = MemoryPool.NewNode(P))
+        {
+            OutSuccessors.Add(NewNode);
+        }
+    }
 }
 
-TOptional<FIntVector> FJPSPlusPathfinder::Jump(const FIntVector& StartPos, const FIntVector& Direction)
+TOptional<FIntVector> FJPSPlusPathfinder::Jump(const FIntVector& StartPos, const FIntVector& Direction, const FIntVector& ParentOfStartPos, float AccumulatedPenalty)
 {
-	FIntVector CurrentPos = StartPos;
+    FIntVector CurrentPos = StartPos;
+    FIntVector PrevPos = ParentOfStartPos;
+
+	const int hVal      = CalculateHeuristic(StartPos, ActualGoalIndex);
+	const float L       = (1.2f - 1.0f) * hVal;  // 논문: L=(t-1)*h(n) :contentReference[oaicite:0]{index=0}
+	//이 로직을 사용한다면, 1.2는 변수로 Property로 뺄것.
+
+	auto recDir = GetRecommendedDirection(Direction, CurrentPos);
+	const int sigma  = CalcPenalty(ParentOfStartPos, StartPos, recDir);
+	AccumulatedPenalty+= sigma;
+	if (AccumulatedPenalty > L)
+	{
+		// 페널티 초과 → 현재 위치를 pseudo-jump point로 반환 :contentReference[oaicite:1]{index=1}
+		return StartPos;
+	}
+	
 	if (HasLineOfSight(CurrentPos, ActualGoalIndex))
 	{
 		return ActualGoalIndex;
 	}
 
 	while (true)
-	{
-		const FIntVector NextPos = CurrentPos + Direction;
+    {
+        // 1. 다음 위치로 이동 가능한지 먼저 확인
+        const FIntVector NextPos = CurrentPos + Direction;
+        if (!WalkabilityGrid.IsIndexValid(NextPos) || !IsAgentMoveFeasible_ThreadSafe(CurrentPos, NextPos))
+        {
+            return {}; // 이동 불가, 점프 실패
+        }
 
-		if (!WalkabilityGrid.IsIndexValid(NextPos))
-			return {};  // 맵 경계를 벗어나면 즉시 실패 처리
-		
-		if (!IsAgentMoveFeasible_ThreadSafe(CurrentPos, NextPos))
-		{
-			return {};
-		}
+        // 2. 위치 갱신 (순서가 매우 중요!)
+        //    먼저 현재 위치를 이전 위치로 기록하고, 그 다음에 현재 위치를 다음 칸으로 이동시킵니다.
+        PrevPos = CurrentPos;
+        CurrentPos = NextPos;
 
-		// 안전성이 확인되었으므로, 상태를 다음 위치로 전진시킵니다.
-		CurrentPos = NextPos;
+        // 3. 목표에 도달했는지 확인
+        if (CurrentPos == ActualGoalIndex)
+        {
+            return CurrentPos;
+        }
+    	
+        // 4. 새 위치에서 강제 이웃이 있는지 확인 (이제 PrevPos는 올바른 '바로 이전 칸'입니다)
+        for (const auto& CheckDir : AllDirections)
+        {
+            if (CheckDir == Direction || CheckDir == Direction * -1) continue;
+            if (HasForcedNeighbour(CurrentPos, CheckDir, PrevPos))
+            {
+                return CurrentPos; // 강제 이웃 발견, 현재 위치가 새로운 점프 포인트임
+            }
+        }
+    	
+        // 5. (필수) 대각선 이동의 정확성을 위한 재귀 탐색 (정찰)
+        const int32 dx = Direction.X, dy = Direction.Y, dz = Direction.Z;	
 
-		// --- 2. 목표 도달 검사 ---
-		// 현재 위치가 목표 지점이라면, 최고의 점프 포인트를 찾은 것이므로 즉시 반환합니다.
-		if (CurrentPos == ActualGoalIndex)
-		{
-			return CurrentPos;
-		}
-
-		// // --- 3. 강제 이웃 검사 ---
-		// 현재 위치(CurrentPos)를 기준으로 강제 이웃이 있는지 확인합니다.
-		// 이 검사는 점프의 방향을 바꿔야 할 '코너'를 찾는 역할을 합니다.
-		// for (const auto& CheckDir : AllDirections)
-		// {
-		// 	if (CheckDir == Direction || CheckDir == (Direction * -1))
-		// 		continue;
-		// 	// 부모 방향(Direction)을 전달하여, 현재 진행 방향을 기준으로 한 강제 이웃을 찾습니다.
-		// 	if (HasForcedNeighbour(CurrentPos, CheckDir, Direction))
-		// 	{
-		// 		// 강제 이웃이 발견되면, 현재 위치는 중요한 분기점이므로 점프 포인트가 됩니다.
-		// 		return CurrentPos;
-		// 	}
-		// }
-		
-		
-		const FIntVector DirToGoal = ActualGoalIndex - CurrentPos;
-		const int64 DistSqToGoal = (int64)DirToGoal.X * DirToGoal.X + (int64)DirToGoal.Y * DirToGoal.Y + (int64)
-			DirToGoal.Z * DirToGoal.Z;
-
-		// 현재 위치에서 다음 스텝까지의 거리 제곱을 직접 계산합니다. (Direction 벡터의 길이 제곱)
-		const int64 DistSqToNext = (int64)Direction.X * Direction.X + (int64)Direction.Y * Direction.Y + (int64)
-			Direction.Z * Direction.Z;
-
-		if (DistSqToNext > DistSqToGoal)
-		{
-			// 다음 스텝이 목표보다 멀리 있다면, 목표를 지나친 것입니다.
-			// 이 경우, 현재 위치에서 목표까지 직접 갈 수 있는지 최종 확인합니다.
-			if (IsAgentMoveFeasible_ThreadSafe(CurrentPos, ActualGoalIndex))
-			{
-				return ActualGoalIndex;
-			}
-		}
-
-		FNeighborWalkability Walkability;
-		const FIntVector AgentRadiusVector(AgentRadiusInVoxels);
-		for (int32 i = 0; i < AllDirections.Num(); ++i)
-		{
-			const FIntVector NeighborPos = CurrentPos + AllDirections[i];
-		
-			if (WalkabilityGrid.IsRegionEmpty(NeighborPos - AgentRadiusVector, NeighborPos + AgentRadiusVector))
-			{
-				Walkability.WalkableMask |= (1 << i);
-			}
-		}
-
-		const int32 ParentDirIndex = DirectionToIndexMap.FindRef(Direction);
-		uint64 ForcedNeighborCandidateMask = CalculateForcedNeighborMask(Walkability, ParentDirIndex);
-		
-		// 2c. CTZ를 사용해 강제 이웃 후보들을 빠르게 순회
-		while (ForcedNeighborCandidateMask != 0)
-		{
-			unsigned long Index;
-			// 가장 오른쪽에 있는 후보(1 비트)의 인덱스를 찾는다
-			_BitScanForward64(&Index, ForcedNeighborCandidateMask); // CTZ 명령어
-		
-			ForcedNeighborCandidateMask &= ForcedNeighborCandidateMask - 1;
-		
-		
-		}
-		return CurrentPos;
-		
+        if (dx != 0 && dy != 0 && dz != 0) // 3D
+        {
+        	if (Jump(CurrentPos, FIntVector(dx, 0, 0), CurrentPos).IsSet() ||
+			   Jump(CurrentPos, FIntVector(0, dy, 0), CurrentPos).IsSet() ||
+			   Jump(CurrentPos, FIntVector(0, 0, dz), CurrentPos).IsSet())
+        	{
+        		return CurrentPos;
+        	}
+            if (Jump(CurrentPos, FIntVector(dx, dy, 0), CurrentPos).IsSet() ||
+                Jump(CurrentPos, FIntVector(dx, 0, dz), CurrentPos).IsSet() ||
+                Jump(CurrentPos, FIntVector(0, dy, dz), CurrentPos).IsSet())
+            {
+                return CurrentPos;
+            }
+        }
+        else if (dx != 0 && dy != 0) // 2D XY
+        {
+            if (Jump(CurrentPos, FIntVector(dx, 0, 0), CurrentPos).IsSet() ||
+                Jump(CurrentPos, FIntVector(0, dy, 0), CurrentPos).IsSet())
+            {
+                return CurrentPos;
+            }
+        }
+        else if (dx != 0 && dz != 0) // 2D XZ
+        {
+            if (Jump(CurrentPos, FIntVector(dx, 0, 0), CurrentPos).IsSet() ||
+                Jump(CurrentPos, FIntVector(0, 0, dz), CurrentPos).IsSet())
+            {
+                return CurrentPos;
+            }
+        }
+        else if (dy != 0 && dz != 0) // 2D YZ
+        {
+            if (Jump(CurrentPos, FIntVector(0, dy, 0), CurrentPos).IsSet() ||
+                Jump(CurrentPos, FIntVector(0, 0, dz), CurrentPos).IsSet())
+            {
+                return CurrentPos;
+            }
+        }
+    	
+    }
 	
-	}
-
 	return {};
 }
 
@@ -499,9 +445,8 @@ void FJPSPlusPathfinder::OptimizePathFromJumpPoints(FPathNode* EndNode, TArray<F
 
 bool FJPSPlusPathfinder::HasLineOfSight(const FIntVector& From, const FIntVector& To) const
 {
-
 	const FIntVector AgentRadiusVector(AgentRadiusInVoxels);
-    
+
 	// 시작점과 끝점에서의 에이전트 바운딩 박스
 	const FIntVector FromMin = From - AgentRadiusVector;
 	const FIntVector FromMax = From + AgentRadiusVector;
@@ -509,8 +454,10 @@ bool FJPSPlusPathfinder::HasLineOfSight(const FIntVector& From, const FIntVector
 	const FIntVector ToMax = To + AgentRadiusVector;
 
 	// 두 박스를 모두 포함하는 스윕된(Swept) 바운딩 박스
-	const FIntVector SweptMin(FMath::Min(FromMin.X, ToMin.X), FMath::Min(FromMin.Y, ToMin.Y), FMath::Min(FromMin.Z, ToMin.Z));
-	const FIntVector SweptMax(FMath::Max(FromMax.X, ToMax.X), FMath::Max(FromMax.Y, ToMax.Y), FMath::Max(FromMax.Z, ToMax.Z));
+	const FIntVector SweptMin(FMath::Min(FromMin.X, ToMin.X), FMath::Min(FromMin.Y, ToMin.Y),
+	                          FMath::Min(FromMin.Z, ToMin.Z));
+	const FIntVector SweptMax(FMath::Max(FromMax.X, ToMax.X), FMath::Max(FromMax.Y, ToMax.Y),
+	                          FMath::Max(FromMax.Z, ToMax.Z));
 
 	// 이 거대한 박스 안에 장애물이 하나라도 있다면, 시야는 즉시 차단된 것으로 간주합니다.
 	// 이것은 매우 빠르고 효율적인 1차 필터링입니다.
@@ -519,7 +466,7 @@ bool FJPSPlusPathfinder::HasLineOfSight(const FIntVector& From, const FIntVector
 		return false;
 	}
 
-	
+
 	// 1. From에서 To까지 중심선을 따라 복셀 목록을 생성합니다.
 	TArray<FIntVector> CenterlineVoxels;
 	FStrategyUtils::GenerateBresenhamLine(From, To, CenterlineVoxels);
@@ -557,8 +504,29 @@ bool FJPSPlusPathfinder::IsAgentMoveFeasible_ThreadSafe(const FIntVector& From, 
 
 	if (MoveDimension > 1) // 대각선 이동일 경우
 	{
+		if (Delta.X != 0 && Delta.Y != 0 && Delta.Z != 0)
+		{
+			// 3D에서는 더 많은 코너 조합을 검사해야 합니다.
+			// 가장 간단한 방법은 3개의 2D 평면 검사를 모두 통과해야 하는 것으로 처리하는 것입니다.
+			const FIntVector CornerX = From + FIntVector(Delta.X, 0, 0);
+			const FIntVector CornerY = From + FIntVector(0, Delta.Y, 0);
+			const FIntVector CornerZ = From + FIntVector(0, 0, Delta.Z);
+
+			// XY 평면 코너 검사
+			if (!WalkabilityGrid.IsRegionEmpty(CornerX - AgentRadiusVector, CornerX + AgentRadiusVector)
+				&& !WalkabilityGrid.IsRegionEmpty(CornerY - AgentRadiusVector, CornerY + AgentRadiusVector))
+				return false;
+			// XZ 평면 코너 검사
+			if (!WalkabilityGrid.IsRegionEmpty(CornerX - AgentRadiusVector, CornerX + AgentRadiusVector)
+				&& !WalkabilityGrid.IsRegionEmpty(CornerZ - AgentRadiusVector, CornerZ + AgentRadiusVector))
+				return false;
+			// YZ 평면 코너 검사
+			if (!WalkabilityGrid.IsRegionEmpty(CornerY - AgentRadiusVector, CornerY + AgentRadiusVector)
+				&& !WalkabilityGrid.IsRegionEmpty(CornerZ - AgentRadiusVector, CornerZ + AgentRadiusVector))
+				return false;
+		}
 		// 2D XY 평면 코너 검사
-		if (Delta.X != 0 && Delta.Y != 0 && Delta.Z == 0)
+		else if (Delta.X != 0 && Delta.Y != 0 && Delta.Z == 0)
 		{
 			const FIntVector Corner1 = From + FIntVector(Delta.X, 0, 0);
 			const FIntVector Corner2 = From + FIntVector(0, Delta.Y, 0);
@@ -595,29 +563,6 @@ bool FJPSPlusPathfinder::IsAgentMoveFeasible_ThreadSafe(const FIntVector& From, 
 				return false;
 			}
 		}
-
-		// 3D 대각선 이동
-		else if (Delta.X != 0 && Delta.Y != 0 && Delta.Z != 0)
-		{
-			// 3D에서는 더 많은 코너 조합을 검사해야 합니다.
-			// 가장 간단한 방법은 3개의 2D 평면 검사를 모두 통과해야 하는 것으로 처리하는 것입니다.
-			const FIntVector CornerX = From + FIntVector(Delta.X, 0, 0);
-			const FIntVector CornerY = From + FIntVector(0, Delta.Y, 0);
-			const FIntVector CornerZ = From + FIntVector(0, 0, Delta.Z);
-
-			// XY 평면 코너 검사
-			if (!WalkabilityGrid.IsRegionEmpty(CornerX - AgentRadiusVector, CornerX + AgentRadiusVector)
-				&& !WalkabilityGrid.IsRegionEmpty(CornerY - AgentRadiusVector, CornerY + AgentRadiusVector))
-				return false;
-			// XZ 평면 코너 검사
-			if (!WalkabilityGrid.IsRegionEmpty(CornerX - AgentRadiusVector, CornerX + AgentRadiusVector)
-				&& !WalkabilityGrid.IsRegionEmpty(CornerZ - AgentRadiusVector, CornerZ + AgentRadiusVector))
-				return false;
-			// YZ 평면 코너 검사
-			if (!WalkabilityGrid.IsRegionEmpty(CornerY - AgentRadiusVector, CornerY + AgentRadiusVector)
-				&& !WalkabilityGrid.IsRegionEmpty(CornerZ - AgentRadiusVector, CornerZ + AgentRadiusVector))
-				return false;
-		}
 	}
 
 	// 3. 이동 경로 전체에 대한 스윕(Sweep) 검사 (선택적이지만 정확도를 높임)
@@ -637,17 +582,11 @@ bool FJPSPlusPathfinder::IsAgentMoveFeasible_ThreadSafe(const FIntVector& From, 
 }
 
 bool FJPSPlusPathfinder::HasForcedNeighbour(const FIntVector& NodePos, const FIntVector& CheckDir,
-                                            const FIntVector& ParentDir) const
+                                            const FIntVector& JumperPrevPos) const
 {
-	if (ParentDir == FIntVector::ZeroValue)
-	{
-		return false;
-	}
-
-	const FIntVector ParentPos = NodePos - ParentDir;
 	const FIntVector CorneringTargetPos = NodePos + CheckDir;
 
-	if (!IsAgentMoveFeasible_ThreadSafe(ParentPos, CorneringTargetPos))
+	if (!IsAgentMoveFeasible_ThreadSafe(JumperPrevPos, CorneringTargetPos))
 	{
 		if (IsAgentMoveFeasible_ThreadSafe(NodePos, CorneringTargetPos))
 		{
@@ -709,4 +648,49 @@ int32 FJPSPlusPathfinder::CalculateHeuristic(const FIntVector& A, const FIntVect
 int32 FJPSPlusPathfinder::GetMoveCost(const FIntVector& A, const FIntVector& B) const
 {
 	return FStrategyUtils::Heuristic_Octile(A, B);
+}
+
+FIntVector FJPSPlusPathfinder::GetRecommendedDirection(
+	const FIntVector& dir,
+	const FIntVector& CurrentPos
+) const {
+	// 1) 대각선 분해 또는 그대로 반환
+	TArray<FIntVector> candidates;
+	if (dir.X != 0 && dir.Y != 0 && dir.Z != 0) {
+		candidates = { {dir.X,0,0}, {0,dir.Y,0}, {0,0,dir.Z} };
+	}
+	else if (dir.X != 0 && dir.Y != 0) {
+		candidates = { {dir.X,0,0}, {0,dir.Y,0} };
+	}
+	else if (dir.X != 0 && dir.Z != 0) {
+		candidates = { {dir.X,0,0}, {0,0,dir.Z} };
+	}
+	else if (dir.Y != 0 && dir.Z != 0) {
+		candidates = { {0,dir.Y,0}, {0,0,dir.Z} };
+	}
+	else {
+		// 이미 축 이동이면 그대로 추천
+		return dir;
+	}
+
+	// 2) 목표까지 휴리스틱이 최소인 방향 선택
+	FIntVector bestDir = candidates[0];
+	int bestH = TNumericLimits<int>::Max();
+	for (const auto& cand : candidates) {
+		FIntVector nextPos = CurrentPos + cand;
+		int h = CalculateHeuristic(nextPos, ActualGoalIndex);
+		if (h < bestH) {
+			bestH = h;
+			bestDir = cand;
+		}
+	}
+	return bestDir;
+}
+
+int FJPSPlusPathfinder::CalcPenalty(const FIntVector& from, const FIntVector& to, const FIntVector& recDir)
+{
+	const int h_xn = CalculateHeuristic(from, to);
+	const int h_nr = CalculateHeuristic(to, ActualGoalIndex);
+	const int h_xr = CalculateHeuristic(from, ActualGoalIndex);
+	return h_xn + h_nr - h_xr;
 }

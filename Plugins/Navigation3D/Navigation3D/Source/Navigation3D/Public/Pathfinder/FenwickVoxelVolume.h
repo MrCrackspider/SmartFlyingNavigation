@@ -102,6 +102,10 @@ public:
 	 */
 	bool IsRegionEmpty_Bitmask(const FIntVector& MinCorner, const FIntVector& MaxCorner) const;
 	uint32 GetChunkSize() {return CHUNK_SIZE; }
+	
+	void GetCombinedBitmask(TArray<F128BitChunk>& CombinedBitmask) const;
+
+	
 private:
 	/** Initializes the core data structures like the Fenwick Tree and Bitmasks. */
 	void InitializeDataStructures();

@@ -588,6 +588,25 @@ void AFenwickVoxelVolume::GatherCurrentObstacleVoxels(TSet<FIntVector>& OutVoxel
 	}
 }
 
+void AFenwickVoxelVolume::GetCombinedBitmask(TArray<F128BitChunk>& CombinedBitmask) const
+{
+	CombinedBitmask.Empty();
+	
+	if (StaticObstacleBitmask.Num() == DynamicObstacleBitmask.Num())
+	{
+		CombinedBitmask = StaticObstacleBitmask;
+		const TArray<F128BitChunk>& DynamicBitmask = DynamicObstacleBitmask;
+
+		for (int32 i = 0; i < CombinedBitmask.Num(); ++i)
+		{
+			// SIMD를 사용하여 OR 연산을 수행합니다.
+			const __m128i StaticData = _mm_load_si128(reinterpret_cast<const __m128i*>(&CombinedBitmask[i]));
+			const __m128i DynamicData = _mm_load_si128(reinterpret_cast<const __m128i*>(&DynamicBitmask[i]));
+			_mm_store_si128(reinterpret_cast<__m128i*>(&CombinedBitmask[i]), _mm_or_si128(StaticData, DynamicData));
+		}
+	}
+}
+
 void AFenwickVoxelVolume::ApplyDynamicObstacleChanges(const TSet<FIntVector>& NewFrameObstacles)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(VoxelVolume_ApplyDynamicChanges);

@@ -1,6 +1,7 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Pathfinder/PathfindingSubsystem.h"
+#include "Pathfinder/Utility/MemoryPool.h"
 #include "Pathfinder/Strategy/PathfindingStrategy.h"
 
 void FPathfindingAsyncTasks::DoThreadedWork()
@@ -25,6 +26,12 @@ void FPathfindingAsyncTasks::DoThreadedWork()
 	{
 		OwnerSubsystem->QueueCompletedResult(Result);
 	}
+
+	if (OwnerSubsystem.IsValid() && Request.MemoryPool)
+	{
+		OwnerSubsystem->ReturnPool(Request.MemoryPool);
+	}
+	
 	delete this;
 }
 
@@ -51,9 +58,38 @@ void FPathfindingAsyncTasks::Abandon()
 		Result.bSuccess = false; // 실패로 처리
 		OwnerSubsystem->QueueCompletedResult(Result);
 	}
+
+	if (OwnerSubsystem.IsValid() && Request.MemoryPool)
+	{
+		OwnerSubsystem->ReturnPool(Request.MemoryPool);
+	}
+	
 	delete this;
 }
 
+
+FPathNodeMemoryPool* UPathfindingSubsystem::LeasePool()
+{
+	FScopeLock Lock(&PoolLock);
+	if (IdlePools.Num() > 0)
+	{
+		// 사용 가능한 유휴 풀이 있다면, 목록에서 하나를 꺼내 반환합니다.
+		return IdlePools.Pop();
+	}
+    
+	// 유휴 풀이 없다면, 새로운 풀을 생성하여 반환합니다.
+	return new FPathNodeMemoryPool(1024); // 기본 슬랩 크기
+}
+
+void UPathfindingSubsystem::ReturnPool(FPathNodeMemoryPool* PoolToReturn)
+{
+	if (PoolToReturn)
+	{
+		FScopeLock Lock(&PoolLock);
+		PoolToReturn->Reset(); // 풀을 깨끗하게 초기화합니다.
+		IdlePools.Add(PoolToReturn); // 유휴 목록에 추가하여 재사용을 준비합니다.
+	}
+}
 
 // --- 1. Subsystem Initialization ---
 // This is called once when the subsystem is created.
@@ -99,13 +135,25 @@ void UPathfindingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 // 서브시스템이 파괴될 때 (예: 맵 전환, 게임 종료) 단 한 번 호출됩니다.
 void UPathfindingSubsystem::Deinitialize()
 {
+	UE_LOG(LogTemp, Warning, TEXT("--- Subsystem Deinitialization START ---"));
+	
 	if (PathfindingThreadPool)
 	{
 		PathfindingThreadPool->Destroy();
 		PathfindingThreadPool = nullptr;
 		UE_LOG(LogTemp, Log, TEXT("Pathfinding Thread Pool destroyed."));
 	}
-
+	UE_LOG(LogTemp, Warning, TEXT("Cleaning up %d Idle Pools..."), IdlePools.Num());
+	
+	FScopeLock Lock(&PoolLock);
+	UE_LOG(LogTemp, Warning, TEXT("Cleaning up %d Idle Pools..."), IdlePools.Num());
+	for (FPathNodeMemoryPool* Pool : IdlePools)
+	{
+		delete Pool;
+	}
+	IdlePools.Empty();
+	UE_LOG(LogTemp, Warning, TEXT("Idle Pools Cleaned."));
+	
 	Super::Deinitialize();
 }
 
@@ -221,7 +269,9 @@ int32 UPathfindingSubsystem::RequestPath(FPathfindingRequest& Request)
 	}
 
 	Request.RequestID = NextRequestID.Increment();
-
+	Request.MemoryPool = LeasePool();
+	if (!Request.MemoryPool)  return -1;
+	
 	// IQueuedWork를 구현한 작업 객체를 생성하여 스레드 풀에 추가
 	PathfindingThreadPool->AddQueuedWork(new FPathfindingAsyncTasks(Request, this));
 
