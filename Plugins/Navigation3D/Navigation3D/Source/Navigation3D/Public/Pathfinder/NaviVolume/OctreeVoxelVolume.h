@@ -92,7 +92,6 @@ protected:
 	void InitializeDynamicLayer();
 	void UpdateDynamicObstacles();
 	void UpdateVoxelStateForBounds(const FBox& InBounds, bool bAsObstacle);
-	void GatherCurrentObstacleVoxels(TSet<FIntVector>& OutVoxelIndices) const;
 	void ApplyDynamicObstacleChanges(const TSet<FIntVector>& NewFrameObstacles);
 	void UpdateDynamicVoxelState(const FIntVector& Index, bool bIsObstacle);
 
@@ -126,9 +125,6 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Baking", meta=(DisplayName="Static Object Filter"))
 	TObjectPtr<UVoxelObstacleFilter> StaticObjectFilter;
 	
-	UPROPERTY(EditAnywhere, Category = "Pathfinding", meta=(DisplayName="Dynamic Object Filter"))
-	TObjectPtr<UVoxelObstacleFilter> DynamicObjectFilter;
-
 private:
 	//~======================================================================
 	// 데이터 멤버
