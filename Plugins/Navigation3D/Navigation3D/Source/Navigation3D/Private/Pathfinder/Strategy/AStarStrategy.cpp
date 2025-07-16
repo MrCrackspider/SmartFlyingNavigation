@@ -26,6 +26,8 @@ void UAStarStrategy::Initialize()
 
 bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FVector>& OutPath)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_FindPathWithStrategy); // Insights에서 이 이름으로 표시됩니다.
+
 	// 1. 요청에서 옥트리 데이터 스냅샷을 가져옵니다.
 	const FOctreePathfindingData& OctreeData = InRequest.NavigationData.Get<FOctreePathfindingData>();
 
@@ -128,6 +130,8 @@ FAstarPathfinder::FAstarPathfinder(const FOctreePathfindingData& InOctreeData, i
 
 EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_Pathfinder_FindPath_Internal);
+	
 	MemoryPool.Reset();
 	OpenSet.Empty();
 	OpenSetLookup.Empty();
@@ -216,40 +220,57 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 
 void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPathNode*>& OutSuccessors)
 {
+	// IdentifySuccessors 함수 전체의 시간을 측정합니다.
+	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_IdentifySuccessors_Internal);
+
 	OutSuccessors.Empty();
 
-	// 1. 현재 노드와 인접한 모든 '정적' Empty 리프 노드를 찾습니다.
-	TArray<int32> AdjacentNodeIndices;
-	OctreeData.FindAdjacentEmptyLeaves(Node->NodeIndex, AdjacentNodeIndices);
+	// AdjacentNodeIndices 변수는 이 함수 전체에서 사용되므로, 함수 스코프 내에 선언합니다.
+	TArray<int32> AdjacentNodeIndices; 
 
+	// FindAdjacentEmptyLeaves 호출 부분만 측정합니다.
+	// 이 코드 블록이 끝나는 중괄호 '}'에서 타이머가 멈춥니다.
+	{ 
+		TRACE_CPUPROFILER_EVENT_SCOPE(AStar_FindAdjacentEmptyLeaves); // 이 스코프 내의 코드를 측정합니다.
+		OctreeData.FindAdjacentEmptyLeaves(Node->NodeIndex, AdjacentNodeIndices);
+	} // AStar_FindAdjacentEmptyLeaves 스코프 끝 (TRACE_CPUPROFILER_EVENT_SCOPE에 해당하는 중괄호 닫힘)
+
+    
 	for (const int32 NeighborIndex : AdjacentNodeIndices)
 	{
-		// 2. 각 이웃이 에이전트 크기를 고려했을 때 '동적으로' 막혔는지 확인합니다.
-		const FBox NeighborBounds = OctreeData.GetNodeBounds(NeighborIndex);
-		if (!OctreeData.IsRegionDynamicallyBlocked(NeighborBounds)) // 에이전트 크기는 IsRegionDynamicallyBlocked 내부에서 고려되어야 함
-		{
-			// 3. 통과 가능하다면 후계자 노드로 생성
-			FAstarPathNode* SuccessorNode = MemoryPool.NewNode();
-			if (SuccessorNode)
+		// IsRegionDynamicallyBlocked와 SuccessorNode 생성 부분을 함께 측정합니다.
+		// FBox NeighborBounds 변수는 이 스코프 내에서 선언되고, 해당 스코프 내에서 사용됩니다.
+		{ 
+			TRACE_CPUPROFILER_EVENT_SCOPE(AStar_CheckAndCreateSuccessor); // 이 스코프 내의 코드를 측정합니다.
+			const FBox NeighborBounds = OctreeData.GetNodeBounds(NeighborIndex); // GetNodeBounds 호출 포함
+            
+			if (!OctreeData.IsRegionDynamicallyBlocked(NeighborBounds)) // IsRegionDynamicallyBlocked 호출 포함
 			{
-				SuccessorNode->NodeIndex = NeighborIndex;
-				SuccessorNode->WorldPosition = NeighborBounds.GetCenter();
-				OutSuccessors.Add(SuccessorNode);
+				// 성공자 노드 생성 및 추가 부분 (이 부분은 AStar_CheckAndCreateSuccessor 스코프 안에 포함됩니다)
+				FAstarPathNode* SuccessorNode = MemoryPool.NewNode();
+				if (SuccessorNode)
+				{
+					SuccessorNode->NodeIndex = NeighborIndex;
+					SuccessorNode->WorldPosition = NeighborBounds.GetCenter();
+					OutSuccessors.Add(SuccessorNode);
+				}
 			}
-		}
+		} // AStar_CheckAndCreateSuccessor 스코프 끝 (TRACE_CPUPROFILER_EVENT_SCOPE에 해당하는 중괄호 닫힘)
 	}
 }
 
 int64 FAstarPathfinder::CalculateHeuristic(const FVector& A, const FVector& B) const
 {
-	// 옥타일 거리 또는 유클리드 거리를 사용할 수 있습니다. 여기서는 유클리드 거리.
-	return static_cast<int64>(FVector::Distance(A, B));
+    TRACE_CPUPROFILER_EVENT_SCOPE(AStar_CalculateHeuristic);
+    // FVector::DistanceSquared는 제곱근 연산 없이 벡터 간 거리의 제곱을 반환합니다.
+    // HCost를 제곱 거리로 변경합니다.
+    return static_cast<int64>(FVector::DistSquared(A, B));
 }
-
 int64 FAstarPathfinder::GetMoveCost(const FVector& A, const FVector& B) const
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_GetMoveCost);
 	// 실제 이동 비용도 두 노드 중심점 간의 거리로 계산합니다.
-	return static_cast<int64>(FVector::Distance(A, B));
+	return static_cast<int64>(FVector::DistSquared(A, B));
 }
 
 void FAstarPathfinder::ReconstructPath(FAstarPathNode* EndNode, TArray<FVector>& OutPath) const

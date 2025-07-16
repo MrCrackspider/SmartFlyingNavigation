@@ -100,7 +100,8 @@ private:
 	// 베이킹 헬퍼 함수
 	//~======================================================================
 #if WITH_EDITOR
-	void InsertObstacleRecursive(int32 NodeIndex, const FBox& NodeBounds, const FIntVector& ObstacleVoxel, int32 CurrentDepth);
+	void InsertObstacleRecursive(int32 NodeIndex, const FIntVector& ObstacleVoxel, int32 CurrentDepth);
+
 	void OptimizeAndCollapse(int32 NodeIndex, const FBox& NodeBounds);
 	FBox CalculateChildBounds(const FBox& ParentBounds, int32 ChildIndex) const;
 	int32 GetOctantContainingVoxel(const FBox& NodeBounds, const FVector& VoxelWorldPos) const;

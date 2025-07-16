@@ -305,17 +305,20 @@ void AOctreeVoxelVolume::BakeStaticData()
 	BakeTask.MakeDialog(); // UI 대화상자 표시
 
 	// --- 3. 옥트리 빌드 ---
-	BakeTask.EnterProgressFrame(AllStaticObstacles.Num(), FText::FromString(TEXT("Building Octree...")));
+	BakeTask.EnterProgressFrame(0, FText::FromString(TEXT("Building Octree...")));
 
 	StaticNodePool.Empty();
 	RootNodeIndex = StaticNodePool.Emplace(FOctreeNode()); // 루트 노드 생성
 
+	StaticNodePool[RootNodeIndex].Bounds = VolumeBounds;
+	
 	for (const FIntVector& ObstacleVoxel : AllStaticObstacles)
 	{
-		BakeTask.EnterProgressFrame(1); // 각 복셀마다 진행률 1씩 증가
-		if (BakeTask.ShouldCancel()) return; // 사용자가 취소 버튼을 눌렀는지 확인
+		BakeTask.EnterProgressFrame(1);
+		if (BakeTask.ShouldCancel()) return;
 
-		InsertObstacleRecursive(RootNodeIndex, VolumeBounds, ObstacleVoxel, 0);
+		// ✨✨ InsertObstacleRecursive 호출 시 VolumeBounds 인자를 제거합니다! ✨✨
+		InsertObstacleRecursive(RootNodeIndex, ObstacleVoxel, 0); // <-- 이렇게 수정합니다.
 	}
 
 	// --- 4. 옥트리 최적화 ---
@@ -393,55 +396,76 @@ void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticOb
 	UE_LOG(LogTemp, Log, TEXT("Scan complete. Found %d unique static obstacle voxels."), OutStaticObstacles.Num());
 }
 
-void AOctreeVoxelVolume::InsertObstacleRecursive(int32 NodeIndex, const FBox& NodeBounds,
-                                                 const FIntVector& ObstacleVoxel, int32 CurrentDepth)
+void AOctreeVoxelVolume::InsertObstacleRecursive(int32 NodeIndex, // <-- const FBox& NodeBounds 인자를 제거합니다!
+												 const FIntVector& ObstacleVoxel, int32 CurrentDepth)
 {
-	if (StaticNodePool[NodeIndex].State == EOctreeNodeState::Solid)
-	{
-		return;
-	}
+  // 1. 유효성 검사 (NodeIndex는 항상 유효해야 하지만, 방어적 코딩)
+    if (!StaticNodePool.IsValidIndex(NodeIndex))
+    {
+        UE_LOG(LogTemp, Error, TEXT("InsertObstacleRecursive: Invalid NodeIndex %d"), NodeIndex);
+        return;
+    }
 
-	if (CurrentDepth == MaxOctreeDepth)
-	{
-		StaticNodePool[NodeIndex].State = EOctreeNodeState::Solid;
-		return;
-	}
+    // 2. 현재 노드의 참조를 가져옵니다.
+    //    주의: StaticNodePool.Emplace() 호출 전에만 유효합니다.
+    FOctreeNode& CurrentNodeRef = StaticNodePool[NodeIndex]; 
+    const FBox CurrentNodeBounds = CurrentNodeRef.Bounds; // <-- 노드에 저장된 Bounds를 사용합니다.
 
-	// This block can cause StaticNodePool to reallocate memory.
-	// We must not hold a reference to any element during this operation.
-	if (StaticNodePool[NodeIndex].State == EOctreeNodeState::Empty)
-	{
-		// First, change the state.
-		StaticNodePool[NodeIndex].State = EOctreeNodeState::Mixed;
+    // 3. 노드 상태가 Solid이면 더 이상 진행할 필요 없음
+    if (CurrentNodeRef.State == EOctreeNodeState::Solid)
+    {
+        return;
+    }
 
-		// Now, emplace the children. Access the parent node via its index, not a reference.
-		for (int i = 0; i < 8; ++i)
-		{
-			const int32 NewChildIndex = StaticNodePool.Emplace(FOctreeNode());
-			StaticNodePool[NodeIndex].ChildrenIndices[i] = NewChildIndex;
-		}
-	}
+    // 4. 최대 깊이에 도달하면 현재 노드를 Solid로 만듭니다.
+    if (CurrentDepth == MaxOctreeDepth)
+    {
+        CurrentNodeRef.State = EOctreeNodeState::Solid;
+        return;
+    }
 
-	// It is now SAFE to get a reference, as no more reallocations will occur in this function.
-	FOctreeNode& Node = StaticNodePool[NodeIndex];
+    // 5. 현재 노드가 Empty 상태이면 Mixed로 바꾸고 자식 노드를 생성합니다.
+    //    이 블록은 StaticNodePool의 재할당을 유발할 수 있으므로,
+    //    이전에 얻었던 CurrentNodeRef 참조가 무효화될 수 있습니다.
+    //    따라서 StaticNodePool[NodeIndex]를 직접 사용하여 안전하게 접근합니다.
+    if (CurrentNodeRef.State == EOctreeNodeState::Empty)
+    {
+        StaticNodePool[NodeIndex].State = EOctreeNodeState::Mixed; // <-- 재할당 가능성 때문에 직접 접근
 
-	const FVector VoxelWorldPos = VoxelIndexToWorld(ObstacleVoxel);
-	const int32 ChildOctant = GetOctantContainingVoxel(NodeBounds, VoxelWorldPos);
+        // 자식 노드를 생성하고 Bounds를 설정합니다.
+        for (int i = 0; i < 8; ++i)
+        {
+            const int32 NewChildIndex = StaticNodePool.Emplace(FOctreeNode()); // 새 노드 추가
+            StaticNodePool[NewChildIndex].Bounds = CalculateChildBounds(CurrentNodeBounds, i); // <-- 새 자식 노드의 Bounds 설정
+            StaticNodePool[NodeIndex].ChildrenIndices[i] = NewChildIndex; // <-- 재할당 가능성 때문에 직접 접근
+        }
+    }
 
-	const int32 ChildNodeIndex = Node.ChildrenIndices[ChildOctant];
-	if (ChildNodeIndex != -1)
-	{
-		const FBox ChildBounds = CalculateChildBounds(NodeBounds, ChildOctant);
-		InsertObstacleRecursive(ChildNodeIndex, ChildBounds, ObstacleVoxel, CurrentDepth + 1);
-	}
-	else
-	{
-		// This error should no longer occur. If it does, there is another logic issue.
-		UE_LOG(LogTemp, Error,
-		       TEXT(
-			       "InsertObstacleRecursive: Invalid child node index (-1) encountered. This should not happen after the fix."
-		       ));
-	}
+    // 6. 자식 노드로 재귀 호출하기 위한 준비
+    //    여기서부터는 StaticNodePool에 더 이상 Emplace가 없으므로 CurrentNodeRef가 다시 유효해집니다.
+    //    하지만 일관성을 위해 StaticNodePool[NodeIndex]를 계속 사용하거나,
+    //    아예 이 시점에서 FOctreeNode& Node = StaticNodePool[NodeIndex]; 를 다시 가져와도 됩니다.
+    //    이전 CurrentNodeRef는 Emplace 때문에 무효화되었을 가능성이 있기 때문입니다.
+    FOctreeNode& Node = StaticNodePool[NodeIndex]; // <-- 안전하게 다시 참조를 가져옵니다.
+
+    const FVector VoxelWorldPos = VoxelIndexToWorld(ObstacleVoxel);
+    // GetOctantContainingVoxel 호출 시 Node.Bounds를 사용합니다.
+    const int32 ChildOctant = GetOctantContainingVoxel(Node.Bounds, VoxelWorldPos); 
+
+    const int32 ChildNodeIndex = Node.ChildrenIndices[ChildOctant];
+    if (ChildNodeIndex != -1)
+    {
+        // 재귀 호출 시 NodeBounds 인자를 제거합니다.
+        // ChildBounds는 더 이상 인자로 전달되지 않고, 재귀 호출된 함수 내부에서 Node.Bounds를 통해 접근합니다.
+        InsertObstacleRecursive(ChildNodeIndex, ObstacleVoxel, CurrentDepth + 1); 
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error,
+               TEXT(
+                   "InsertObstacleRecursive: Invalid child node index (-1) encountered. This should not happen after the fix."
+               ));
+    }
 }
 
 void AOctreeVoxelVolume::OptimizeAndCollapse(int32 NodeIndex, const FBox& NodeBounds)

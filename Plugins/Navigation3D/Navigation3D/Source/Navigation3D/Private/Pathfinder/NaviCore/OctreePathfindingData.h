@@ -137,15 +137,17 @@ public:
 	/** 특정 노드 인덱스에 해당하는 노드의 월드 경계를 계산합니다. */
 	FBox GetNodeBounds(int32 NodeIndex) const
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(Octree_GetNodeBounds);
+    
 		if (!StaticNodePool.IsValidIndex(NodeIndex))
 		{
 			return FBox(ForceInit);
 		}
-		if (NodeIndex == RootNodeIndex)
-		{
-			return VolumeBounds;
-		}
-		return GetNodeBoundsRecursive(NodeIndex, RootNodeIndex, VolumeBounds);
+    
+		// ✨✨ RootNodeIndex에 대한 특별 처리가 필요 없습니다.
+		// BuildOctreeRecursive에서 RootNodeIndex의 Bounds도 VolumeBounds로 설정되었기 때문입니다.
+		// 따라서 모든 노드는 이제 StaticNodePool[NodeIndex].Bounds에 올바른 값을 가집니다.
+		return StaticNodePool[NodeIndex].Bounds; 
 	}
 
 	/** 특정 노드와 인접한 모든 'Empty' 리프 노드를 찾습니다. */
@@ -192,6 +194,8 @@ public:
 	/** 특정 월드 영역이 동적 장애물에 의해 막혔는지 확인합니다. */
 	bool IsRegionDynamicallyBlocked(const FBox& QueryBox) const
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(Octree_IsRegionDynamicallyBlocked);
+		
 		const FIntVector MinCorner = WorldToVoxelIndex(QueryBox.Min);
 		// Max 코너는 복셀의 끝 지점까지 포함해야 하므로 1을 뺀 인덱스를 사용
 		const FIntVector MaxCorner = WorldToVoxelIndex(QueryBox.Max - FVector(KINDA_SMALL_NUMBER));

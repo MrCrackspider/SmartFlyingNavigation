@@ -28,6 +28,9 @@ struct FOctreeNode
 	UPROPERTY()
 	EOctreeNodeState State;
 
+	UPROPERTY() // UPROPERTY를 붙여야 리플렉션 시스템에서 인식합니다.
+	FBox Bounds; // FBox는 기본적으로 언리얼 엔진에 포함되어 있습니다.
+	
 	// 생성자: 기본값으로 초기화
 	FOctreeNode() : State(EOctreeNodeState::Empty)
 	{
