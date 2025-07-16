@@ -181,7 +181,36 @@ private:
         // 모든 자식 노드를 검사했지만 충돌이 없었습니다.
         return false;
     }
-	
+	void FindLeavesInBoxRecursive(TArray<int32>& OutLeaves, int32 NodeIndex, const FBox& QueryBox) const
+	{
+		if (!StaticNodePool.IsValidIndex(NodeIndex)) return;
+
+		const FBox NodeBounds = GetNodeBounds(NodeIndex);
+
+		// 1. [가지치기] 쿼리 박스와 현재 노드가 겹치지 않으면 더 이상 탐색할 필요가 없습니다.
+		if (!NodeBounds.Intersect(QueryBox))
+		{
+			return;
+		}
+
+		const FOctreeNode& Node = StaticNodePool[NodeIndex];
+
+		// 2. [리프 노드 도달]
+		if (Node.State != EOctreeNodeState::Mixed)
+		{
+			OutLeaves.Add(NodeIndex);
+			return;
+		}
+
+		// 3. [재귀 탐색] Mixed 노드인 경우, 자식 노드들을 재귀적으로 탐색합니다.
+		for (int32 i = 0; i < 8; ++i)
+		{
+			if (Node.ChildrenIndices[i] != -1)
+			{
+				FindLeavesInBoxRecursive(OutLeaves, Node.ChildrenIndices[i], QueryBox);
+			}
+		}
+	}
 public:
 	// --- 공개 API 함수 구현 ---
 
@@ -236,10 +265,7 @@ public:
 		{
 			return FBox(ForceInit);
 		}
-    
-		// ✨✨ RootNodeIndex에 대한 특별 처리가 필요 없습니다.
-		// BuildOctreeRecursive에서 RootNodeIndex의 Bounds도 VolumeBounds로 설정되었기 때문입니다.
-		// 따라서 모든 노드는 이제 StaticNodePool[NodeIndex].Bounds에 올바른 값을 가집니다.
+		
 		return StaticNodePool[NodeIndex].Bounds; 
 	}
 
@@ -357,5 +383,46 @@ public:
 			}
 		}
 		return false; // 안 막힘
+	}
+
+	int32 FindNearestEmptyLeaf(const FVector& Origin, float InitialSearchRadius, int32 MaxIterations) const
+	{
+		if (RootNodeIndex == -1) return -1;
+
+		for (int32 i = 1; i <= MaxIterations; ++i)
+		{
+			const float CurrentRadius = InitialSearchRadius * i;
+			const FBox SearchBox(Origin - FVector(CurrentRadius), Origin + FVector(CurrentRadius));
+		
+			TArray<int32> CandidateLeaves;
+			FindLeavesInBoxRecursive(CandidateLeaves, RootNodeIndex, SearchBox);
+
+			int32 BestNodeIndex = -1;
+			float MinDistSq = TNumericLimits<float>::Max();
+
+			for (const int32 LeafIndex : CandidateLeaves)
+			{
+				if (StaticNodePool[LeafIndex].State == EOctreeNodeState::Empty)
+				{
+					const FBox LeafBounds = GetNodeBounds(LeafIndex);
+					if (!IsRegionDynamicallyBlocked(LeafBounds))
+					{
+						const float DistSq = FVector::DistSquared(Origin, LeafBounds.GetCenter());
+						if (DistSq < MinDistSq)
+						{
+							MinDistSq = DistSq;
+							BestNodeIndex = LeafIndex;
+						}
+					}
+				}
+			}
+
+			if (BestNodeIndex != -1)
+			{
+				return BestNodeIndex;
+			}
+		}
+		
+		return -1;
 	}
 };

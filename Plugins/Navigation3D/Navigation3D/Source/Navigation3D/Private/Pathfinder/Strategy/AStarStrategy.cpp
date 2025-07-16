@@ -33,7 +33,7 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 
 	// 2. 시작점과 끝점이 유효한 'Empty' 리프 노드에 있는지 확인합니다.
 	const int32 StartNodeIndex = OctreeData.FindLeafNodeAt(InRequest.StartLocation);
-	const int32 GoalNodeIndex = OctreeData.FindLeafNodeAt(InRequest.EndLocation);
+	int32 GoalNodeIndex = OctreeData.FindLeafNodeAt(InRequest.EndLocation);
 
 	if (StartNodeIndex == -1 || OctreeData.StaticNodePool[StartNodeIndex].State != EOctreeNodeState::Empty)
 	{
@@ -42,9 +42,16 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	}
 	if (GoalNodeIndex == -1 || OctreeData.StaticNodePool[GoalNodeIndex].State != EOctreeNodeState::Empty)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("A* (Octree) Failed: Goal location is invalid or inside a solid node."));
-		// TODO: 여기서 FindNearestWalkable 같은 로직을 호출하여 대안 목표를 찾을 수 있습니다.
-		return false;
+		const int32 NewGoalNodeIndex = OctreeData.FindNearestEmptyLeaf(InRequest.EndLocation, NearbyGoalSearchRadius, NearbyGoalSearchIterations);
+
+		if (NewGoalNodeIndex == -1)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("A* (Octree) Failed: Could not find any valid nearby goal location."));
+			return false; // 주변 탐색으로도 실패 시, 최종 실패 처리
+		}
+
+		GoalNodeIndex = NewGoalNodeIndex; // 찾은 새 노드를 목표로 설정
+		UE_LOG(LogTemp, Log, TEXT("A* (Octree): Found alternative goal at node index %d."), GoalNodeIndex);
 	}
 
 	if (OctreeData.IsRegionDynamicallyBlocked(OctreeData.GetNodeBounds(StartNodeIndex)))
@@ -67,7 +74,10 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	auto& NodePool = *static_cast<TNodeMemoryPool<FAstarPathNode>*>(BasePool);
 
 	// 3. '일꾼' 객체를 생성하고 작업을 위임합니다.
-	FAstarPathfinder Pathfinder(OctreeData, StartNodeIndex, GoalNodeIndex, InRequest.AgentRadius, NodePool);
+	FAstarPathfinder Pathfinder(OctreeData, StartNodeIndex, GoalNodeIndex,
+	                            InRequest.StartLocation, InRequest.EndLocation,
+	                            InRequest.AgentRadius, NodePool);
+	
 	const EPathfindingResult Result = Pathfinder.FindPath(OutPath);
 
 	return (Result == EPathfindingResult::Success || Result == EPathfindingResult::Success_Partial);
@@ -117,12 +127,14 @@ FName UAStarStrategy::GetStrategyName() const
 // FAstarPathfinder: 전문가(일꾼) 역할
 // =======================================================================
 
-FAstarPathfinder::FAstarPathfinder(const FOctreePathfindingData& InOctreeData, int32 InStartNodeIndex,
-                                   int32 InGoalNodeIndex, float InAgentRadius,
+FAstarPathfinder::FAstarPathfinder(const FOctreePathfindingData& InOctreeData, int32 InStartIndex, int32 InEndIndex,
+                                   const FVector& InStartLocation, const FVector& InEndLocation, float InAgentRadius,
                                    TNodeMemoryPool<FAstarPathNode>& InMemoryPool)
 	: OctreeData(InOctreeData)
-	  , StartNodeIndex(InStartNodeIndex)
-	  , GoalNodeIndex(InGoalNodeIndex)
+	  , StartNodeIndex(InStartIndex)
+	  , GoalNodeIndex(InEndIndex)
+	  , ActualStartLocation(InStartLocation)
+	  , ActualGoalLocation(InEndLocation)
 	  , AgentRadius(InAgentRadius)
 	  , MemoryPool(InMemoryPool)
 {
@@ -131,7 +143,7 @@ FAstarPathfinder::FAstarPathfinder(const FOctreePathfindingData& InOctreeData, i
 EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_Pathfinder_FindPath_Internal);
-	
+
 	MemoryPool.Reset();
 	OpenSet.Empty();
 	OpenSetLookup.Empty();
@@ -148,7 +160,7 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 	                                      OctreeData.GetNodeBounds(GoalNodeIndex).GetCenter());
 	StartNode->CalculateAndSetFCost();
 
-	OpenSet.HeapPush(StartNode,Predicate);
+	OpenSet.HeapPush(StartNode, Predicate);
 	OpenSetLookup.Add(StartNodeIndex, StartNode);
 
 	FAstarPathNode* BestPartialNode = StartNode;
@@ -185,9 +197,10 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 
 			// === THETA* 로직 시작 ===
 			FAstarPathNode* ParentNode = CurrentNode; // 기본 부모는 현재 노드 (A*와 동일)
-			
+
 			// 현재 노드에 부모가 있고(시작 노드가 아님), "부모의 부모"와 "Successor" 사이에 가시선이 확보된다면
-			if (CurrentNode->Parent && HasLineOfSightWithRadius(CurrentNode->Parent->WorldPosition, Successor->WorldPosition))
+			if (CurrentNode->Parent && HasLineOfSightWithRadius(CurrentNode->Parent->WorldPosition,
+			                                                    Successor->WorldPosition))
 			{
 				// 부모를 "부모의 부모"로 설정하여 경로를 단축합니다.
 				ParentNode = CurrentNode->Parent;
@@ -210,8 +223,8 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 			else // OpenSet에 없는 새로운 노드인 경우
 			{
 				Successor->SetParent(ParentNode, NewGCost,
-									 CalculateHeuristic(Successor->WorldPosition,
-														OctreeData.GetNodeBounds(GoalNodeIndex).GetCenter()));
+				                     CalculateHeuristic(Successor->WorldPosition,
+				                                        OctreeData.GetNodeBounds(GoalNodeIndex).GetCenter()));
 
 				OpenSet.HeapPush(Successor, Predicate);
 				OpenSetLookup.Add(Successor->NodeIndex, Successor);
@@ -242,6 +255,8 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 {
 	TArray<FVector> RawPath;
 	FAstarPathNode* CurrentNode = EndNode;
+
+
 	while (CurrentNode != nullptr)
 	{
 		RawPath.Add(CurrentNode->WorldPosition);
@@ -249,15 +264,21 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 	}
 	Algo::Reverse(RawPath);
 
+	RawPath[0] = ActualStartLocation;
+
+	if (HasLineOfSightWithRadius(RawPath.Last(), ActualGoalLocation))
+	{
+		RawPath.Last() = ActualGoalLocation;
+	}
+
 	if (RawPath.Num() < 2)
 	{
 		OutPath = RawPath;
 		return;
 	}
 
-	// String Pulling (경로 다듬기) 로직
 	OutPath.Empty();
-	OutPath.Add(RawPath[0]); // 시작점 추가
+	OutPath.Add(RawPath[0]); // 수정된 실제 시작점 추가
 
 	int32 CurrentPointIndex = 0;
 	while (CurrentPointIndex < RawPath.Num() - 1)
@@ -266,7 +287,7 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 		// 경로의 끝에서부터 현재 지점까지 가시선이 통하는 가장 먼 지점을 찾습니다.
 		while (LookAheadIndex > CurrentPointIndex + 1)
 		{
-			if (HasLineOfSightWithRadius(RawPath[CurrentPointIndex], RawPath[LookAheadIndex]))
+			if (HasLineOfSightWithRadius(OutPath.Last(), RawPath[LookAheadIndex]))
 			{
 				break; // 찾았다!
 			}
@@ -274,24 +295,32 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 		}
 		
 		OutPath.Add(RawPath[LookAheadIndex]); // 가시선이 확보된 가장 먼 지점을 경로에 추가
-		CurrentPointIndex = LookAheadIndex;   // 현재 위치를 그 지점으로 점프
+		
+		// 만약 마지막 지점을 추가한 것이라면 루프를 종료합니다.
+		if (LookAheadIndex == RawPath.Num() - 1)
+		{
+			break;
+		}
+		
+		CurrentPointIndex = LookAheadIndex; 
 	}
 }
+
 void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPathNode*>& OutSuccessors)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_IdentifySuccessors_Internal);
 
 	OutSuccessors.Empty();
 
-	TArray<int32> AdjacentNodeIndices; 
+	TArray<int32> AdjacentNodeIndices;
 
-	{ 
+	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(AStar_FindAdjacentEmptyLeaves);
 		OctreeData.FindAdjacentEmptyLeaves(Node->NodeIndex, AdjacentNodeIndices);
-	} 
+	}
 	for (const int32 NeighborIndex : AdjacentNodeIndices)
 	{
-		{ 
+		{
 			TRACE_CPUPROFILER_EVENT_SCOPE(AStar_CheckAndCreateSuccessor);
 			const FBox NeighborBounds = OctreeData.GetNodeBounds(NeighborIndex);
 
@@ -299,9 +328,9 @@ void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPat
 
 			if (OctreeData.CheckForSolidNodesInCapsule(NeighborCenter, NeighborCenter, AgentRadius))
 			{
-				continue; 
+				continue;
 			}
-			
+
 			if (!OctreeData.IsRegionDynamicallyBlocked(NeighborBounds))
 			{
 				FAstarPathNode* SuccessorNode = MemoryPool.NewNode();
@@ -318,15 +347,13 @@ void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPat
 
 int64 FAstarPathfinder::CalculateHeuristic(const FVector& A, const FVector& B) const
 {
-    TRACE_CPUPROFILER_EVENT_SCOPE(AStar_CalculateHeuristic);
-    // FVector::DistanceSquared는 제곱근 연산 없이 벡터 간 거리의 제곱을 반환합니다.
-    // HCost를 제곱 거리로 변경합니다.
-    return static_cast<int64>(FVector::DistSquared(A, B));
+	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_CalculateHeuristic);
+	return static_cast<int64>(FVector::DistSquared(A, B));
 }
+
 int64 FAstarPathfinder::GetMoveCost(const FVector& A, const FVector& B) const
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_GetMoveCost);
-	// 실제 이동 비용도 두 노드 중심점 간의 거리로 계산합니다.
 	return static_cast<int64>(FVector::DistSquared(A, B));
 }
 
@@ -341,6 +368,3 @@ void FAstarPathfinder::ReconstructPath(FAstarPathNode* EndNode, TArray<FVector>&
 	}
 	Algo::Reverse(OutPath);
 }
-
-
-

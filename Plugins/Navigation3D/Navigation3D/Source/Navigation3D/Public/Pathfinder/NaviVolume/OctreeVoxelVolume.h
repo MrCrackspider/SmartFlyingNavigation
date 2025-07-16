@@ -28,7 +28,8 @@ public:
 	virtual bool IsRegionWalkable(const FIntVector& VoxelIndex, int32 AgentRadiusInVoxels) const override;
 	virtual void GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const override;
 	virtual bool IsVoxelWalkable(const FIntVector& VoxelIndex) const override;
-
+	virtual void RegisterDynamicObstacle(UDynamicObstacleComponent* ObstacleComponent) override;
+	virtual void UnregisterDynamicObstacle(UDynamicObstacleComponent* ObstacleComponent) override;
 	/** 런타임에 로드된 정적 옥트리 노드 풀의 복사본을 반환합니다. (스레드 안전) */
 	FORCEINLINE TArray<FOctreeNode> GetStaticNodePool() const { return StaticNodePool; }
 
@@ -90,6 +91,7 @@ protected:
 	//~======================================================================
 	void InitializeDynamicLayer();
 	void UpdateDynamicObstacles();
+	void UpdateVoxelStateForBounds(const FBox& InBounds, bool bAsObstacle);
 	void GatherCurrentObstacleVoxels(TSet<FIntVector>& OutVoxelIndices) const;
 	void ApplyDynamicObstacleChanges(const TSet<FIntVector>& NewFrameObstacles);
 	void UpdateDynamicVoxelState(const FIntVector& Index, bool bIsObstacle);

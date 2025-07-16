@@ -47,7 +47,7 @@ void AOctreeVoxelVolume::BeginPlay()
 
 	// 2. Initialize dynamic obstacle layer and start timer
 	InitializeDynamicLayer();
-	GetWorldTimerManager().SetTimer(DynamicObstacleTimer, this, &AOctreeVoxelVolume::UpdateDynamicObstacles, 0.2f, true,
+	GetWorldTimerManager().SetTimer(DynamicObstacleTimer, this, &AOctreeVoxelVolume::UpdateDynamicObstacles, 2.f, true,
 	                                0.1f);
 }
 
@@ -137,6 +137,23 @@ void AOctreeVoxelVolume::GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObs
 bool AOctreeVoxelVolume::IsVoxelWalkable(const FIntVector& Index) const
 {
 	return IsRegionWalkable(Index, 0);
+}
+
+void AOctreeVoxelVolume::RegisterDynamicObstacle(UDynamicObstacleComponent* ObstacleComponent)
+{
+	if (ObstacleComponent)
+	{
+		RegisteredObstacles.Add(ObstacleComponent);
+	}
+}
+
+void AOctreeVoxelVolume::UnregisterDynamicObstacle(UDynamicObstacleComponent* ObstacleComponent)
+{
+	if (ObstacleComponent)
+	{
+		UpdateVoxelStateForBounds(ObstacleComponent->GetLastKnownBounds(), false);
+		RegisteredObstacles.Remove(ObstacleComponent);
+	}
 }
 
 //======================================================================
@@ -669,12 +686,50 @@ void AOctreeVoxelVolume::InitializeDynamicLayer()
 
 void AOctreeVoxelVolume::UpdateDynamicObstacles()
 {
-	TSet<FIntVector> NewFrameObstacles;
-	GatherCurrentObstacleVoxels(NewFrameObstacles);
-	ApplyDynamicObstacleChanges(NewFrameObstacles);
-	CurrentDynamicObstacles = MoveTemp(NewFrameObstacles);
+	TRACE_CPUPROFILER_EVENT_SCOPE(VoxelVolume_UpdateDynamicObstacles_Optimized);
+
+	for (UDynamicObstacleComponent* Comp : RegisteredObstacles)
+	{
+		if (!Comp) continue;
+		
+		// 컴포넌트가 움직였을 때("Dirty"일 때)만 업데이트합니다.
+		if (Comp->IsDirty())
+		{
+			// 1. 이전 위치의 복셀들을 비웁니다.
+			UpdateVoxelStateForBounds(Comp->GetLastKnownBounds(), false);
+
+			// 2. 현재 위치의 경계 상자를 계산하고, 그 위치에 복셀들을 채웁니다.
+			const FBox CurrentBounds = Comp->GetCurrentBounds();
+			UpdateVoxelStateForBounds(CurrentBounds, true);
+
+			// 3. 마지막 위치 정보를 현재로 업데이트하고, Dirty 플래그를 내립니다.
+			Comp->UpdateLastKnownBounds();
+			Comp->ClearDirtyFlag();
+		}
+	}
 }
 
+void AOctreeVoxelVolume::UpdateVoxelStateForBounds(const FBox& InBounds, bool bAsObstacle)
+{
+	if (!InBounds.IsValid) return;
+
+	FIntVector MinVoxelIndex = WorldToVoxelIndex(InBounds.Min);
+	FIntVector MaxVoxelIndex = WorldToVoxelIndex(InBounds.Max);
+
+	FIntVector ClampedMin, ClampedMax;
+	if (!ClampVoxelIndicesToVolume(MinVoxelIndex, MaxVoxelIndex, ClampedMin, ClampedMax)) return;
+
+	for (int32 z = ClampedMin.Z; z <= ClampedMax.Z; ++z)
+	{
+		for (int32 y = ClampedMin.Y; y <= ClampedMax.Y; ++y)
+		{
+			for (int32 x = ClampedMin.X; x <= ClampedMax.X; ++x)
+			{
+				UpdateDynamicVoxelState({x, y, z}, bAsObstacle);
+			}
+		}
+	}
+}
 void AOctreeVoxelVolume::GatherCurrentObstacleVoxels(TSet<FIntVector>& OutVoxelIndices) const
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(VoxelVolume_GatherObstacles);
@@ -708,6 +763,11 @@ void AOctreeVoxelVolume::GatherCurrentObstacleVoxels(TSet<FIntVector>& OutVoxelI
 		UPrimitiveComponent* OverlappedComponent = Result.GetComponent();
 		AActor* OverlappedActor = Result.GetActor();
 
+		if (OverlappedActor && OverlappedActor->FindComponentByClass<UPathfindingComponent>())
+		{
+			continue;
+		}
+		
 		if (DynamicObjectFilter->DoesActorMatch(OverlappedActor, OverlappedComponent))
 		{
 			const FBox ObstacleBounds = OverlappedComponent->Bounds.GetBox();

@@ -471,58 +471,19 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 {
 	if (bSuccess && Path.Num() > 1)
     {
-        // 디버그 드로잉 (이전 답변과 동일하게 LifeTime을 짧게 설정하는 것을 권장)
-        FlushPersistentDebugLines(GetWorld());
-        for (int32 i = 0; i < Path.Num() - 1; ++i)
-        {
-	        DrawDebugLine(GetWorld(),
-	        	Path[i],
-	        	Path[i + 1],
-	        	FColor::Cyan,
-	        	false,
-	        	10.0f,
-	        	0,
-	        	10.0f);
-        }
-
-		
-		for (const FVector& Point : Path)
-		{
-			DrawDebugSphere(
-				GetWorld(),
-				Point,
-				25.0f,
-				12,
-				FColor::Magenta,
-				false,
-				10.0f,
-				0,
-				5.0f);
-		}
-        UE_LOG(LogTemp, Log, TEXT("Pathfinding successful! Drawing debug path with %d points."), Path.Num());
         
-        // ✨✨✨ 여기에 실제 이동 로직을 위한 경로 저장 및 상태 변경 ✨✨✨
-        FoundPath = Path; // FVector 경로를 FoundPath에 저장
-        FoundPathIndices.Empty(); // FVector 경로를 사용하므로 FoundPathIndices는 비워둡니다.
-                                  // 또는, FVector 경로를 FIntVector로 변환하여 저장할 수도 있습니다.
-                                  // 하지만 현재 Octree는 FVector 경로를 반환하므로, FVector를 직접 사용하는 것이 좋습니다.
-
-		// ✨✨✨ 바로 이 부분입니다! 첫 번째 경로 지점을 액터의 현재 위치로 보정합니다. ✨✨✨
-		if (GetOwner())
+        FoundPath = Path; 
+        FoundPathIndices.Empty();
+		
+		if (GetOwner() && FoundPath.Num() > 0)
 		{
-			FoundPath.Insert(GetOwner()->GetActorLocation(), 0);
-		}
-		else
-		{
-			UE_LOG(LogTemp, Warning, TEXT("PathfindingComponent: Owner is null when setting first path point."));
+			FoundPath[0] = GetOwner()->GetActorLocation(); 
 		}
 		
-        CurrentPathDestinationIndex = 0; // 첫 번째 지점부터 시작 (또는 1부터 시작하여 첫 지점은 건너뛰기)
-                                         // 보통 0부터 시작해서 첫 지점은 현재 위치로 간주하고 다음 지점으로 이동합니다.
-        bIsReachDestination = false; // 목적지에 도달하지 않음
-        CurrentState = EPathfindingState::FollowPath; // 상태를 '경로 따라가기'로 변경
-
-        // 스플라인 초기화 및 설정 (ProcessNewPath에서 가져와서 FVector 경로에 맞게 수정)
+        CurrentPathDestinationIndex = 1;
+		bIsReachDestination = false;
+        CurrentState = EPathfindingState::FollowPath;
+		
         if (PathSplinePtr.IsValid())
         {
             PathSplinePtr->ClearSplinePoints();
@@ -531,14 +492,13 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
                 PathSplinePtr->AddSplinePoint(Point, ESplineCoordinateSpace::World, false);
             }
             PathSplinePtr->UpdateSpline();
-            DistanceAlongSpline = 0.f; // 스플라인 시작 지점으로 초기화
+            DistanceAlongSpline = 0.f;
         }
         else
         {
             UE_LOG(LogTemp, Warning, TEXT("PathSplinePtr is not valid. Cannot set up spline path."));
         }
 
-        // PathOptimizationTimer 활성화 (필요하다면)
         GetWorld()->GetTimerManager().UnPauseTimer(PathOptimizationTimer);
     }
     else
@@ -548,10 +508,9 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
         FoundPathIndices.Empty();
         CurrentPathDestinationIndex = 0;
         CurrentState = EPathfindingState::Idle;
-        GetWorld()->GetTimerManager().PauseTimer(PathOptimizationTimer); // 실패 시 타이머 중지
+        GetWorld()->GetTimerManager().PauseTimer(PathOptimizationTimer);
     }
-
-    // RepathCooldownTimer 설정 (HandleVoxelPathResult와 동일하게)
+	
     if (bPeriodicRepath && !bIsReachDestination)
     {
         if (UWorld* World = GetWorld())
@@ -612,11 +571,10 @@ void UPathfindingComponent::ProcessNewPath(const TArray<FIntVector>& PathIndices
 		FoundPath.Add(GridVolume->VoxelIndexToWorld(Index));
 	}
 
-	//그대로 해도 살짝이상 살짝 dir방향으로 앞쪽에 해야할듯
 	FoundPath[0] = GetOwner()->GetActorLocation();
 
 	CurrentState = EPathfindingState::FollowPath;
-	MovementMode = EPathMovementMode::Spline; //움직임모드 설정할 수 있게 할거면 하드하게 설정하지 말고 변수로 대체
+	MovementMode = EPathMovementMode::Spline;
 	GetWorld()->GetTimerManager().UnPauseTimer(PathOptimizationTimer);
 
 	if (PathSplinePtr.IsValid())
@@ -792,42 +750,6 @@ bool UPathfindingComponent::IsSplinePathSafe() const
 			continue;
 		}
 
-		// { //for debug
-		// 	// 디버그 구체를 그립니다.
-		// 	DrawDebugSphere(
-		// 		GetWorld(),                  // 구체를 그릴 월드
-		// 		StartPoint,             // 구체의 중심 위치: StartPoint
-		// 		AgentRadius,            // 구체의 반지름: AgentRadius
-		// 		6,                     // 구체의 정밀도 (12 또는 24 정도면 충분합니다)
-		// 		FColor::Green,          // 색상: 녹색
-		// 		false,                  // 한 프레임만 표시할지 여부
-		// 		5.0f,                   // 표시 시간: 5초
-		// 		0,                      // 렌더링 우선순위
-		// 		2.0f                    // 선의 두께 (추가적인 파라미터)
-		// 	);
-		//
-		// 	TArray<FHitResult> HitResult;
-		// 	bool bHit = GetWorld()->SweepMultiByObjectType(
-		// 		HitResult,
-		// 		StartPoint,
-		// 		EndPoint,
-		// 		FQuat::Identity,
-		// 		ObjectQueryParams,
-		// 		FCollisionShape::MakeSphere(AgentRadius),
-		// 		CollisionParams
-		// 	);
-		//
-		// 	if (bHit)
-		// 	{
-		// 		UE_LOG(LogTemp, Warning, TEXT("Obstacle detected"));
-		// 		for (FHitResult Hit : HitResult)
-		// 		{
-		// 			AActor* HitActor = Hit.GetActor();
-		// 			UE_LOG(LogTemp, Warning, TEXT("Result: %s"), *HitActor->GetName());
-		// 		}
-		// 		return false;
-		// 	}
-		// }
 		
 		if (GetWorld()->SweepTestByObjectType(StartPoint, EndPoint, FQuat::Identity, ObjectQueryParams,
 		                                      FCollisionShape::MakeSphere(AgentRadius), CollisionParams))

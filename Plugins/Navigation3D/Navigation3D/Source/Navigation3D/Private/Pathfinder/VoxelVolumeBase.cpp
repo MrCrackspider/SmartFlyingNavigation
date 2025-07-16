@@ -140,6 +140,14 @@ bool AVoxelVolumeBase::IsVoxelWalkable(const FIntVector& VoxelIndex) const
 	return false;
 }
 
+void AVoxelVolumeBase::RegisterDynamicObstacle(UDynamicObstacleComponent* ObstacleComponent)
+{
+}
+
+void AVoxelVolumeBase::UnregisterDynamicObstacle(UDynamicObstacleComponent* ObstacleComponent)
+{
+}
+
 
 bool AVoxelVolumeBase::IsIndexValid(const FIntVector& Index) const
 {
