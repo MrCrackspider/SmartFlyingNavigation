@@ -35,7 +35,7 @@ protected:
 
 public:	
 	virtual void Tick(float DeltaTime) override;
-	
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason);
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|VolumeSettings")
 	float VoxelExtent;
 

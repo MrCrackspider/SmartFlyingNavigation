@@ -90,13 +90,31 @@ void AVoxelVolumeBase::OnConstruction(const FTransform& Transform)
 	VolumeBox->SetBoxExtent(HalfExtent);
 	VolumeBox->SetRelativeLocation(HalfExtent);
 	VolumeBox->SetLineThickness(DebugLineWidth);
-
-	UpdateDebugObstacleVisualization();
 }
 
 void AVoxelVolumeBase::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+}
+
+void AVoxelVolumeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	GetWorldTimerManager().ClearTimer(DebugUpdateTimer);
+
+	if (DebugSolidNodesComponent)
+	{
+		DebugSolidNodesComponent->ClearInstances();
+	}
+	if (DebugEmptyNodesComponent)
+	{
+		DebugEmptyNodesComponent->ClearInstances();
+	}
+	if (DebugMixedNodesComponent)
+	{
+		DebugMixedNodesComponent->ClearInstances();
+	}
+    
+	Super::EndPlay(EndPlayReason);
 }
 
 
@@ -237,8 +255,14 @@ void AVoxelVolumeBase::GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObsta
 {
 }
 
+
 void AVoxelVolumeBase::UpdateDebugObstacleVisualization()
 {
+	if (!bDrawDebugBox || !GetWorld())
+	{
+		return;
+	}
+	
 	if (bIsUpdatingVisualization)
 	{
 		return;

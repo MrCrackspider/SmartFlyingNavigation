@@ -5,7 +5,6 @@
 
 // 베이킹에 필요한 헤더
 #if WITH_EDITOR
-#include "AssetToolsModule.h"
 #include "FileHelpers.h"
 #endif
 
@@ -288,6 +287,23 @@ void AOctreeVoxelVolume::BakeStaticData()
 {
 	Super::BakeStaticData();
 
+	if (!StaticObjectFilter)
+	{
+		const FText Title = FText::FromString(TEXT("Baking Confirmation"));
+
+		const FText Message = FText::FromString(
+			TEXT("The 'Static Object Filter' is not set.\n\nThe system will fall back to the default behavior: baking all 'WorldStatic' objects as permanent obstacles.\n\nIs this okay?")
+		);
+
+		if (FPlatformMisc::MessageBoxExt(EAppMsgType::YesNo, *Message.ToString(), *Title.ToString()) == EAppReturnType::No)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Baking cancelled by user. Please set a 'Static Object Filter' to define what to bake."));
+			return; // 베이킹 중단
+		}
+	}
+
+	
+	
 	// --- 1. 사전 준비 및 장애물 스캔 ---
 	TSet<FIntVector> AllStaticObstacles;
 	ScanForAllStaticObstacles(AllStaticObstacles);
@@ -300,12 +316,11 @@ void AOctreeVoxelVolume::BakeStaticData()
 	}
 
 	// --- 2. UI 프로그레스 바 설정 ---
-	// 총 작업량 = (빌드: 장애물 개수) + (최적화: 1) + (저장: 1)
 	FScopedSlowTask BakeTask(AllStaticObstacles.Num() + 2, FText::FromString(TEXT("Baking Octree Data...")));
 	BakeTask.MakeDialog(); // UI 대화상자 표시
 
 	// --- 3. 옥트리 빌드 ---
-	BakeTask.EnterProgressFrame(0, FText::FromString(TEXT("Building Octree...")));
+	BakeTask.EnterProgressFrame(0, FText::FromString(TEXT("Building Octree... (1/3)")));
 
 	StaticNodePool.Empty();
 	RootNodeIndex = StaticNodePool.Emplace(FOctreeNode()); // 루트 노드 생성
@@ -317,18 +332,17 @@ void AOctreeVoxelVolume::BakeStaticData()
 		BakeTask.EnterProgressFrame(1);
 		if (BakeTask.ShouldCancel()) return;
 
-		// ✨✨ InsertObstacleRecursive 호출 시 VolumeBounds 인자를 제거합니다! ✨✨
 		InsertObstacleRecursive(RootNodeIndex, ObstacleVoxel, 0); // <-- 이렇게 수정합니다.
 	}
 
 	// --- 4. 옥트리 최적화 ---
-	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Optimizing Octree...")));
+	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Optimizing Octree...(2/3)")));
 	if (BakeTask.ShouldCancel()) return;
 
 	OptimizeAndCollapse(RootNodeIndex, VolumeBounds);
 
 	// --- 5. 애셋 파일로 저장 ---
-	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Saving data asset...")));
+	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Saving data asset...(3/3)")));
 	if (BakeTask.ShouldCancel()) return;
 
 	SaveOctreeToAsset(); // 헬퍼 함수 호출로 깔끔하게 처리
@@ -340,60 +354,95 @@ void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticOb
 {
 	OutStaticObstacles.Empty();
 
-	// 1. 볼륨 전체 영역에 대한 박스를 계산합니다.
+	// 1. [스캔 대상 설정] StaticObjectFilter의 존재 여부에 따라 스캔할 오브젝트 타입을 결정합니다.
+	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypesToQuery;
+	if (StaticObjectFilter)
+	{
+		// 필터가 설정된 경우: 필터에 정의된 채널을 사용합니다.
+		UE_LOG(LogTemp, Log, TEXT("Using custom 'Static Object Filter' for baking."));
+		for (const TEnumAsByte<ECollisionChannel>& Channel : StaticObjectFilter->CollisionChannels)
+		{
+			ObjectTypesToQuery.Add(UEngineTypes::ConvertToObjectType(Channel));
+		}
+		
+		if (ObjectTypesToQuery.Num() == 0)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("ScanForAllStaticObstacles: The assigned 'Static Object Filter' has no Collision Channels specified. No objects were scanned."));
+			return;
+		}
+	}
+	else
+	{
+		// 필터가 없는 경우: 기본값인 WorldStatic을 사용합니다.
+		UE_LOG(LogTemp, Log, TEXT("'Static Object Filter' not set. Falling back to default: scanning 'WorldStatic' objects."));
+		ObjectTypesToQuery.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_WorldStatic));
+	}
+	
+	// 2. [오브젝트 스캔] 볼륨 내에서 결정된 타입의 모든 액터를 찾습니다.
 	const FBox VolumeWorldBounds = GetComponentsBoundingBox(true, true);
-
-	// 2. 해당 박스 영역과 겹치는 모든 Static Mesh 액터를 찾습니다.
 	TArray<AActor*> OverlappingActors;
-	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
-	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_WorldStatic));
-
 	UKismetSystemLibrary::BoxOverlapActors(GetWorld(), VolumeWorldBounds.GetCenter(), VolumeWorldBounds.GetExtent(),
-	                                       ObjectTypes, AActor::StaticClass(), BakeExcludeActors, OverlappingActors);
+	                                       ObjectTypesToQuery, AActor::StaticClass(), BakeExcludeActors, OverlappingActors);
 
 	if (OverlappingActors.Num() == 0)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("ScanForAllStaticObstacles: No overlapping static actors found in volume."));
+		UE_LOG(LogTemp, Log, TEXT("ScanForAllStaticObstacles: No overlapping actors found for the specified query."));
 		return;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("ScanForAllStaticObstacles: Found %d overlapping actors. Now checking voxels..."),
-	       OverlappingActors.Num());
+	UE_LOG(LogTemp, Log, TEXT("ScanForAllStaticObstacles: Found %d potential actors. Applying filter and checking voxels..."), OverlappingActors.Num());
 
-	// 3. 각 액터의 컴포넌트를 순회하며 복셀 단위로 정밀 검사합니다.
+	// 3. [필터링 및 복셀화] 각 액터를 최종 확인하고 복셀화합니다.
 	for (AActor* Actor : OverlappingActors)
 	{
+		if (!Actor) continue;
+		
 		TArray<UPrimitiveComponent*> PrimitiveComponents;
 		Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
 
 		for (UPrimitiveComponent* Comp : PrimitiveComponents)
 		{
 			if (!Comp || !Comp->IsQueryCollisionEnabled()) continue;
-
-			const FBox ComponentBounds = Comp->Bounds.GetBox();
-			FIntVector MinVoxel, MaxVoxel;
-			FIntVector MinVoxelUnclamped = WorldToVoxelIndex(ComponentBounds.Min);
-			FIntVector MaxVoxelUnclamped = WorldToVoxelIndex(ComponentBounds.Max);
-			if (!ClampVoxelIndicesToVolume(MinVoxelUnclamped, MaxVoxelUnclamped, MinVoxel, MaxVoxel)) continue;
-
-			for (int32 z = MinVoxel.Z; z <= MaxVoxel.Z; ++z)
+			
+			bool bShouldBake;
+			if (StaticObjectFilter)
 			{
-				for (int32 y = MinVoxel.Y; y <= MaxVoxel.Y; ++y)
+				// 필터가 있으면, 필터와 일치해야만 베이킹합니다.
+				bShouldBake = StaticObjectFilter->DoesActorMatch(Actor, Comp);
+			}
+			else
+			{
+				bShouldBake = true;
+			}
+
+			if (bShouldBake)
+			{
+				// --- 베이킹 대상으로 확정된 오브젝트만 복셀화 진행 ---
+				const FBox ComponentBounds = Comp->Bounds.GetBox();
+				FIntVector MinVoxel, MaxVoxel;
+				FIntVector MinVoxelUnclamped = WorldToVoxelIndex(ComponentBounds.Min);
+				FIntVector MaxVoxelUnclamped = WorldToVoxelIndex(ComponentBounds.Max);
+				if (!ClampVoxelIndicesToVolume(MinVoxelUnclamped, MaxVoxelUnclamped, MinVoxel, MaxVoxel)) continue;
+
+				for (int32 z = MinVoxel.Z; z <= MaxVoxel.Z; ++z)
 				{
-					for (int32 x = MinVoxel.X; x <= MaxVoxel.X; ++x)
+					for (int32 y = MinVoxel.Y; y <= MaxVoxel.Y; ++y)
 					{
-						const FIntVector VoxelIndex(x, y, z);
-						if (OutStaticObstacles.Contains(VoxelIndex)) continue;
-						if (CheckVoxelOverlap(VoxelIndex, Comp))
+						for (int32 x = MinVoxel.X; x <= MaxVoxel.X; ++x)
 						{
-							OutStaticObstacles.Add(VoxelIndex);
+							const FIntVector VoxelIndex(x, y, z);
+							if (OutStaticObstacles.Contains(VoxelIndex)) continue;
+							if (CheckVoxelOverlap(VoxelIndex, Comp))
+							{
+								OutStaticObstacles.Add(VoxelIndex);
+							}
 						}
 					}
 				}
 			}
 		}
 	}
-	UE_LOG(LogTemp, Log, TEXT("Scan complete. Found %d unique static obstacle voxels."), OutStaticObstacles.Num());
+	UE_LOG(LogTemp, Log, TEXT("Scan complete. Baked %d unique static obstacle voxels."), OutStaticObstacles.Num());
 }
 
 void AOctreeVoxelVolume::InsertObstacleRecursive(int32 NodeIndex, // <-- const FBox& NodeBounds 인자를 제거합니다!
@@ -540,8 +589,8 @@ FBox AOctreeVoxelVolume::CalculateChildBounds(const FBox& ParentBounds, int32 Ch
 	case 5: return FBox(FVector(Center.X, Min.Y, Center.Z), FVector(Max.X, Center.Y, Max.Z)); // +-+
 	case 6: return FBox(FVector(Min.X, Center.Y, Center.Z), FVector(Center.X, Max.Y, Max.Z)); // -++
 	case 7: return FBox(Center, Max); // +++
+	default: return FBox{};
 	}
-	return FBox();
 }
 
 int32 AOctreeVoxelVolume::GetOctantContainingVoxel(const FBox& NodeBounds, const FVector& VoxelWorldPos) const
@@ -572,6 +621,7 @@ bool AOctreeVoxelVolume::GetBakedAssetPath(FString& OutPackagePath, FString& Out
 	return true;
 }
 
+
 void AOctreeVoxelVolume::SaveOctreeToAsset()
 {
 	FString PackageName, AssetName;
@@ -583,23 +633,23 @@ void AOctreeVoxelVolume::SaveOctreeToAsset()
 	UPackage* Package = CreatePackage(*PackageName);
 	Package->FullyLoad();
 
-	UOctreeDataAsset* NewOctreeData = NewObject<
-		UOctreeDataAsset>(Package, FName(*AssetName), RF_Public | RF_Standalone);
+	UOctreeDataAsset* NewOctreeData = NewObject<UOctreeDataAsset>(
+		Package, FName(*AssetName), RF_Public | RF_Standalone
+	);
 	if (!NewOctreeData)
 	{
 		UE_LOG(LogTemp, Error, TEXT("Failed to create new UOctreeDataAsset object for package: %s"), *PackageName);
 		return;
 	}
+	
+	NewOctreeData->Modify();
 
-	// 베이크된 데이터와 설정을 애셋에 복사
 	NewOctreeData->NodePool = StaticNodePool;
 	NewOctreeData->BakedMapSize = this->MapSize;
 	NewOctreeData->BakedMaxOctreeDepth = this->MaxOctreeDepth;
 
 	FAssetRegistryModule::AssetCreated(NewOctreeData);
-	Package->MarkPackageDirty();
 
-	// --- 저장 로직 변경 ---
 	TArray<UPackage*> PackagesToSave;
 	PackagesToSave.Add(Package);
 
@@ -613,7 +663,6 @@ void AOctreeVoxelVolume::SaveOctreeToAsset()
 		UE_LOG(LogTemp, Error, TEXT("Failed to save Octree data package: %s"), *PackageName);
 	}
 }
-
 #endif
 
 //======================================================================
@@ -642,29 +691,38 @@ void AOctreeVoxelVolume::GatherCurrentObstacleVoxels(TSet<FIntVector>& OutVoxelI
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(VoxelVolume_GatherObstacles);
 
-	if (!IsValid(ObstacleFilterProfile)) return;
+	OutVoxelIndices.Empty();
+
+	if (!DynamicObjectFilter)
+	{
+		return;
+	}
 
 	FCollisionObjectQueryParams ObjectQueryParams;
-	for (const TEnumAsByte<ECollisionChannel>& Channel : ObstacleFilterProfile->CollisionChannels)
+	for (const TEnumAsByte<ECollisionChannel>& Channel : DynamicObjectFilter->CollisionChannels)
 	{
 		ObjectQueryParams.AddObjectTypesToQuery(Channel);
 	}
+	
+	if (ObjectQueryParams.GetQueryBitfield() == 0)
+	{
+		return;
+	}
 
 	TArray<FOverlapResult> OverlapResults;
-	if (!GetOverlappingComponentsInVolume(ObjectQueryParams, OverlapResults)) return;
+	if (!GetOverlappingComponentsInVolume(ObjectQueryParams, OverlapResults))
+	{
+		return;
+	}
 
 	for (const FOverlapResult& Result : OverlapResults)
 	{
 		UPrimitiveComponent* OverlappedComponent = Result.GetComponent();
 		AActor* OverlappedActor = Result.GetActor();
 
-		if (OverlappedActor && OverlappedActor->FindComponentByClass<UPathfindingComponent>())
+		if (DynamicObjectFilter->DoesActorMatch(OverlappedActor, OverlappedComponent))
 		{
-			continue;
-		}
-
-		if (ObstacleFilterProfile->DoesActorMatch(OverlappedActor, OverlappedComponent))
-		{
+			// --- 필터를 통과한 동적 오브젝트만 복셀화 진행 ---
 			const FBox ObstacleBounds = OverlappedComponent->Bounds.GetBox();
 			FIntVector MinVoxelIndex = WorldToVoxelIndex(ObstacleBounds.Min);
 			FIntVector MaxVoxelIndex = WorldToVoxelIndex(ObstacleBounds.Max - FVector(KINDA_SMALL_NUMBER));

@@ -20,7 +20,7 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
-	
+
 public:
 	//~======================================================================
 	// AUniformGridVolume 인터페이스 구현 (하이브리드 쿼리)
@@ -40,23 +40,31 @@ public:
 
 	/** 동적 장애물 비트마스크의 복사본을 반환합니다. (스레드 안전) */
 	FORCEINLINE TArray<F128BitChunk> GetDynamicObstacleBitmask() const { return DynamicObstacleBitmask; }
-	
+
 #if WITH_EDITOR
 	// 옥트리 베이킹 함수
 	virtual void BakeStaticData() override;
 	void ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticObstacles) const;
 #endif
-	
+
 #if WITH_EDITORONLY_DATA
 
 	UPROPERTY(EditAnywhere, Category = "Octree|Baking", meta=(ContentDir))
 	FDirectoryPath BakedDataSaveDirectory;
 
 	void SafeRemoveInstances(UInstancedStaticMeshComponent* Component, TArray<int32>& InstanceIndicesToRemove);
+
 	// 옥트리 베이킹 함수
-	struct FDebugNodeInfo { int32 NodeIndex; FBox Bounds; EOctreeNodeState State; };
+	struct FDebugNodeInfo
+	{
+		int32 NodeIndex;
+		FBox Bounds;
+		EOctreeNodeState State;
+	};
+
 	virtual void UpdateDebugObstacleVisualization() override;
-	void GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex, const FBox& NodeBounds, int32 CurrentDepth) const;
+	void GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex, const FBox& NodeBounds,
+	                               int32 CurrentDepth) const;
 	// 현재 그려진 노드 인덱스 추적
 	UPROPERTY()
 	TMap<int32, int32> DisplayedSolidNodeInstanceMap;
@@ -87,7 +95,7 @@ private:
 	//~======================================================================
 	// 쿼리 헬퍼 함수
 	//~======================================================================
-	
+
 	/** 정적 옥트리 레이어에서 해당 영역이 비어있는지 확인합니다. */
 	bool IsRegionEmpty_StaticOctree(const FBox& QueryBox) const;
 	bool IsRegionEmptyRecursive(int32 NodeIndex, const FBox& NodeBounds, const FBox& QueryBox) const;
@@ -109,6 +117,12 @@ private:
 	void SaveOctreeToAsset();
 #endif
 
+protected:
+	UPROPERTY(EditAnywhere, Category = "Baking", meta=(DisplayName="Static Object Filter"))
+	TObjectPtr<UVoxelObstacleFilter> StaticObjectFilter;
+	
+	UPROPERTY(EditAnywhere, Category = "Pathfinding", meta=(DisplayName="Dynamic Object Filter"))
+	TObjectPtr<UVoxelObstacleFilter> DynamicObjectFilter;
 
 private:
 	//~======================================================================
@@ -129,7 +143,7 @@ private:
 	// --- 2. 동적(Dynamic) 장애물 레이어 ---
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Filter", meta=(AllowPrivateAccess="true"))
 	TObjectPtr<UVoxelObstacleFilter> ObstacleFilterProfile;
-	
+
 	/** 동적 장애물을 위한 비트마스크 그리드 (실시간 업데이트) */
 	TArray<F128BitChunk> DynamicObstacleBitmask;
 	TSet<FIntVector> CurrentDynamicObstacles;

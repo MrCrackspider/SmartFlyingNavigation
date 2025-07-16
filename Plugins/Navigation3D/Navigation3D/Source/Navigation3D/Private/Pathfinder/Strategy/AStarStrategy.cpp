@@ -169,7 +169,7 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 
 		if (CurrentNode->NodeIndex == GoalNodeIndex)
 		{
-			ReconstructPath(CurrentNode, OutPath);
+			ReconstructAndSmoothPath(CurrentNode, OutPath);
 			return EPathfindingResult::Success;
 		}
 
@@ -183,24 +183,35 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 				continue;
 			}
 
-			const int64 NewGCost = CurrentNode->GCost + GetMoveCost(CurrentNode->WorldPosition,
-			                                                        Successor->WorldPosition);
+			// === THETA* 로직 시작 ===
+			FAstarPathNode* ParentNode = CurrentNode; // 기본 부모는 현재 노드 (A*와 동일)
+			
+			// 현재 노드에 부모가 있고(시작 노드가 아님), "부모의 부모"와 "Successor" 사이에 가시선이 확보된다면
+			if (CurrentNode->Parent && HasLineOfSightWithRadius(CurrentNode->Parent->WorldPosition, Successor->WorldPosition))
+			{
+				// 부모를 "부모의 부모"로 설정하여 경로를 단축합니다.
+				ParentNode = CurrentNode->Parent;
+			}
+			// === THETA* 로직 끝 ===
+
+			const int64 NewGCost = ParentNode->GCost + GetMoveCost(ParentNode->WorldPosition, Successor->WorldPosition);
 
 			FAstarPathNode** ExistingNodePtr = OpenSetLookup.Find(Successor->NodeIndex);
-			if (ExistingNodePtr)
+			if (ExistingNodePtr) // OpenSet에 이미 있는 경우
 			{
 				if (NewGCost < (*ExistingNodePtr)->GCost)
 				{
-					(*ExistingNodePtr)->SetParent(CurrentNode, NewGCost, (*ExistingNodePtr)->HCost);
-
-					//OpenSet.Heapify(Predicate);
+					// 더 짧은 경로를 찾았으므로 부모와 비용을 업데이트합니다.
+					(*ExistingNodePtr)->SetParent(ParentNode, NewGCost, (*ExistingNodePtr)->HCost);
+					// 참고: TArray를 힙으로 사용할 때, 요소의 우선순위가 변경되면 힙을 재정렬해야 합니다.
+					// OpenSet.Heapify(Predicate); // 혹은 해당 요소만 재정렬하는 함수를 사용
 				}
 			}
-			else
+			else // OpenSet에 없는 새로운 노드인 경우
 			{
-				Successor->SetParent(CurrentNode, NewGCost,
-				                     CalculateHeuristic(Successor->WorldPosition,
-				                                        OctreeData.GetNodeBounds(GoalNodeIndex).GetCenter()));
+				Successor->SetParent(ParentNode, NewGCost,
+									 CalculateHeuristic(Successor->WorldPosition,
+														OctreeData.GetNodeBounds(GoalNodeIndex).GetCenter()));
 
 				OpenSet.HeapPush(Successor, Predicate);
 				OpenSetLookup.Add(Successor->NodeIndex, Successor);
@@ -210,43 +221,89 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 
 	if (BestPartialNode)
 	{
-		ReconstructPath(BestPartialNode, OutPath);
+		ReconstructAndSmoothPath(BestPartialNode, OutPath);
 		return EPathfindingResult::Success_Partial;
 	}
 
 	return EPathfindingResult::Failed_Unreachable;
 }
 
+bool FAstarPathfinder::HasLineOfSightWithRadius(const FVector& Start, const FVector& End) const
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(ThetaStar_HasLineOfSightWithRadius);
 
+	return !OctreeData.CheckForSolidNodesInCapsule(Start, End, AgentRadius);
+}
+
+/**
+ * 경로를 재구성하고, 더 부드럽게 만들기 위해 스무딩(String Pulling)을 적용합니다.
+ */
+void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<FVector>& OutPath)
+{
+	TArray<FVector> RawPath;
+	FAstarPathNode* CurrentNode = EndNode;
+	while (CurrentNode != nullptr)
+	{
+		RawPath.Add(CurrentNode->WorldPosition);
+		CurrentNode = CurrentNode->Parent;
+	}
+	Algo::Reverse(RawPath);
+
+	if (RawPath.Num() < 2)
+	{
+		OutPath = RawPath;
+		return;
+	}
+
+	// String Pulling (경로 다듬기) 로직
+	OutPath.Empty();
+	OutPath.Add(RawPath[0]); // 시작점 추가
+
+	int32 CurrentPointIndex = 0;
+	while (CurrentPointIndex < RawPath.Num() - 1)
+	{
+		int32 LookAheadIndex = RawPath.Num() - 1;
+		// 경로의 끝에서부터 현재 지점까지 가시선이 통하는 가장 먼 지점을 찾습니다.
+		while (LookAheadIndex > CurrentPointIndex + 1)
+		{
+			if (HasLineOfSightWithRadius(RawPath[CurrentPointIndex], RawPath[LookAheadIndex]))
+			{
+				break; // 찾았다!
+			}
+			LookAheadIndex--;
+		}
+		
+		OutPath.Add(RawPath[LookAheadIndex]); // 가시선이 확보된 가장 먼 지점을 경로에 추가
+		CurrentPointIndex = LookAheadIndex;   // 현재 위치를 그 지점으로 점프
+	}
+}
 void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPathNode*>& OutSuccessors)
 {
-	// IdentifySuccessors 함수 전체의 시간을 측정합니다.
 	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_IdentifySuccessors_Internal);
 
 	OutSuccessors.Empty();
 
-	// AdjacentNodeIndices 변수는 이 함수 전체에서 사용되므로, 함수 스코프 내에 선언합니다.
 	TArray<int32> AdjacentNodeIndices; 
 
-	// FindAdjacentEmptyLeaves 호출 부분만 측정합니다.
-	// 이 코드 블록이 끝나는 중괄호 '}'에서 타이머가 멈춥니다.
 	{ 
-		TRACE_CPUPROFILER_EVENT_SCOPE(AStar_FindAdjacentEmptyLeaves); // 이 스코프 내의 코드를 측정합니다.
+		TRACE_CPUPROFILER_EVENT_SCOPE(AStar_FindAdjacentEmptyLeaves);
 		OctreeData.FindAdjacentEmptyLeaves(Node->NodeIndex, AdjacentNodeIndices);
-	} // AStar_FindAdjacentEmptyLeaves 스코프 끝 (TRACE_CPUPROFILER_EVENT_SCOPE에 해당하는 중괄호 닫힘)
-
-    
+	} 
 	for (const int32 NeighborIndex : AdjacentNodeIndices)
 	{
-		// IsRegionDynamicallyBlocked와 SuccessorNode 생성 부분을 함께 측정합니다.
-		// FBox NeighborBounds 변수는 이 스코프 내에서 선언되고, 해당 스코프 내에서 사용됩니다.
 		{ 
-			TRACE_CPUPROFILER_EVENT_SCOPE(AStar_CheckAndCreateSuccessor); // 이 스코프 내의 코드를 측정합니다.
-			const FBox NeighborBounds = OctreeData.GetNodeBounds(NeighborIndex); // GetNodeBounds 호출 포함
-            
-			if (!OctreeData.IsRegionDynamicallyBlocked(NeighborBounds)) // IsRegionDynamicallyBlocked 호출 포함
+			TRACE_CPUPROFILER_EVENT_SCOPE(AStar_CheckAndCreateSuccessor);
+			const FBox NeighborBounds = OctreeData.GetNodeBounds(NeighborIndex);
+
+			const FVector NeighborCenter = NeighborBounds.GetCenter();
+
+			if (OctreeData.CheckForSolidNodesInCapsule(NeighborCenter, NeighborCenter, AgentRadius))
 			{
-				// 성공자 노드 생성 및 추가 부분 (이 부분은 AStar_CheckAndCreateSuccessor 스코프 안에 포함됩니다)
+				continue; 
+			}
+			
+			if (!OctreeData.IsRegionDynamicallyBlocked(NeighborBounds))
+			{
 				FAstarPathNode* SuccessorNode = MemoryPool.NewNode();
 				if (SuccessorNode)
 				{
@@ -255,7 +312,7 @@ void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPat
 					OutSuccessors.Add(SuccessorNode);
 				}
 			}
-		} // AStar_CheckAndCreateSuccessor 스코프 끝 (TRACE_CPUPROFILER_EVENT_SCOPE에 해당하는 중괄호 닫힘)
+		}
 	}
 }
 
@@ -284,3 +341,6 @@ void FAstarPathfinder::ReconstructPath(FAstarPathNode* EndNode, TArray<FVector>&
 	}
 	Algo::Reverse(OutPath);
 }
+
+
+
