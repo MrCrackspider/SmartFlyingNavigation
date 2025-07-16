@@ -469,61 +469,96 @@ void UPathfindingComponent::HandleVoxelPathResult(const TArray<FIntVector>& Path
 
 void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess)
 {
-	// 1. 길찾기 성공 여부와 경로 유효성 확인
 	if (bSuccess && Path.Num() > 1)
-	{
-		// --- 길찾기 결과 시각화를 위한 디버그 드로잉 ---
-        
-		// 이전 디버그 라인이 남아있을 수 있으므로 모두 지웁니다.
-		FlushPersistentDebugLines(GetWorld());
+    {
+        // 디버그 드로잉 (이전 답변과 동일하게 LifeTime을 짧게 설정하는 것을 권장)
+        FlushPersistentDebugLines(GetWorld());
+        for (int32 i = 0; i < Path.Num() - 1; ++i)
+        {
+	        DrawDebugLine(GetWorld(),
+	        	Path[i],
+	        	Path[i + 1],
+	        	FColor::Cyan,
+	        	false,
+	        	10.0f,
+	        	0,
+	        	10.0f);
+        }
 
-		// 경로의 각 지점을 연결하는 선을 그립니다.
-		for (int32 i = 0; i < Path.Num() - 1; ++i)
-		{
-			DrawDebugLine(
-				GetWorld(),
-				Path[i],                     // 시작점
-				Path[i + 1],                 // 끝점
-				FColor::Cyan,                // 선 색상
-				true,                        // 선이 사라지지 않게 함 (true)
-				-1.0f,                       // 지속 시간 (-1은 무한)
-				0,                           // 렌더링 우선순위
-				10.0f                        // 선 두께
-			);
-		}
-
-		// 각 경로 지점에 구체를 그려서 포인트를 명확하게 표시합니다.
+		
 		for (const FVector& Point : Path)
 		{
 			DrawDebugSphere(
 				GetWorld(),
 				Point,
-				25.0f,                       // 구체 반지름
-				12,                          // 구체 정밀도
-				FColor::Magenta,             // 구체 색상
-				true,                        // 사라지지 않게 함
-				-1.0f,
+				25.0f,
+				12,
+				FColor::Magenta,
+				false,
+				10.0f,
 				0,
-				5.0f
-			);
+				5.0f);
 		}
+        UE_LOG(LogTemp, Log, TEXT("Pathfinding successful! Drawing debug path with %d points."), Path.Num());
         
-		UE_LOG(LogTemp, Log, TEXT("Pathfinding successful! Drawing debug path with %d points."), Path.Num());
-        
-		// TODO: 나중에 실제 이동 로직을 여기에 추가합니다.
-		// FoundPath = Path;
-		// ProcessNewPath(Path);
-		// CurrentState = EPathfindingState::FollowPath;
-	}
-	else
-	{
-		// 길찾기 실패 시 로그 출력
-		UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed or path is too short."));
-		// CurrentState = EPathfindingState::Idle;
-	}
+        // ✨✨✨ 여기에 실제 이동 로직을 위한 경로 저장 및 상태 변경 ✨✨✨
+        FoundPath = Path; // FVector 경로를 FoundPath에 저장
+        FoundPathIndices.Empty(); // FVector 경로를 사용하므로 FoundPathIndices는 비워둡니다.
+                                  // 또는, FVector 경로를 FIntVector로 변환하여 저장할 수도 있습니다.
+                                  // 하지만 현재 Octree는 FVector 경로를 반환하므로, FVector를 직접 사용하는 것이 좋습니다.
 
-	// TODO: 나중에 리패스 로직을 여기에 추가합니다.
-	// if (bPeriodicRepath && !bIsReachDestination) { ... }
+		// ✨✨✨ 바로 이 부분입니다! 첫 번째 경로 지점을 액터의 현재 위치로 보정합니다. ✨✨✨
+		if (GetOwner())
+		{
+			FoundPath.Insert(GetOwner()->GetActorLocation(), 0);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("PathfindingComponent: Owner is null when setting first path point."));
+		}
+		
+        CurrentPathDestinationIndex = 0; // 첫 번째 지점부터 시작 (또는 1부터 시작하여 첫 지점은 건너뛰기)
+                                         // 보통 0부터 시작해서 첫 지점은 현재 위치로 간주하고 다음 지점으로 이동합니다.
+        bIsReachDestination = false; // 목적지에 도달하지 않음
+        CurrentState = EPathfindingState::FollowPath; // 상태를 '경로 따라가기'로 변경
+
+        // 스플라인 초기화 및 설정 (ProcessNewPath에서 가져와서 FVector 경로에 맞게 수정)
+        if (PathSplinePtr.IsValid())
+        {
+            PathSplinePtr->ClearSplinePoints();
+            for (const FVector& Point : FoundPath)
+            {
+                PathSplinePtr->AddSplinePoint(Point, ESplineCoordinateSpace::World, false);
+            }
+            PathSplinePtr->UpdateSpline();
+            DistanceAlongSpline = 0.f; // 스플라인 시작 지점으로 초기화
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("PathSplinePtr is not valid. Cannot set up spline path."));
+        }
+
+        // PathOptimizationTimer 활성화 (필요하다면)
+        GetWorld()->GetTimerManager().UnPauseTimer(PathOptimizationTimer);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed or path is too short."));
+        FoundPath.Empty();
+        FoundPathIndices.Empty();
+        CurrentPathDestinationIndex = 0;
+        CurrentState = EPathfindingState::Idle;
+        GetWorld()->GetTimerManager().PauseTimer(PathOptimizationTimer); // 실패 시 타이머 중지
+    }
+
+    // RepathCooldownTimer 설정 (HandleVoxelPathResult와 동일하게)
+    if (bPeriodicRepath && !bIsReachDestination)
+    {
+        if (UWorld* World = GetWorld())
+        {
+            World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath, RepathCooldown, false);
+        }
+    }
 }
 //======================================================================================
 // Internal Logic
