@@ -5,39 +5,6 @@
 #include "Serialization/Archive.h"
 const FName UStaticVoxelChunkData::VoxelChunkAssetType = TEXT("VoxelChunk");
 
-// void operator<<(FStructuredArchive::FSlot Slot, FByteBulkData& BulkData)
-// {
-// 	// FStructuredArchive::FStream을 열어 바이너리 데이터를 처리합니다.
-// 	FStructuredArchive::FStream Stream = Slot.EnterStream();
-//     
-// 	// 스트림의 전체 크기를 먼저 기록/로드합니다.
-// 	int64 NumBytes = BulkData.GetBulkDataSize();
-// 	Stream.EnterElement() << NumBytes;
-//
-// 	void* Data = nullptr;
-// 	if (Stream.GetUnderlyingArchive().IsLoading())
-// 	{
-// 		// 로딩 시: 데이터를 저장할 공간을 확보합니다.
-// 		BulkData.Lock(NumBytes);
-// 		Data = BulkData.Realloc(NumBytes);
-// 	}
-// 	else
-// 	{
-// 		// 저장 시: 기존 데이터를 가져옵니다.
-// 		Data = BulkData.Lock(LOCK_READ_ONLY);
-// 	}
-//
-// 	if (Data)
-// 	{
-// 		// 실제 바이너리 데이터를 스트림에 씁니다.
-// 		Stream.EnterElement().Serialize(Data, NumBytes);
-// 	}
-//
-// 	// 작업이 끝나면 반드시 잠금을 해제합니다.
-// 	BulkData.Unlock();
-// }
-
-
 FPrimaryAssetId UStaticVoxelChunkData::GetPrimaryAssetId() const
 {
 	FString AssetName = FString::Printf(TEXT("Chunk_%d_%d_%d"), ChunkCoords.X, ChunkCoords.Y, ChunkCoords.Z);

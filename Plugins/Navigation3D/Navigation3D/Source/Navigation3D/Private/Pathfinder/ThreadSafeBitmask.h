@@ -1,95 +1,231 @@
 ﻿#pragma once
 #include "CoreMinimal.h"
-#include "Containers/Queue.h" // TQueue 사용을 위해 포함
-#include "Pathfinder/StaticVoxelChunkData.h" // F128BitChunk를 위해 포함
-
-// SIMD 내장 함수 헤더
+#include "Containers/Queue.h"
+#include "Pathfinder/StaticVoxelChunkData.h" // F128BitChunk
+// SIMD
 #include "emmintrin.h" // SSE2
 #include "smmintrin.h" // SSE4.1
 
 struct FThreadSafeBitmaskGrid
 {
-	// 데이터는 F128BitChunk의 배열로 저장된다고 가정합니다.
 	TArray<F128BitChunk> ObstacleBitmasks;
 	FIntVector GridSize;
+	int64 TotalVoxels;
 
-	FThreadSafeBitmaskGrid() : GridSize(FIntVector::ZeroValue) {}
+	FThreadSafeBitmaskGrid() : GridSize(FIntVector::ZeroValue)
+	{
+	}
 
 	FORCEINLINE bool IsIndexValid(const FIntVector& Index) const
 	{
 		return Index.X >= 0 && Index.X < GridSize.X &&
-			   Index.Y >= 0 && Index.Y < GridSize.Y &&
-			   Index.Z >= 0 && Index.Z < GridSize.Z;
+			Index.Y >= 0 && Index.Y < GridSize.Y &&
+			Index.Z >= 0 && Index.Z < GridSize.Z;
+	}
+
+
+	/**
+ * 1) 전역 128비트 그리드에서 단일 셀의 비트(장애물 여부)를 읽어옵니다.
+ *    경계를 벗어나면 장애물로 처리(true 반환)
+ */
+	FORCEINLINE bool GetBitAt(const FIntVector& Idx) const
+	{
+		if (!IsIndexValid(Idx))
+		{
+			return true;
+		}
+		// flat index: Z * (Y*X) + Y*X + X
+		const int64 Flat = (int64)Idx.Z * GridSize.Y * GridSize.X +
+			(int64)Idx.Y * GridSize.X + Idx.X;
+		const int32 ChunkIdx = Flat >> 7; // /128
+		const int32 BitInChunk = Flat & 127; // %128
+
+		const F128BitChunk& Chunk = ObstacleBitmasks[ChunkIdx];
+		// 0~63 → Words[0], 64~127 → Words[1]
+		if (BitInChunk < 64)
+		{
+			return (Chunk.Words[0] >> BitInChunk) & 1ULL;
+		}
+		else
+		{
+			return (Chunk.Words[1] >> (BitInChunk - 64)) & 1ULL;
+		}
+	}
+
+	void GetObstacleMask128_Clearance(const FIntVector& StartPos, const FIntVector& Direction,
+	                                  uint64_t outMask[2]) const
+	{
+		outMask[0] = 0;
+		outMask[1] = 0;
+
+		for (int32 i = 0; i < 128; ++i)
+		{
+			const FIntVector VoxelToCheck = StartPos + Direction * i;
+
+			// ClearanceGrid의 비트를 직접 읽습니다. GetBitAt은 경계를 벗어나면 true(장애물)를 반환합니다.
+			// 이 비트는 이미 에이전트의 부피를 고려한 결과여야 합니다.
+			if (GetBitAt(VoxelToCheck))
+			{
+				if (i < 64)
+				{
+					outMask[0] |= (1ULL << i);
+				}
+				else
+				{
+					outMask[1] |= (1ULL << (i - 64));
+				}
+			}
+		}
+	}
+
+	void GetObstacleMask128(const FIntVector& Curr, const FIntVector& Dir, uint64_t outMask[2]) const
+	{
+		// 초기화
+		outMask[0] = 0;
+		outMask[1] = 0;
+
+		// 1..128칸에 대해 순회
+		for (int i = 1; i <= 128; ++i)
+		{
+			// i번째 칸 좌표 계산
+			FIntVector Pos = Curr + Dir * i;
+
+			// 장애물(true)인지 확인 (경계 밖도 true로 처리됨)
+			bool bBlocked = GetBitAt(Pos);
+
+			if (bBlocked)
+			{
+				if (i <= 64)
+				{
+					// 0~63 비트에 세팅 (i-1)
+					outMask[0] |= (1ULL << (i - 1));
+				}
+				else
+				{
+					// 64~127 비트에 세팅 (i-65)
+					outMask[1] |= (1ULL << (i - 65));
+				}
+			}
+		}
+	}
+
+	uint64_t GetNeighbourObstacleMask(const FIntVector& Curr) const
+	{
+		static const TArray<FIntVector> Dirs26 = []()
+		{
+			TArray<FIntVector> A;
+			A.Reserve(26);
+			for (int dz = -1; dz <= 1; ++dz)
+				for (int dy = -1; dy <= 1; ++dy)
+					for (int dx = -1; dx <= 1; ++dx)
+						if (dx || dy || dz)
+							A.Emplace(dx, dy, dz);
+			return A;
+		}();
+
+		uint64_t mask = 0ULL;
+		for (int32 i = 0; i < Dirs26.Num(); ++i)
+		{
+			const FIntVector N = Curr + Dirs26[i];
+			if (GetBitAt(N)) // 장애물(true) 이면
+			{
+				mask |= (1ULL << i);
+			}
+		}
+		return mask;
+	}
+
+	FORCEINLINE uint64_t GetNeighbourWalkableMask(const FIntVector& Curr) const
+	{
+		return ~GetNeighbourObstacleMask(Curr);
 	}
 
 	// IsRegionEmpty의 SIMD 최적화 버전
+	// IsRegionEmpty의 SIMD 최적화 버전 (안정성 강화)
 	bool IsRegionEmpty(const FIntVector& MinCorner, const FIntVector& MaxCorner) const
 	{
 		const FIntVector ClampedMin(
 			FMath::Max(MinCorner.X, 0), FMath::Max(MinCorner.Y, 0), FMath::Max(MinCorner.Z, 0)
 		);
 		const FIntVector ClampedMax(
-			FMath::Min(MaxCorner.X, GridSize.X - 1), FMath::Min(MaxCorner.Y, GridSize.Y - 1), FMath::Min(MaxCorner.Z, GridSize.Z - 1)
+			FMath::Min(MaxCorner.X, GridSize.X - 1), FMath::Min(MaxCorner.Y, GridSize.Y - 1),
+			FMath::Min(MaxCorner.Z, GridSize.Z - 1)
 		);
 
 		if (ClampedMin.X > ClampedMax.X || ClampedMin.Y > ClampedMax.Y || ClampedMin.Z > ClampedMax.Z)
 		{
 			return true;
 		}
-		
+
 		if (ObstacleBitmasks.Num() == 0 || GridSize.X == 0)
 		{
 			return true;
 		}
 
-		const int32 ChunksPerRow = GridSize.X / 128;
+		const __m128i AllOnesMask = _mm_set_epi64x(-1LL, -1LL);
 
+		// ★★★ 2. 미정의 동작을 피하도록 수정한 CreateMask 람다 ★★★
 		auto CreateMask = [](int32 StartBit, int32 EndBit) -> __m128i
 		{
-			uint64 LowMask = (StartBit < 64) ? (~0ULL << StartBit) : 0;
-			if (EndBit < 64) LowMask &= (~0ULL >> (63 - EndBit));
-			
-			uint64 HighMask = (EndBit >= 64) ? (~0ULL >> (127 - EndBit)) : 0;
-			if (StartBit >= 64) HighMask &= (~0ULL << (StartBit - 64));
-			
+			uint64 LowMask = 0, HighMask = 0;
+
+			if (EndBit >= 0 && StartBit < 64)
+			{
+				LowMask = (~0ULL << StartBit);
+				if (EndBit < 64)
+				{
+					LowMask &= (~0ULL >> (63 - EndBit));
+				}
+			}
+
+			if (StartBit < 128 && EndBit >= 64)
+			{
+				HighMask = (~0ULL >> (127 - EndBit));
+				if (StartBit >= 64)
+				{
+					HighMask &= (~0ULL << (StartBit - 64));
+				}
+			}
+
 			return _mm_set_epi64x(HighMask, LowMask);
 		};
+
+		const int32 ChunksPerRow = GridSize.X / 128; // GridSize.X가 128의 배수이므로 이 계산은 안전
 
 		for (int32 z = ClampedMin.Z; z <= ClampedMax.Z; ++z)
 		{
 			for (int32 y = ClampedMin.Y; y <= ClampedMax.Y; ++y)
 			{
 				const int32 RowStartChunkIndex = (z * GridSize.Y + y) * ChunksPerRow;
-				
-				const int32 StartX = ClampedMin.X;
-				const int32 EndX = ClampedMax.X;
-
-				const int32 StartChunkIndex = RowStartChunkIndex + StartX / 128;
-				const int32 EndChunkIndex = RowStartChunkIndex + EndX / 128;
-				
-				const int32 StartBitInChunk = StartX % 128;
-				const int32 EndBitInChunk = EndX % 128;
+				const int32 StartChunkIndex = RowStartChunkIndex + ClampedMin.X / 128;
+				const int32 EndChunkIndex = RowStartChunkIndex + ClampedMax.X / 128;
+				const int32 StartBitInChunk = ClampedMin.X % 128;
+				const int32 EndBitInChunk = ClampedMax.X % 128;
 
 				if (StartChunkIndex == EndChunkIndex)
 				{
 					const __m128i Mask = CreateMask(StartBitInChunk, EndBitInChunk);
-					const __m128i ChunkData = _mm_load_si128(reinterpret_cast<const __m128i*>(&ObstacleBitmasks[StartChunkIndex]));
+					// ★★★ 1. 충돌을 방지하는 안전한 Unaligned Load 사용 ★★★
+					const __m128i ChunkData = _mm_loadu_si128(
+						reinterpret_cast<const __m128i*>(&ObstacleBitmasks[StartChunkIndex]));
 					if (_mm_testz_si128(ChunkData, Mask) == 0) return false;
 				}
 				else
 				{
 					__m128i StartMask = CreateMask(StartBitInChunk, 127);
-					__m128i ChunkData = _mm_load_si128(reinterpret_cast<const __m128i*>(&ObstacleBitmasks[StartChunkIndex]));
+					__m128i ChunkData = _mm_loadu_si128(
+						reinterpret_cast<const __m128i*>(&ObstacleBitmasks[StartChunkIndex]));
 					if (_mm_testz_si128(ChunkData, StartMask) == 0) return false;
 
 					for (int32 i = StartChunkIndex + 1; i < EndChunkIndex; ++i)
 					{
-						const __m128i MiddleChunkData = _mm_load_si128(reinterpret_cast<const __m128i*>(&ObstacleBitmasks[i]));
-						if (_mm_testz_si128(MiddleChunkData, MiddleChunkData) == 0) return false;
+						const __m128i MiddleChunkData = _mm_loadu_si128(
+							reinterpret_cast<const __m128i*>(&ObstacleBitmasks[i]));
+						if (_mm_testz_si128(MiddleChunkData, AllOnesMask) == 0) return false;
 					}
 
 					__m128i EndMask = CreateMask(0, EndBitInChunk);
-					ChunkData = _mm_load_si128(reinterpret_cast<const __m128i*>(&ObstacleBitmasks[EndChunkIndex]));
+					ChunkData = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&ObstacleBitmasks[EndChunkIndex]));
 					if (_mm_testz_si128(ChunkData, EndMask) == 0) return false;
 				}
 			}
@@ -105,7 +241,7 @@ struct FThreadSafeBitmaskGrid
 		const FIntVector AgentRadius(AgentRadiusInVoxels);
 		const FIntVector MinCorner = VoxelIndex - AgentRadius;
 		const FIntVector MaxCorner = VoxelIndex + AgentRadius;
-		
+
 		// IsRegionEmpty 내부에서 경계를 클램핑하므로, 여기서는 별도의 IsIndexValid 검사가 필요 없습니다.
 		return IsRegionEmpty(MinCorner, MaxCorner);
 	}
@@ -127,7 +263,7 @@ struct FThreadSafeBitmaskGrid
 		}
 
 		// 2. BFS를 위한 자료구조 초기화
-		TQueue<FIntVector> Queue;   // 언리얼의 표준 큐 사용
+		TQueue<FIntVector> Queue; // 언리얼의 표준 큐 사용
 		TSet<FIntVector> Visited; // 방문한 노드만 저장하여 메모리 효율 증대
 
 		Queue.Enqueue(TargetVoxel);

@@ -7,91 +7,19 @@
 #include "GameFramework/Actor.h"
 #include "UniformGridVolume.generated.h"
 
-class UBoxComponent;
-
-UCLASS()
+UCLASS(Abstract) // AFenwickVoxelVolume 같은 구체적인 자식이 구현할 것이므로 추상 클래스로 유지
 class NAVIGATION3D_API AUniformGridVolume : public AVoxelVolumeBase
 {
 	GENERATED_BODY()
 
 public:
-	// Sets default values for this actor's properties
 	AUniformGridVolume();
 
-protected:
-	// Called when the game starts or when spawned
-	virtual void BeginPlay() override;
-	virtual void OnConstruction(const FTransform& Transform) override;
-
-protected:
-	TSet<FIntVector> ExcludedBakeVoxels;
-
-public:
-	// Called every frame
-	virtual void Tick(float DeltaTime) override;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VolumeSettings")
-	float VoxelExtent;
-	// --- 균일 격자 공통 프로퍼티가 여기에 위치! ---
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VolumeSettings")
-	FIntVector MapSize;
-	
-	UPROPERTY()
-	USceneComponent* PivotComponent;
-
-	UBoxComponent* VolumeBox;
-
-	// --- 공통 기능 구현 ---
+	//~======================================================================
+	// AVoxelVolumeBase 인터페이스 구현 (이 클래스는 아직 추상이므로, 자식이 구현)
+	//~======================================================================
 	virtual EVolumeDataStructure GetStructureType() const override { return EVolumeDataStructure::UniformGrid; }
-
-	virtual void SetObstacle(const FIntVector& Index, bool bIsObstacle) PURE_VIRTUAL(AUniformGridVolume::SetObstacle,);
-
-	// 좌표 변환은 VoxelSize와 MapSize를 기반으로 여기서 구현합니다.
-	virtual FVector GetLocationFromIndex(const FIntVector& VoxelIndex) const override;
-
-	virtual FIntVector GetIndexFromLocation(const FVector& WorldPosition) const override;
-
-	FIntVector WorldToVoxelIndex(const FVector& WorldPosition) const;
-
-	FVector VoxelIndexToWorld(const FIntVector& VoxelIndex) const;
-
-	bool IsIndexValid(const FIntVector& Index) const;
-
-	bool ClampVoxelIndicesToVolume(FIntVector& MinVoxelIndex,
-	                               FIntVector& MaxVoxelIndex) const;
-
-	bool ClampVoxelIndicesToVolume(const FIntVector& InMinVoxelIndex, const FIntVector& InMaxVoxelIndex,
-	                               FIntVector& OutClampedMin,
-	                               FIntVector& OutClampedMax) const;
 	
-	bool GetOverlappingComponentsInVolume(const FCollisionObjectQueryParams& ObjectQueryParams,
-	                                      TArray<FOverlapResult>& OutResults) const;
-
-	bool CheckVoxelOverlap(const FIntVector& VoxelIndex,
-	                       UPrimitiveComponent* ComponentToTest) const;
-
-	// 위치 기반 조회 함수는 인덱스 기반 조회 함수를 호출하도록 구현
-	virtual bool IsLocationWalkable(const FVector& WorldPosition) const override
-	{
-		return IsVoxelWalkable(GetIndexFromLocation(WorldPosition));
-	}
-
-	virtual bool IsPathSegmentWalkable(const FIntVector& FromStartIndex, const FIntVector& ToStartIndex,
-	                                   int32 AgentRadiusInVoxels) const;
-
-	virtual void UpdateDebugObstacleVisualization() override;
-	// 균일 격자 자식들이 구현해야 할 새로운 순수 가상 함수
-	virtual bool IsVoxelWalkable(const FIntVector& VoxelIndex) const PURE_VIRTUAL
-	(AUniformGridVolume::IsVoxelWalkable, return false;);
-
-	// --- JPS를 위해 추가된 인터페이스 ---
-	virtual bool IsRegionWalkable(const FIntVector& CenterIndex, int32 AgentRadiusInVoxels) const PURE_VIRTUAL(
-		AUniformGridVolume::IsRegionWalkable, return false;);
-
-protected:
-	/** 현재 디버그 메쉬로 표시되고 있는 복셀의 인덱스 집합 */
-	TSet<FIntVector> DisplayedVoxelIndices;
-
-	/** 업데이트가 진행 중인지 확인하는 플래그 */
-	bool bIsUpdatingVisualization = false;
+	// IsVoxelWalkable, IsRegionWalkable은 여전히 순수 가상 함수로 남아,
+	// AFenwickVoxelVolume 같은 최종 자식 클래스가 구현하도록 강제합니다.
 };

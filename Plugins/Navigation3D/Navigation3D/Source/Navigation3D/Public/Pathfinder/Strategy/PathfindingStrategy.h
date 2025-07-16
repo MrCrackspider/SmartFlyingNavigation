@@ -4,7 +4,6 @@
 
 #include "CoreMinimal.h"
 #include "Pathfinder/PathfindingRequest.h"
-#include "UObject/NoExportTypes.h"
 #include "PathfindingStrategy.generated.h"
 
 class UPathfindingSubsystem;
@@ -34,9 +33,12 @@ public:
 	virtual void Initialize();
 
 	virtual bool FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FIntVector>& OutPath);
+	virtual bool FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FVector>& OutPath);
 	
-	virtual bool ShouldRepathForOptimization(const FVector& CurrentAgentLocation, const TArray<FVector>& CurrentPath,
-	                                         int32 CurrentPathIndex, const FVector& GoalLocation,
-	                                         uint32 AgentRadius) const;
+	virtual bool ShouldRepathForOptimization(const FIntVector& CurrentAgentVoxel,
+											 const TArray<FIntVector>& CurrentPathVoxels,
+											 int32 CurrentPathIndex,
+											 const FIntVector& GoalVoxel,
+											 uint32 AgentRadiusVoxels) const;
 	virtual FName GetStrategyName() const;
 };

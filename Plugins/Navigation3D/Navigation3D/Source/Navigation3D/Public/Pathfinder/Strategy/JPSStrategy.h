@@ -4,7 +4,6 @@
 
 #include "CoreMinimal.h"
 #include "PathfindingStrategy.h"
-#include "Pathfinder/Utility/MemoryPool.h"
 #include "UObject/WeakObjectPtr.h"
 #include "Pathfinder/Utility/StrategyUtils.h"
 #include "JPSStrategy.generated.h"
@@ -12,7 +11,7 @@
 
 class AVoxelVolumeBase;
 struct FPathNode;
-
+//struct FPathNodeMemoryPool;
 
 UCLASS()
 class NAVIGATION3D_API UJPSStrategy final : public UPathfindingStrategy
@@ -61,7 +60,7 @@ protected:
 private:
     TWeakObjectPtr<AUniformGridVolume> Volume;
 
-    TUniquePtr<FPathNodeMemoryPool> NodePool;
+    //TUniquePtr<FPathNodeMemoryPool> NodePool;
     
     // A* 탐색을 위한 자료구조
     TArray<FPathNode*> OpenSet;

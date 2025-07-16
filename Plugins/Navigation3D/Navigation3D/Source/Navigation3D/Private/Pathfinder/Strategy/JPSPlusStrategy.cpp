@@ -1,6 +1,7 @@
 ﻿// JPSStrategy.cpp
 #include "Pathfinder/Strategy/JPSPlusStrategy.h"
 #include "Pathfinder/Utility/StrategyUtils.h"
+#include "Pathfinder/Utility/MemoryPool.h"
 #include "Algo/Reverse.h"
 #include "DrawDebugHelpers.h"
 
@@ -28,23 +29,30 @@ void UJPSPlusStrategy::Initialize()
 bool UJPSPlusStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FIntVector>& OutPath)
 {
 	FIntVector ActualGoalIndex = InRequest.EndIndex;
-	if (InRequest.WalkabilityGrid.IsRegionWalkable(InRequest.EndIndex, InRequest.AgentRadiusInVoxels))
+	auto GridData = InRequest.NavigationData.Get<FThreadSafeBitmaskGrid>();
+	
+	if (GridData.IsRegionWalkable(InRequest.EndIndex, InRequest.AgentRadiusInVoxels))
 	{
 		FIntVector NearestWalkableVoxel;
-		if (InRequest.WalkabilityGrid.FindNearestWalkableVoxel_BFS(InRequest.EndIndex, InRequest.AgentRadiusInVoxels,
+		if (GridData.FindNearestWalkableVoxel_BFS(InRequest.EndIndex, InRequest.AgentRadiusInVoxels,
 		                                                           50, NearestWalkableVoxel))
 		{
 			ActualGoalIndex = NearestWalkableVoxel;
 		}
 	}
+	FPathNodeMemoryPoolBase* BasePool = InRequest.MemoryPool;
+	if (!BasePool)
+	{
+		UE_LOG(LogTemp, Error, TEXT("JPS+ Strategy failed to lease a memory pool."));
+		return false;
+	}
+	auto& NodePool = *static_cast<TNodeMemoryPool<FPathNode>*>(BasePool);
 
 	// 3. '일꾼' 객체 생성 및 작업 위임
-	FJPSPlusPathfinder Pathfinder(InRequest, AllDirections, DirectionToIndexMap, ActualGoalIndex,
-	                              *InRequest.MemoryPool);
+	FJPSPlusPathfinder Pathfinder(InRequest,GridData, AllDirections, DirectionToIndexMap, ActualGoalIndex,NodePool);
 
 	const EPathfindingResult Result = Pathfinder.FindPath(OutPath);
-
-
+	
 	// 실패 원인에 대한 로그 기록 (디버깅 용이성)
 	if (Result != EPathfindingResult::Success && Result != EPathfindingResult::Success_Partial)
 	{
@@ -73,12 +81,12 @@ bool UJPSPlusStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest
 	return true;
 }
 
-bool UJPSPlusStrategy::ShouldRepathForOptimization(const FVector& CurrentAgentLocation,
-                                                   const TArray<FVector>& CurrentPath, int32 CurrentPathIndex,
-                                                   const FVector& GoalLocation, uint32 AgentRadius) const
+bool UJPSPlusStrategy::ShouldRepathForOptimization(const FIntVector& CurrentAgentVoxel,
+	const TArray<FIntVector>& CurrentPathVoxels, int32 CurrentPathIndex, const FIntVector& GoalVoxel,
+	uint32 AgentRadiusVoxels) const
 {
-	return Super::ShouldRepathForOptimization(CurrentAgentLocation, CurrentPath, CurrentPathIndex, GoalLocation,
-	                                          AgentRadius);
+	return Super::ShouldRepathForOptimization(CurrentAgentVoxel, CurrentPathVoxels, CurrentPathIndex, GoalVoxel,
+	                                          AgentRadiusVoxels);
 }
 
 FName UJPSPlusStrategy::GetStrategyName() const
@@ -92,12 +100,13 @@ FName UJPSPlusStrategy::GetStrategyName() const
 // =======================================================================
 
 FJPSPlusPathfinder::FJPSPlusPathfinder(const FPathfindingRequest& InRequest,
+										const FThreadSafeBitmaskGrid& InGrid,
                                        const TArray<FIntVector>& InAllDirections,
                                        const TMap<FIntVector, int32>& InDirectionToIndexMap,
                                        FIntVector InActualGoal,
-                                       FPathNodeMemoryPool& InMemoryPool)
+                                        TNodeMemoryPool<FPathNode>& InMemoryPool)
 	: Request(InRequest)
-	  , WalkabilityGrid(InRequest.WalkabilityGrid)
+	  , WalkabilityGrid(InGrid)
 	  , AllDirections(InAllDirections)
 	  , DirectionToIndexMap(InDirectionToIndexMap)
 	  , ActualGoalIndex(InActualGoal)

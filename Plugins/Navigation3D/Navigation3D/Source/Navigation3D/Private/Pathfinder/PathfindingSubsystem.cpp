@@ -1,37 +1,46 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Pathfinder/PathfindingSubsystem.h"
-#include "Pathfinder/Utility/MemoryPool.h"
 #include "Pathfinder/Strategy/PathfindingStrategy.h"
+#include "Pathfinder/Utility/StrategyUtils.h"
+#include "Pathfinder/Utility/MemoryPool.h"
+#include "Pathfinder/Utility/AStarStrategyUtils.h"
 
 void FPathfindingAsyncTasks::DoThreadedWork()
 {
-	// 실제 길찾기 로직 (백그라운드 스레드에서 실행)
-	TArray<FIntVector> PathIndices;
-	bool bSuccess = false;
+	// 1. 결과 구조체 생성
+	FPathfindingResult Result;
+	Result.Request = Request; // 요청서 복사
+	Result.bSuccess = false;
 
 	if (Request.Strategy.IsValid())
 	{
-		bSuccess = Request.Strategy->FindPathWithStrategy(Request, PathIndices);
+		// 2. 요청 타입에 따라 올바른 전략 함수를 호출하고,
+		//    그에 맞는 경로 변수에 결과를 저장합니다.
+		if (Request.NodeType == EPathfindingNodeType::Grid)
+		{
+			// VoxelPath가 채워지고, WorldPath는 비어있게 됩니다.
+			Result.bSuccess = Request.Strategy->FindPathWithStrategy(Request, Result.VoxelPath);
+		}
+		else if (Request.NodeType == EPathfindingNodeType::Octree)
+		{
+			// WorldPath가 채워지고, VoxelPath는 비어있게 됩니다.
+			Result.bSuccess = Request.Strategy->FindPathWithStrategy(Request, Result.WorldPath);
+		}
 	}
 
-	// 결과 처리를 게임 스레드로 넘김
-	FPathfindingResult Result;
-	Result.Request = Request;
-	Result.Path = PathIndices;
-	Result.bSuccess = bSuccess;
-
-	// 서브시스템의 완료 큐에 결과를 추가
+	// 3. 결과 처리를 위해 서브시스템의 큐에 추가합니다.
 	if (OwnerSubsystem.IsValid())
 	{
 		OwnerSubsystem->QueueCompletedResult(Result);
 	}
 
+	// 4. 풀 반납 및 자기 파괴
 	if (OwnerSubsystem.IsValid() && Request.MemoryPool)
 	{
 		OwnerSubsystem->ReturnPool(Request.MemoryPool);
 	}
-	
+    
 	delete this;
 }
 
@@ -68,26 +77,46 @@ void FPathfindingAsyncTasks::Abandon()
 }
 
 
-FPathNodeMemoryPool* UPathfindingSubsystem::LeasePool()
+FPathNodeMemoryPoolBase* UPathfindingSubsystem::LeasePool(EPathfindingNodeType NodeType)
 {
 	FScopeLock Lock(&PoolLock);
-	if (IdlePools.Num() > 0)
-	{
-		// 사용 가능한 유휴 풀이 있다면, 목록에서 하나를 꺼내 반환합니다.
-		return IdlePools.Pop();
-	}
     
-	// 유휴 풀이 없다면, 새로운 풀을 생성하여 반환합니다.
-	return new FPathNodeMemoryPool(1024); // 기본 슬랩 크기
-}
-
-void UPathfindingSubsystem::ReturnPool(FPathNodeMemoryPool* PoolToReturn)
-{
-	if (PoolToReturn)
+	// 요청된 타입에 맞는 유휴 풀 목록을 선택합니다.
+	TArray<FPathNodeMemoryPoolBase*>& TargetIdlePools = (NodeType == EPathfindingNodeType::Grid) ? IdleGridPools : IdleOctreePools;
+	
+	if (TargetIdlePools.Num() > 0)
 	{
-		FScopeLock Lock(&PoolLock);
-		PoolToReturn->Reset(); // 풀을 깨끗하게 초기화합니다.
-		IdlePools.Add(PoolToReturn); // 유휴 목록에 추가하여 재사용을 준비합니다.
+		return TargetIdlePools.Pop();
+	}
+
+	switch (NodeType)
+	{
+	case EPathfindingNodeType::Grid:
+		return new TNodeMemoryPool<FPathNode>(1024);
+	case EPathfindingNodeType::Octree:
+		return new TNodeMemoryPool<FAstarPathNode>(1024);
+	default:
+		return nullptr;
+	}
+}
+void UPathfindingSubsystem::ReturnPool(FPathNodeMemoryPoolBase* PoolToReturn)
+{
+	if (!PoolToReturn) return;
+	FScopeLock Lock(&PoolLock);
+	PoolToReturn->Reset();
+    
+	// dynamic_cast도 TNodeMemoryPool 이름을 사용합니다.
+	if (PoolToReturn->GetNodeType() == EPathfindingNodeType::Grid)
+	{
+		IdleGridPools.Add(PoolToReturn);
+	}
+	else if (PoolToReturn->GetNodeType() == EPathfindingNodeType::Octree)
+	{
+		IdleOctreePools.Add(PoolToReturn);
+	}
+	else
+	{
+		delete PoolToReturn;
 	}
 }
 
@@ -132,27 +161,40 @@ void UPathfindingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 }
 
 // --- 2. 서브시스템 소멸 ---
-// 서브시스템이 파괴될 때 (예: 맵 전환, 게임 종료) 단 한 번 호출됩니다.
 void UPathfindingSubsystem::Deinitialize()
 {
-	UE_LOG(LogTemp, Warning, TEXT("--- Subsystem Deinitialization START ---"));
+	UE_LOG(LogTemp, Log, TEXT("PathfindingSubsystem: Deinitializing..."));
 	
+	// 1. 스레드 풀을 먼저 안전하게 파괴합니다.
 	if (PathfindingThreadPool)
 	{
 		PathfindingThreadPool->Destroy();
 		PathfindingThreadPool = nullptr;
 		UE_LOG(LogTemp, Log, TEXT("Pathfinding Thread Pool destroyed."));
 	}
-	UE_LOG(LogTemp, Warning, TEXT("Cleaning up %d Idle Pools..."), IdlePools.Num());
 	
-	FScopeLock Lock(&PoolLock);
-	UE_LOG(LogTemp, Warning, TEXT("Cleaning up %d Idle Pools..."), IdlePools.Num());
-	for (FPathNodeMemoryPool* Pool : IdlePools)
+	// 2. 락을 걸고 모든 유휴 메모리 풀을 정리합니다.
 	{
-		delete Pool;
+		FScopeLock Lock(&PoolLock);
+
+		UE_LOG(LogTemp, Log, TEXT("Cleaning up %d idle Grid pools and %d idle Octree pools..."), IdleGridPools.Num(), IdleOctreePools.Num());
+
+		// Grid 풀 정리
+		for (FPathNodeMemoryPoolBase* Pool : IdleGridPools)
+		{
+			delete Pool;
+		}
+		IdleGridPools.Empty();
+
+		// Octree 풀 정리
+		for (FPathNodeMemoryPoolBase* Pool : IdleOctreePools)
+		{
+			delete Pool;
+		}
+		IdleOctreePools.Empty();
+		
+		UE_LOG(LogTemp, Log, TEXT("All idle pools cleaned up."));
 	}
-	IdlePools.Empty();
-	UE_LOG(LogTemp, Warning, TEXT("Idle Pools Cleaned."));
 	
 	Super::Deinitialize();
 }
@@ -246,10 +288,16 @@ void UPathfindingSubsystem::Tick(float DeltaTime)
 		}
 	}
 
-	// 이제 락이 풀린 상태에서 안전하게 콜백을 실행합니다.
 	for (const FPathfindingResult& Result : TasksToProcessThisFrame)
 	{
-		OnPathfindingCompleted(Result.Request, Result.Path, Result.bSuccess);
+		if (Result.Request.NodeType == EPathfindingNodeType::Grid)
+		{
+			OnPathfindingCompleted(Result.Request, Result.VoxelPath, Result.bSuccess);
+		}
+		else if (Result.Request.NodeType == EPathfindingNodeType::Octree)
+		{
+			OnPathfindingCompleted(Result.Request, Result.WorldPath, Result.bSuccess);
+		}
 	}
 }
 // --- 3. 길찾기 요청 접수 (Public API) ---
@@ -262,15 +310,15 @@ int32 UPathfindingSubsystem::RequestPath(FPathfindingRequest& Request)
 		return -1;
 	}
 
-	if (!Request.Strategy.IsValid() || !Request.RequestingObject.IsValid() || !Request.OnPathfindingComplete.IsBound())
+	if (!Request.Strategy.IsValid() || !Request.RequestingObject.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Pathfinding request is invalid."));
 		return -1;
 	}
 
 	Request.RequestID = NextRequestID.Increment();
-	Request.MemoryPool = LeasePool();
-	if (!Request.MemoryPool)  return -1;
+	Request.MemoryPool = LeasePool(Request.NodeType); 
+	if (!Request.MemoryPool) return -1;
 	
 	// IQueuedWork를 구현한 작업 객체를 생성하여 스레드 풀에 추가
 	PathfindingThreadPool->AddQueuedWork(new FPathfindingAsyncTasks(Request, this));
@@ -279,18 +327,27 @@ int32 UPathfindingSubsystem::RequestPath(FPathfindingRequest& Request)
 	return Request.RequestID;
 }
 
+void UPathfindingSubsystem::OnPathfindingCompleted(const FPathfindingRequest& Request, const TArray<FIntVector>& VoxelPath, bool bSuccess)
+{
+	if (Request.RequestingObject.IsValid())
+	{
+		// OnVoxelPathComplete 델리게이트를 호출합니다.
+		Request.OnVoxelPathComplete.ExecuteIfBound(VoxelPath, bSuccess);
+	}
+	UE_LOG(LogTemp, Log, TEXT("Pathfinding request #%d (Grid) completed."), Request.RequestID);
+}
+
+void UPathfindingSubsystem::OnPathfindingCompleted(const FPathfindingRequest& Request, const TArray<FVector>& WorldPath, bool bSuccess)
+{ if (Request.RequestingObject.IsValid())
+{
+	// OnWorldPathComplete 델리게이트를 호출합니다.
+	Request.OnWorldPathComplete.ExecuteIfBound(WorldPath, bSuccess);
+}
+	UE_LOG(LogTemp, Log, TEXT("Pathfinding request #%d (Octree) completed."), Request.RequestID);
+}
+
 void UPathfindingSubsystem::QueueCompletedResult(const FPathfindingResult& Result)
 {
 	FScopeLock Lock(&QueueLock);
 	CompletedTasksQueue.Enqueue(Result);
-}
-
-void UPathfindingSubsystem::OnPathfindingCompleted(FPathfindingRequest Result, TArray<FIntVector> Path, bool bSuccess)
-{
-	// 이 함수는 항상 게임 스레드에서 실행됨
-	if (Result.RequestingObject.IsValid())
-	{
-		Result.OnPathfindingComplete.ExecuteIfBound(Path, bSuccess);
-	}
-	UE_LOG(LogTemp, Log, TEXT("Pathfinding request #%d completed."), Result.RequestID);
 }

@@ -3,14 +3,18 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "NaviCore/OctreePathfindingData.h"
 #include "Pathfinder/ThreadSafeBitmask.h"
+#include "Pathfinder/Utility/MemoryPool.h"
 #include "PathfindingRequest.generated.h"
 
-DECLARE_DYNAMIC_DELEGATE_TwoParams(FPathfindingResultDelegate, const TArray<FIntVector>&, Path, bool, bSuccess);
+DECLARE_DYNAMIC_DELEGATE_TwoParams(FVoxelPathfindingResultDelegate, const TArray<FIntVector>&, Path, bool, bSuccess);
+DECLARE_DYNAMIC_DELEGATE_TwoParams(FWorldPathfindingResultDelegate, const TArray<FVector>&, Path, bool, bSuccess);
 
 class UPathfindingComponent;
 class UPathfindingStrategy;
-struct FPathNodeMemoryPool;
+enum class EPathfindingNodeType : uint8;
+
 USTRUCT(BlueprintType)
 struct FPathfindingRequest
 {
@@ -30,9 +34,19 @@ struct FPathfindingRequest
 
 	UPROPERTY()
 	FIntVector EndIndex;
+
+	UPROPERTY()
+	FVector StartLocation;
+
+	UPROPERTY()
+	FVector EndLocation;
+
 	
 	UPROPERTY()
 	int32 AgentRadiusInVoxels = 0;
+
+	UPROPERTY()
+	int32 AgentRadius = 0;
 
 	UPROPERTY()
 	int32 Priority = 0;
@@ -41,9 +55,12 @@ struct FPathfindingRequest
 	UPROPERTY()
 	TWeakObjectPtr<UObject> RequestingObject;
 	
-	FPathfindingResultDelegate OnPathfindingComplete;
+	FVoxelPathfindingResultDelegate OnVoxelPathComplete;
+	FWorldPathfindingResultDelegate OnWorldPathComplete;
 
-	FThreadSafeBitmaskGrid WalkabilityGrid;
+	TVariant<FThreadSafeBitmaskGrid, FOctreePathfindingData> NavigationData;
+	
+	FPathNodeMemoryPoolBase* MemoryPool = nullptr;
 
-	FPathNodeMemoryPool* MemoryPool = nullptr;
+	EPathfindingNodeType NodeType;
 };

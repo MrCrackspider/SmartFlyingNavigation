@@ -33,7 +33,7 @@ void FNav3DVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
 		{
 			if (AFenwickVoxelVolume* Volume = Cast<AFenwickVoxelVolume>(SelectedObject.Get()))
 			{
-				Volume->BakeStaticDataToChunks();
+				Volume->BakeStaticData();
 			}
 		}
 		return FReply::Handled();

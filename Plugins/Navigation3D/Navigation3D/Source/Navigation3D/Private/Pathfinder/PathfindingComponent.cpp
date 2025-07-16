@@ -7,7 +7,9 @@
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
 #include "DrawDebugHelpers.h"
+#include "Components/BoxComponent.h"
 #include "Pathfinder/PathActor.h"
+#include "Pathfinder/NaviVolume/OctreeVoxelVolume.h"
 
 #include "Pathfinder/Strategy/JPSPlusStrategy.h"
 
@@ -22,66 +24,96 @@ UPathfindingComponent::UPathfindingComponent()
 
 bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 {
-	if (PathfindingTaskFuture.IsValid())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("RequestPathToLocation: Already requesting a path. New request ignored."));
-		return false;
-	}
+    // --- 1. 사전 유효성 검사 (기존과 동일) ---
+    if (PathfindingTaskFuture.IsValid() && !PathfindingTaskFuture.IsReady())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("RequestPathToLocation: Already requesting a path. New request ignored."));
+        return false;
+    }
 
-	if (!PathfindingStrategy || !TargetVolume)
-	{
-		UE_LOG(LogTemp, Error, TEXT("RequestPathToLocation failed: Strategy or TargetVolume is not set."));
-		return false;
-	}
-	
-	// 기존에 타이머 걸어둔게 있으면 취소
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(RepathCooldownTimer);
-	}
+    if (!PathfindingStrategy || !TargetVolume)
+    {
+        UE_LOG(LogTemp, Error, TEXT("RequestPathToLocation failed: Strategy or TargetVolume is not set."));
+        return false;
+    }
 
-	AFenwickVoxelVolume* GridVolume = Cast<AFenwickVoxelVolume>(TargetVolume);
-	if (!GridVolume)
-	{
-		UE_LOG(LogTemp, Error, TEXT("RequestPathToLocation failed: Strategy or TargetVolume is not set."));
-		return false;
-	}
-	
-	if (!PathSplinePtr.IsValid())
-	{
-		PathSplinePtr->SetupAttachment(GetOwner()->GetRootComponent());
-		PathSplinePtr->SetAbsolute(true, true, true);
-	}
-	
-	CurrentTargetLocation = TargetLocation;
-	FoundPathIndices.Empty();
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        World->GetTimerManager().ClearTimer(RepathCooldownTimer);
+    }
 
-	TArray<F128BitChunk> CombinedBitmask;
-	GridVolume->GetCombinedBitmask(CombinedBitmask);
-	
-	// 2. "요청서"를 작성합니다.
-	FPathfindingRequest Request;
-	Request.RequestingComponent = this;
+    // --- 2. "요청서" 작성 시작 ---
+    FPathfindingRequest Request;
+    Request.RequestingObject = this;
+    Request.StartLocation = GetOwner()->GetActorLocation();
+    Request.EndLocation = TargetLocation;
+    Request.AgentRadius = this->AgentRadius; // 월드 유닛 에이전트 반경
 	Request.Strategy = PathfindingStrategy;
-	Request.StartIndex = GridVolume->WorldToVoxelIndex(GetOwner()->GetActorLocation());
-	Request.EndIndex = GridVolume->WorldToVoxelIndex(TargetLocation);
-	Request.AgentRadiusInVoxels = FMath::CeilToInt((AgentRadius / GridVolume->VoxelExtent) - 0.5f);
-	Request.WalkabilityGrid.GridSize = GridVolume->MapSize;
-	Request.WalkabilityGrid.ObstacleBitmasks = MoveTemp(CombinedBitmask);
-	
-	// 결과를 받을 콜백 함수를 지정합니다.
-	Request.OnPathfindingComplete.BindDynamic(this, &UPathfindingComponent::HandlePathfindingResult);
-	Request.RequestingObject = this;
-	
-	CurrentRequestID = PathSubsystem->RequestPath(Request);
+    bool bRequestDataValid = false;
 
-	if (CurrentRequestID != -1)
-	{
-		// 상태 변경 등...
-		return true;
-	}
+    if (AFenwickVoxelVolume* GridVolume = Cast<AFenwickVoxelVolume>(TargetVolume))
+    {
+        // ----- 그리드 볼륨일 경우 -----
+        UE_LOG(LogTemp, Log, TEXT("Requesting path on a Grid Volume (Fenwick)."));
 
-	return false;
+        Request.NodeType = EPathfindingNodeType::Grid;
+    	Request.OnVoxelPathComplete.BindDynamic(this, &UPathfindingComponent::HandleVoxelPathResult);
+ 
+        // FThreadSafeBitmaskGrid 스냅샷 생성
+        FThreadSafeBitmaskGrid GridData;
+        GridData.GridSize = GridVolume->MapSize;
+       // GridData = GridVolume->VoxelExtent; // VoxelSize도 복사
+        GridVolume->GetCombinedBitmask(GridData.ObstacleBitmasks); // 비트마스크 복사
+
+        // NavigationData에 그리드 데이터 스냅샷을 넣음
+        Request.NavigationData.Emplace<FThreadSafeBitmaskGrid>(MoveTemp(GridData));
+        bRequestDataValid = true;
+    }
+    else if (AOctreeVoxelVolume* OctreeVolume = Cast<AOctreeVoxelVolume>(TargetVolume))
+    {
+        // ----- 옥트리 볼륨일 경우 -----
+        UE_LOG(LogTemp, Log, TEXT("Requesting path on an Octree Volume."));
+
+        // 요청서에 옥트리용이라고 명시
+        Request.NodeType = EPathfindingNodeType::Octree;
+    	Request.OnWorldPathComplete.BindDynamic(this, &UPathfindingComponent::HandleWorldPathResult);
+ 
+        // FOctreePathfindingData 스냅샷 생성
+        FOctreePathfindingData OctreeData;
+        OctreeData.StaticNodePool = OctreeVolume->GetStaticNodePool();
+        OctreeData.RootNodeIndex = OctreeVolume->GetRootNodeIndex();
+        OctreeData.MaxOctreeDepth = OctreeVolume->GetMaxOctreeDepth();
+        OctreeData.VolumeBounds = OctreeVolume->VolumeBox->Bounds.GetBox();
+        OctreeData.DynamicObstacleBitmask = OctreeVolume->GetDynamicObstacleBitmask();
+        OctreeData.MapSize = OctreeVolume->MapSize;
+        OctreeData.VoxelSize = OctreeVolume->VoxelExtent;
+        OctreeData.AgentRadius = this->AgentRadius;
+
+        // NavigationData에 옥트리 데이터 스냅샷을 넣음
+        Request.NavigationData.Emplace<FOctreePathfindingData>(MoveTemp(OctreeData));
+        bRequestDataValid = true;
+    }
+
+    // --- 4. 유효한 요청 데이터가 만들어졌으면 서브시스템에 전달 ---
+    if (bRequestDataValid)
+    {
+        CurrentTargetLocation = TargetLocation;
+        FoundPath.Empty(); // 경로 초기화
+
+    	CurrentRequestID = PathSubsystem->RequestPath(Request);
+    	if (CurrentRequestID != -1)
+    	{
+    		// 상태 변경 등...
+    		return true;
+    	}
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("RequestPathToLocation failed: TargetVolume is not a supported type (Fenwick or Octree)."));
+    }
+
+    return false;
 }
 
 bool UPathfindingComponent::RequestPathToTargetActor()
@@ -269,21 +301,35 @@ void UPathfindingComponent::DetermineMovementModeForNextPath()
 void UPathfindingComponent::CheckForPathOptimization()
 {
 	if (CurrentState != EPathfindingState::FollowPath || !PathfindingStrategy)
-	{
 		return;
-	}
-	if (PathfindingStrategy->ShouldRepathForOptimization(GetOwner()->GetActorLocation(),
-	                                                     FoundPath,
-	                                                     CurrentPathDestinationIndex,
-	                                                     CurrentTargetLocation, AgentRadius))
-	{
-		UE_LOG(LogTemp, Log, TEXT("Strategy suggests a shorter path is available. Requesting repath."));
 
-		// 전략이 재탐색이 필요하다고 판단했으므로, 재탐색을 요청합니다.
+	// 1) Volume, AgentVoxel, GoalVoxel 계산
+	AUniformGridVolume* Volume = Cast<AUniformGridVolume>(TargetVolume);
+	if (!Volume) return;
+	const FIntVector CurrentAgentVoxel =
+		Volume->WorldToVoxelIndex(GetOwner()->GetActorLocation());
+	const FIntVector GoalVoxel =
+		Volume->WorldToVoxelIndex(CurrentTargetLocation);
+
+	// 2) FoundPathIndices 는 이미 voxel 인덱스 배열이니 그대로 사용
+	const TArray<FIntVector>& VoxPath = FoundPathIndices;
+
+	// 3) Agent 반경도 voxel 단위로
+	const int32 AgentRadiusInVoxels =
+		FMath::CeilToInt((AgentRadius / Volume->VoxelExtent) - 0.5f);
+
+	// 4) 호출!
+	if (PathfindingStrategy->ShouldRepathForOptimization(
+			CurrentAgentVoxel,
+			VoxPath,
+			CurrentPathDestinationIndex,
+			GoalVoxel,
+			AgentRadiusInVoxels))
+	{
+		UE_LOG(LogTemp, Log, TEXT("Strategy suggests a shorter path → Requesting repath"));
 		RequestPathToLocation(CurrentTargetLocation);
 	}
 }
-
 //======================================================================================
 // Engine Overrides
 //======================================================================================
@@ -360,12 +406,24 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	if (!IsPathAheadValid()) //여기가 리패스하는 곳인듯
+	if (CurrentState == EPathfindingState::FollowPath)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Dynamic obstacle is on path. Start Repath"));
-		InvalidatePathAndRequestRepath();
+		// 1) 먼저 로컬 스티어링 / 위치 업데이트
+		//UpdateSteering(DeltaTime);
+
+		// 2) 경로가 물리적으로 막혔는지 체크 (동적 장애물)
+		if (!IsPathAheadValid())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Dynamic obstacle is on path. Start Repath"));
+			InvalidatePathAndRequestRepath();
+			return;
+		}
+
+		// 3) 전략 기반 최적화 재탐색 제안
+		CheckForPathOptimization();
 	}
 
+	
 	if (PathfindingTaskFuture.IsValid()) //thread돌아가는지 확인
 	{
 		HandlePathfindingResult();
@@ -387,7 +445,7 @@ void UPathfindingComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-void UPathfindingComponent::HandlePathfindingResult(const TArray<FIntVector>& PathIndices, bool bSuccess)
+void UPathfindingComponent::HandleVoxelPathResult(const TArray<FIntVector>& PathIndices, bool bSuccess)
 {
 	if (bSuccess && PathIndices.Num() > 0)
 	{
@@ -409,6 +467,64 @@ void UPathfindingComponent::HandlePathfindingResult(const TArray<FIntVector>& Pa
 	}
 }
 
+void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess)
+{
+	// 1. 길찾기 성공 여부와 경로 유효성 확인
+	if (bSuccess && Path.Num() > 1)
+	{
+		// --- 길찾기 결과 시각화를 위한 디버그 드로잉 ---
+        
+		// 이전 디버그 라인이 남아있을 수 있으므로 모두 지웁니다.
+		FlushPersistentDebugLines(GetWorld());
+
+		// 경로의 각 지점을 연결하는 선을 그립니다.
+		for (int32 i = 0; i < Path.Num() - 1; ++i)
+		{
+			DrawDebugLine(
+				GetWorld(),
+				Path[i],                     // 시작점
+				Path[i + 1],                 // 끝점
+				FColor::Cyan,                // 선 색상
+				true,                        // 선이 사라지지 않게 함 (true)
+				-1.0f,                       // 지속 시간 (-1은 무한)
+				0,                           // 렌더링 우선순위
+				10.0f                        // 선 두께
+			);
+		}
+
+		// 각 경로 지점에 구체를 그려서 포인트를 명확하게 표시합니다.
+		for (const FVector& Point : Path)
+		{
+			DrawDebugSphere(
+				GetWorld(),
+				Point,
+				25.0f,                       // 구체 반지름
+				12,                          // 구체 정밀도
+				FColor::Magenta,             // 구체 색상
+				true,                        // 사라지지 않게 함
+				-1.0f,
+				0,
+				5.0f
+			);
+		}
+        
+		UE_LOG(LogTemp, Log, TEXT("Pathfinding successful! Drawing debug path with %d points."), Path.Num());
+        
+		// TODO: 나중에 실제 이동 로직을 여기에 추가합니다.
+		// FoundPath = Path;
+		// ProcessNewPath(Path);
+		// CurrentState = EPathfindingState::FollowPath;
+	}
+	else
+	{
+		// 길찾기 실패 시 로그 출력
+		UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed or path is too short."));
+		// CurrentState = EPathfindingState::Idle;
+	}
+
+	// TODO: 나중에 리패스 로직을 여기에 추가합니다.
+	// if (bPeriodicRepath && !bIsReachDestination) { ... }
+}
 //======================================================================================
 // Internal Logic
 //======================================================================================
@@ -486,18 +602,44 @@ void UPathfindingComponent::ProcessNewPath(const TArray<FIntVector>& PathIndices
 			PathSplinePtr->AddSplinePoint(FoundPath[i], ESplineCoordinateSpace::World, false);
 		}
 
-		{	// 스플라인이 이상하게 그려져서 리패스 처음에 뒤로가는 현상 수정용 -> 첫번째와 두번째 SplinePoint만 Spline 강직도를 올림
-			float Tension = 0.1f;
-			const FVector P0 = PathSplinePtr->GetLocationAtSplinePoint(0, ESplineCoordinateSpace::Local);
-			const FVector P1 = PathSplinePtr->GetLocationAtSplinePoint(1, ESplineCoordinateSpace::Local);
-			FVector Tangent = (P1 - P0) * Tension;
-			PathSplinePtr->SetTangentAtSplinePoint(0, Tangent, ESplineCoordinateSpace::Local, true);
-
-			const FVector P_Prev = PathSplinePtr->GetLocationAtSplinePoint(0, ESplineCoordinateSpace::Local);
-			const FVector P_Next = PathSplinePtr->GetLocationAtSplinePoint(2, ESplineCoordinateSpace::Local);
-			Tangent = (P_Next - P_Prev) * Tension;
-			PathSplinePtr->SetTangentAtSplinePoint(1, Tangent, ESplineCoordinateSpace::Local, true);
-		}
+		//아래는 spline곡선이 튀지 않게 방지하는 코드
+		// const float Tension = 0.2f; // 곡선의 팽팽함. 0.5가 보통 가장 자연스러움. -> UProperty로 빼서 사용자가 지정할 수 있게 변경
+		//
+		// for (int32 i = 0; i < NumPoints; ++i)
+		// {
+		// 	FVector Tangent;
+		//
+		// 	if (i == 0)
+		// 	{
+		// 		// --- 시작점 (First Point) ---
+		// 		// 다음 포인트(1)와 현재 포인트(0)의 차이를 탄젠트로 사용합니다.
+		// 		// 이렇게 하면 곡선이 경로의 시작 방향으로 부드럽게 뻗어나갑니다.
+		// 		const FVector P0 = PathSplinePtr->GetLocationAtSplinePoint(0, ESplineCoordinateSpace::Local);
+		// 		const FVector P1 = PathSplinePtr->GetLocationAtSplinePoint(1, ESplineCoordinateSpace::Local);
+		// 		Tangent = (P1 - P0) * Tension;
+		// 	}
+		// 	else if (i == NumPoints - 1)
+		// 	{
+		// 		// --- 끝점 (Last Point) ---
+		// 		// 현재 포인트(Last)와 이전 포인트(Last-1)의 차이를 탄젠트로 사용합니다.
+		// 		// 곡선이 경로의 끝 방향으로 자연스럽게 수렴합니다.
+		// 		const FVector PN_1 = PathSplinePtr->GetLocationAtSplinePoint(i - 1, ESplineCoordinateSpace::Local);
+		// 		const FVector PN = PathSplinePtr->GetLocationAtSplinePoint(i, ESplineCoordinateSpace::Local);
+		// 		Tangent = (PN - PN_1) * Tension;
+		// 	}
+		// 	else
+		// 	{
+		// 		// --- 중간점 (Intermediate Points) ---
+		// 		// 이것이 Catmull-Rom의 핵심입니다.
+		// 		// 이전 포인트(i-1)에서 다음 포인트(i+1)를 향하는 벡터를 계산합니다.
+		// 		const FVector P_Prev = PathSplinePtr->GetLocationAtSplinePoint(i - 1, ESplineCoordinateSpace::Local);
+		// 		const FVector P_Next = PathSplinePtr->GetLocationAtSplinePoint(i + 1, ESplineCoordinateSpace::Local);
+		// 		Tangent = (P_Next - P_Prev) * Tension;
+		// 	}
+		//
+		// 	// 계산된 탄젠트를 스플라인 포인트에 설정합니다.
+		// 	PathSplinePtr->SetTangentAtSplinePoint(i, Tangent, ESplineCoordinateSpace::Local, true);
+		// }
 		
 		PathSplinePtr->UpdateSpline();
 	}

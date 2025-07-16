@@ -269,4 +269,21 @@ struct FStrategyUtils
 			}
 		}
 	}
+
+	static bool HasLineOfSightLight(const FThreadSafeBitmaskGrid& Grid,
+	                                const FIntVector& From,
+	                                const FIntVector& To,
+	                                uint32 AgentRadiusInVoxel)
+	{
+		TArray<FIntVector> Voxels;
+		FStrategyUtils::GenerateBresenhamLine(From, To, Voxels);
+		for (const FIntVector& V : Voxels)
+		{
+			if (!Grid.IsRegionWalkable(V, AgentRadiusInVoxel))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
 };

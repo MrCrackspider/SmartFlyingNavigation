@@ -1,10 +1,15 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
+// VoxelVolumeBase.h (수정 후)
+
+#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "VoxelVolumeBase.generated.h"
+
+class UBoxComponent;
 
 UENUM(BlueprintType)
 enum class EVolumeDataStructure : uint8
@@ -15,69 +20,109 @@ enum class EVolumeDataStructure : uint8
 	Other
 };
 
-
-
-UCLASS()
+// 자식 클래스가 핵심 기능을 구현해야만 사용할 수 있도록 '추상 클래스'로 선언합니다.
+UCLASS(Abstract)
 class NAVIGATION3D_API AVoxelVolumeBase : public AActor
 {
 	GENERATED_BODY()
 	
 public:	
-	// Sets default values for this actor's properties
 	AVoxelVolumeBase();
 
 protected:
-	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+	virtual void OnConstruction(const FTransform& Transform) override;
 
 public:	
-	// Called every frame
 	virtual void Tick(float DeltaTime) override;
-
-	virtual void OnConstruction(const FTransform& Transform) override;
 	
-	UPROPERTY(EditAnywhere, Category="Baking")
-	TArray<AActor*> BakeExcludeActors;
-#if WITH_EDITOR
-	UFUNCTION()
-	virtual void BakeStaticDataToChunks();
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|VolumeSettings")
+	float VoxelExtent;
 
-#endif
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|VolumeSettings")
+	FIntVector MapSize;
 	
-	// --- 모든 자식이 반드시 구현해야 하는 공통 인터페이스 ---
+	UPROPERTY()
+	TObjectPtr<USceneComponent> PivotComponent;
+
+	UPROPERTY()
+	TObjectPtr<UBoxComponent> VolumeBox;
+
 
 	virtual EVolumeDataStructure GetStructureType() const PURE_VIRTUAL(AVoxelVolumeBase::GetStructureType, return EVolumeDataStructure::NONE;);
-
+	virtual bool IsRegionWalkable(const FIntVector& CenterIndex, int32 AgentRadiusInVoxels) const PURE_VIRTUAL(AVoxelVolumeBase::IsRegionWalkable, return false;);
+	
 	UFUNCTION(BlueprintPure, Category = "Voxel")
-	virtual FVector GetLocationFromIndex(const FIntVector& Index) const PURE_VIRTUAL(AVoxelVolumeBase::GetLocationFromIndex, return FVector::ZeroVector;);
+	virtual FVector VoxelIndexToWorld(const FIntVector& VoxelIndex) const;
     
 	UFUNCTION(BlueprintPure, Category = "Voxel")
-	virtual FIntVector GetIndexFromLocation(const FVector& WorldPosition) const PURE_VIRTUAL(AVoxelVolumeBase::GetIndexFromLocation, return FIntVector::ZeroValue;);
+	virtual FIntVector WorldToVoxelIndex(const FVector& WorldPosition) const;
 
-	virtual bool IsLocationWalkable(const FVector& WorldPosition) const PURE_VIRTUAL(AVoxelVolumeBase::IsLocationWalkable, return false;);
-
-	virtual void BuildObstacles() PURE_VIRTUAL(AVoxelVolumeBase::BuildObstacles,);
+	//virtual bool IsLocationWalkable(const FVector& WorldPosition) const;
+	virtual bool IsVoxelWalkable (const FIntVector& VoxelIndex) const;
 	
-	virtual void GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const;
+	bool IsIndexValid(const FIntVector& Index) const;
+	bool ClampVoxelIndicesToVolume(FIntVector& MinVoxelIndex, FIntVector& MaxVoxelIndex) const;
+	bool ClampVoxelIndicesToVolume(const FIntVector& InMinVoxelIndex, const FIntVector& InMaxVoxelIndex, FIntVector& OutClampedMin, FIntVector& OutClampedMax) const;
 	
-	virtual void UpdateDebugObstacleVisualization();
+	bool GetOverlappingComponentsInVolume(const FCollisionObjectQueryParams& ObjectQueryParams, TArray<FOverlapResult>& OutResults) const;
+	bool CheckVoxelOverlap(const FIntVector& VoxelIndex, UPrimitiveComponent* ComponentToTest) const;
+	
+	//~======================================================================
+	// 베이킹 및 스트리밍
+	//~======================================================================
+	
+	UPROPERTY(EditAnywhere, Category="Voxel|Baking")
+	TArray<AActor*> BakeExcludeActors;
 
-	virtual void RegisterStreamingAgent(AActor* Agent);
-
-	virtual void UnregisterStreamingAgent(AActor* Agent) ;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VolumeProperties")
-	bool bDrawDebugBox;
-	UPROPERTY(EditAnywhere,BlueprintReadOnly, Category = "Voxel|Debug", meta=(ClampMin = 10.f))
-	float DebugLineWidth  = 40.0f;
-
-#if WITH_EDITORONLY_DATA
-	TObjectPtr<UInstancedStaticMeshComponent> DebugObstaclesComponent;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VolumeProperties")
-	TSoftObjectPtr<UStaticMesh> DebugMeshAsset;
+#if WITH_EDITOR
+	UFUNCTION(CallInEditor, Category = "Voxel|Baking")
+	virtual void BakeStaticData();
 #endif
 	
-	FTimerHandle DebugUpdateTimer;
+	virtual void RegisterStreamingAgent(AActor* Agent);
+	virtual void UnregisterStreamingAgent(AActor* Agent);
 
+	//~======================================================================
+	// 디버그 시각화
+	//~======================================================================
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug")
+	bool bDrawDebugBox;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|Debug", meta=(ClampMin = 1.f))
+	float DebugLineWidth  = 4.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|Debug", meta=(ClampMin = 1.f))
+	FColor DebugLineColor  = FColor::Green;
+	
+#if WITH_EDITORONLY_DATA
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug")
+	TSoftObjectPtr<UStaticMesh> DebugMeshAsset;
+	
+	UPROPERTY() TObjectPtr<UInstancedStaticMeshComponent> DebugSolidNodesComponent;
+	UPROPERTY() TObjectPtr<UInstancedStaticMeshComponent> DebugEmptyNodesComponent;
+	UPROPERTY() TObjectPtr<UInstancedStaticMeshComponent> DebugMixedNodesComponent;
+
+	// 디버그용 머티리얼 (에디터에서 설정 가능)
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug")
+	TObjectPtr<UMaterialInterface> SolidNodeMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug")
+	TObjectPtr<UMaterialInterface> EmptyNodeMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug")
+	TObjectPtr<UMaterialInterface> MixedNodeMaterial;
+	
+#endif
+	
+	virtual void GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const;
+	virtual void UpdateDebugObstacleVisualization();
+
+protected:
+	FTimerHandle DebugUpdateTimer;
+	TSet<FIntVector> DisplayedVoxelIndices;
+	bool bIsUpdatingVisualization = false;
 };

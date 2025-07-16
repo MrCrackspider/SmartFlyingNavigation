@@ -13,12 +13,18 @@ bool UPathfindingStrategy::FindPathWithStrategy(const FPathfindingRequest& InReq
 	return false;
 }
 
-bool UPathfindingStrategy::ShouldRepathForOptimization(const FVector& CurrentAgentLocation,
-                                                       const TArray<FVector>& CurrentPath, int32 CurrentPathIndex,
-                                                       const FVector& GoalLocation, uint32 AgentRadius) const
+bool UPathfindingStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FVector>& OutPath)
 {
 	return false;
 }
+
+bool UPathfindingStrategy::ShouldRepathForOptimization(const FIntVector& CurrentAgentVoxel,
+                                                       const TArray<FIntVector>& CurrentPathVoxels, int32 CurrentPathIndex, const FIntVector& GoalVoxel,
+                                                       uint32 AgentRadiusVoxels) const
+{
+	return false;
+}
+
 
 FName UPathfindingStrategy::GetStrategyName() const
 {

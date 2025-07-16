@@ -121,7 +121,9 @@ protected:
 
 	//subsystem에서 길찾기가 비동기로 완료 되었을 때 실행될 함수
 	UFUNCTION()
-	void HandlePathfindingResult(const TArray<FIntVector>& PathIndices, bool bSuccess);
+	void HandleVoxelPathResult(const TArray<FIntVector>& PathIndices, bool bSuccess);
+	UFUNCTION()
+	void HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess);
 	
 	/** 비동기 길찾기 작업이 완료되었을 때 결과를 처리합니다. */
 	void HandlePathfindingResult();

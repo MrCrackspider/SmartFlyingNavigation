@@ -3,14 +3,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "AStarStrategy.h"
 #include "Pathfinder/PathfindingRequest.h"
 #include "PathfindingStrategy.h"
 #include "Pathfinder/ThreadSafeBitmask.h"
-#include "Pathfinder/Utility/MemoryPool.h"
 #include "JPSPlusStrategy.generated.h"
 
 
-constexpr int32 NUM_ALL_DIRECTIONS = 26;
 struct FPathNode;
 class AFenwickVoxelVolume;
 class AVoxelVolumeBase;
@@ -34,10 +33,11 @@ public:
 	// 생성자: 길찾기에 필요한 모든 데이터를 안전하게 복사/참조합니다.
 
 	FJPSPlusPathfinder(const FPathfindingRequest& InRequest,
+						const FThreadSafeBitmaskGrid& InGrid,
 	                   const TArray<FIntVector>& InAllDirections,
 	                   const TMap<FIntVector, int32>& InDirectionToIndexMap,
 	                   FIntVector InActualGoal,
-	                   FPathNodeMemoryPool& InMemoryPool);
+	                   TNodeMemoryPool<FPathNode>& InMemoryPool);
 	// 실제 길찾기를 수행하는 메인 함수
 	EPathfindingResult FindPath(TArray<FIntVector>& OutPath);
 
@@ -66,7 +66,7 @@ private:
 	FIntVector ActualGoalIndex;
 
 	int32 AgentRadiusInVoxels;
-	FPathNodeMemoryPool& MemoryPool;
+	TNodeMemoryPool<FPathNode>& MemoryPool;
 	TArray<FPathNode*> OpenSet;
 	TMap<FIntVector, FPathNode*> OpenSetLookup;
 	TMap<FIntVector, FPathNode*> ClosedSet;
@@ -81,9 +81,11 @@ class NAVIGATION3D_API UJPSPlusStrategy : public UPathfindingStrategy
 public:
 	virtual void Initialize() override;
 	virtual bool FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FIntVector>& OutPath) override;
-	virtual bool ShouldRepathForOptimization(const FVector& CurrentAgentLocation, const TArray<FVector>& CurrentPath,
-	                                         int32 CurrentPathIndex, const FVector& GoalLocation,
-	                                         uint32 AgentRadius) const override;
+	virtual bool ShouldRepathForOptimization(const FIntVector& CurrentAgentVoxel,
+											 const TArray<FIntVector>& CurrentPathVoxels,
+											 int32 CurrentPathIndex,
+											 const FIntVector& GoalVoxel,
+											 uint32 AgentRadiusVoxels) const override;
 	virtual FName GetStrategyName() const override;
 
 private:

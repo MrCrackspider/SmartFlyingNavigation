@@ -8,7 +8,6 @@
 #include "PathfindingSubsystem.generated.h"
 
 
-struct FPathNodeMemoryPool;
 class AVoxelVolumeBase;
 class UPathfindingComponent;
 class UPathfindingStrategy;
@@ -18,7 +17,8 @@ class FQueuedThreadPool;
 struct FPathfindingResult
 {
 	FPathfindingRequest Request;
-	TArray<FIntVector> Path;
+	TArray<FIntVector> VoxelPath;
+	TArray<FVector> WorldPath;
 	bool bSuccess;
 };
 
@@ -26,7 +26,7 @@ struct FPathfindingResult
 class FPathfindingAsyncTasks : public IQueuedWork
 {
 public:
-	FPathfindingAsyncTasks(const FPathfindingRequest& InRequest, TWeakObjectPtr<UPathfindingSubsystem> InOwner)
+	FPathfindingAsyncTasks(const FPathfindingRequest& InRequest, UPathfindingSubsystem* InOwner)
 	  : Request(InRequest) // InRequest의 내용이 멤버 변수 Request로 '복사'됩니다.
 	  , OwnerSubsystem(InOwner)
 	{
@@ -55,7 +55,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
 	int32 RequestPath(FPathfindingRequest& Request);
 
-	void OnPathfindingCompleted(FPathfindingRequest Result, TArray<FIntVector> Path, bool bSuccess);
+	void OnPathfindingCompleted(const FPathfindingRequest& Request, const TArray<FIntVector>& VoxelPath, bool bSuccess);
+	void OnPathfindingCompleted(const FPathfindingRequest& Request, const TArray<FVector>& WorldPath, bool bSuccess);
 
 	UFUNCTION(BlueprintPure, Category = "Pathfinding|Debug")
 	int32 GetNumWorkerThreads() const;
@@ -79,10 +80,10 @@ public:
 	virtual TStatId GetStatId() const override {return TStatId(); };
 
 	// 경로탐색 작업이 메모리 풀을 빌려갈 때 호출하는 함수입니다.
-	FPathNodeMemoryPool* LeasePool();
+	FPathNodeMemoryPoolBase* LeasePool(EPathfindingNodeType NodeType);
 
 	// 작업이 끝난 후 메모리 풀을 반납할 때 호출하는 함수입니다.
-	void ReturnPool(FPathNodeMemoryPool* PoolToReturn);
+	void ReturnPool(FPathNodeMemoryPoolBase* PoolToReturn);
 	
 protected:
 	// --- Subsystem Lifecycle ---
@@ -116,8 +117,8 @@ private:
 	TQueue<FPathfindingResult> CompletedTasksQueue;
 	
 private:
-	// 재사용을 위해 대기 중인 유휴 메모리 풀 목록입니다.
-	TArray<FPathNodeMemoryPool*> IdlePools;
+	TArray<FPathNodeMemoryPoolBase*> IdleGridPools;
+	TArray<FPathNodeMemoryPoolBase*> IdleOctreePools;
 
 	// 여러 스레드에서 동시에 풀을 빌리거나 반납할 때의 충돌을 막는 잠금 장치입니다.
 	FCriticalSection PoolLock;
