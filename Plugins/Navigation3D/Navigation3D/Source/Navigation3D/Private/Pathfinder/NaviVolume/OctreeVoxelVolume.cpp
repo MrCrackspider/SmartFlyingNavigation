@@ -21,21 +21,21 @@
 AOctreeVoxelVolume::AOctreeVoxelVolume()
 {
 	PrimaryActorTick.bCanEverTick = true;
-	// 기본값 설정
-	MaxOctreeDepth = 7; // 예: 128x128x128 볼륨 -> 2^7=128
+	// Set default values
+	MaxOctreeDepth = 7; // e.g., 128x128x128 volume -> 2^7=128
 }
 
 void AOctreeVoxelVolume::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// 1. 베이크된 정적 옥트리 데이터 로드
+	// 1. Load baked static octree data
 	if (BakedOctreeData)
 	{
 		StaticNodePool = BakedOctreeData->NodePool;
 		if (StaticNodePool.Num() > 0)
 		{
-			RootNodeIndex = 0; // 루트 노드는 항상 인덱스 0으로 가정
+			RootNodeIndex = 0; // Assume root node is always at index 0
 			UE_LOG(LogTemp, Log, TEXT("OctreeVoxelVolume: Loaded static octree with %d nodes."), StaticNodePool.Num());
 		}
 	}
@@ -45,7 +45,7 @@ void AOctreeVoxelVolume::BeginPlay()
 		       TEXT("OctreeVoxelVolume: No BakedOctreeData asset assigned. Static layer will be empty."));
 	}
 
-	// 2. 동적 장애물 레이어 초기화 및 타이머 시작
+	// 2. Initialize dynamic obstacle layer and start timer
 	InitializeDynamicLayer();
 	GetWorldTimerManager().SetTimer(DynamicObstacleTimer, this, &AOctreeVoxelVolume::UpdateDynamicObstacles, 0.2f, true,
 	                                0.1f);
@@ -57,7 +57,7 @@ void AOctreeVoxelVolume::Tick(float DeltaTime)
 }
 
 //======================================================================
-// --- 핵심 인터페이스 구현 ---
+// --- Core Interface Implementation ---
 //======================================================================
 
 bool AOctreeVoxelVolume::IsRegionWalkable(const FIntVector& VoxelIndex, int32 AgentRadiusInVoxels) const
@@ -66,25 +66,26 @@ bool AOctreeVoxelVolume::IsRegionWalkable(const FIntVector& VoxelIndex, int32 Ag
 	const FIntVector MinCorner = VoxelIndex - AgentRadius;
 	const FIntVector MaxCorner = VoxelIndex + AgentRadius;
 
-	// 월드 좌표계의 쿼리 박스 계산
+	// Calculate query box in world coordinates
 	const FVector QueryMinWorld = VoxelIndexToWorld(MinCorner);
-	// Max 코너는 복셀의 끝 지점까지 포함해야 하므로 1을 더한 인덱스의 월드 위치를 사용
+	
+	// Max corner should include the end point of the voxel, so use world position of index + 1
 	const FVector QueryMaxWorld = VoxelIndexToWorld(MaxCorner + FIntVector(1, 1, 1));
 	const FBox QueryBox(QueryMinWorld, QueryMaxWorld);
 
-	// 1. 정적 옥트리 레이어 확인
+	// 1. Check static octree layer
 	if (!IsRegionEmpty_StaticOctree(QueryBox))
 	{
 		return false; // 정적 지형에 막힘
 	}
 
-	// 2. 동적 그리드 레이어 확인
+	// 2. Check dynamic grid layer
 	if (!IsRegionEmpty_DynamicGrid(MinCorner, MaxCorner))
 	{
-		return false; // 동적 장애물에 막힘
+		return false; // Blocked by dynamic obstacles
 	}
 
-	// 두 레이어 모두 통과하면 걸을 수 있음
+	// If both layers are clear, it's walkable
 	return true;
 }
 
@@ -92,7 +93,7 @@ void AOctreeVoxelVolume::GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObs
 {
 	OutObstacleIndices.Empty();
 
-	// 1. 동적 장애물 복셀 수집
+	// 1. Collect dynamic obstacle voxels
 	if (DynamicObstacleBitmask.Num() > 0)
 	{
 		const int32 ChunksPerRow = MapSize.X / 128;
@@ -124,12 +125,12 @@ void AOctreeVoxelVolume::GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObs
 		}
 	}
 
-	// 2. 정적 장애물 복셀 수집 (옥트리 순회)
+	// 2. Collect static obstacle voxels (octree traversal)
 	if (RootNodeIndex != -1)
 	{
 		TSet<FIntVector> StaticObstacles; // 중복 방지
-		// 재귀적으로 Solid 리프 노드 찾기
-		// ... (이 부분은 매우 느릴 수 있으므로 디버깅용으로만 사용)
+		// Recursively find Solid leaf nodes
+		// ... (This part can be very slow, use only for debugging)
 	}
 }
 
@@ -139,10 +140,10 @@ bool AOctreeVoxelVolume::IsVoxelWalkable(const FIntVector& Index) const
 }
 
 //======================================================================
-// --- 베이킹 구현 ---
+// --- Baking Implementation ---
 //======================================================================
 
-// 헬퍼 함수 구현
+// Helper function implementation
 void AOctreeVoxelVolume::SafeRemoveInstances(UInstancedStaticMeshComponent* Component,
                                              TArray<int32>& InstanceIndicesToRemove)
 {
@@ -150,15 +151,14 @@ void AOctreeVoxelVolume::SafeRemoveInstances(UInstancedStaticMeshComponent* Comp
 	{
 		return;
 	}
-	// 인덱스가 큰 것부터 제거해야 나머지 인덱스가 유효하게 유지됩니다.
+	
+	// Remove instances from largest index to smallest to keep other indices valid.
 	InstanceIndicesToRemove.Sort([](const int32& A, const int32& B)
 	{
 		return A > B;
 	});
 	Component->RemoveInstances(InstanceIndicesToRemove);
 }
-
-// 이 코드로 UpdateDebugObstacleVisualization 함수를 완전히 교체하십시오.
 
 void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 {
@@ -178,7 +178,7 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 	TWeakObjectPtr<AOctreeVoxelVolume> WeakThis(this);
 	const FBox InitialBounds = VolumeBox->Bounds.GetBox();
 
-	// 1. 백그라운드 스레드에서 그려야 할 노드 정보 수집
+	// 1. Collect node information to draw in a background thread
 	Async(EAsyncExecution::ThreadPool, [WeakThis, InitialBounds]()
 	{
 		if (!WeakThis.IsValid() || WeakThis->RootNodeIndex == -1)
@@ -190,13 +190,13 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 		TArray<FDebugNodeInfo> NodesToDraw;
 		WeakThis->GetDebugNodeInfoRecursive(NodesToDraw, WeakThis->RootNodeIndex, InitialBounds, 0);
 
-		// 2. 게임 스레드에서 인스턴스 업데이트
+		// 2. Update instances on the game thread
 		AsyncTask(ENamedThreads::GameThread, [WeakThis, NodesToDraw = MoveTemp(NodesToDraw)]()
 		{
 			AOctreeVoxelVolume* StrongThis = WeakThis.Get();
 			if (!StrongThis) return;
 
-			// --- 모든 컴포넌트의 인스턴스를 깨끗하게 비웁니다 ---
+			// --- Clear instances from all components ---
 			if (StrongThis->DebugSolidNodesComponent) StrongThis->DebugSolidNodesComponent->ClearInstances();
 			if (StrongThis->DebugEmptyNodesComponent) StrongThis->DebugEmptyNodesComponent->ClearInstances();
 			if (StrongThis->DebugMixedNodesComponent) StrongThis->DebugMixedNodesComponent->ClearInstances();
@@ -207,7 +207,7 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 				return;
 			}
 
-			// --- 그려야 할 노드들의 "로컬" Transform을 수집합니다 ---
+			// --- Collect "local" Transforms for nodes to draw ---
 			TArray<FTransform> SolidTransforms, EmptyTransforms, MixedTransforms;
 
 			for (const auto& NodeInfo : NodesToDraw)
@@ -217,28 +217,28 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 
 				if (NodeInfo.State == EOctreeNodeState::Solid && StrongThis->DebugSolidNodesComponent)
 				{
-					// "Solid" 컴포넌트의 Transform을 기준으로 로컬 좌표 계산
+					// Calculate local coordinates relative to the "Solid" component's Transform
 					const FTransform CompXform = StrongThis->DebugSolidNodesComponent->GetComponentTransform();
 					const FVector LocalCenter = CompXform.InverseTransformPosition(WorldCenter);
 					SolidTransforms.Emplace(FRotator::ZeroRotator, LocalCenter, Scale);
 				}
 				else if (NodeInfo.State == EOctreeNodeState::Empty && StrongThis->DebugEmptyNodesComponent)
 				{
-					// "Empty" 컴포넌트의 Transform을 기준으로 로컬 좌표 계산
+					// Calculate local coordinates relative to the "Empty" component's Transform
 					const FTransform CompXform = StrongThis->DebugEmptyNodesComponent->GetComponentTransform();
 					const FVector LocalCenter = CompXform.InverseTransformPosition(WorldCenter);
 					EmptyTransforms.Emplace(FRotator::ZeroRotator, LocalCenter, Scale);
 				}
 				else if (NodeInfo.State == EOctreeNodeState::Mixed && StrongThis->DebugMixedNodesComponent)
 				{
-					// "Mixed" 컴포넌트의 Transform을 기준으로 로컬 좌표 계산
+					// Calculate local coordinates relative to the "Mixed" component's Transform
 					const FTransform CompXform = StrongThis->DebugMixedNodesComponent->GetComponentTransform();
 					const FVector LocalCenter = CompXform.InverseTransformPosition(WorldCenter);
 					MixedTransforms.Emplace(FRotator::ZeroRotator, LocalCenter, Scale);
 				}
 			}
 
-			// --- 상태별로 인스턴스 일괄 추가 (bWorldSpace = false) ---
+			// --- Batch add instances by state (bWorldSpace = false) ---
 			if (StrongThis->DebugSolidNodesComponent && SolidTransforms.Num() > 0)
 			{
 				StrongThis->DebugSolidNodesComponent->AddInstances(SolidTransforms, false, false);
@@ -264,12 +264,12 @@ void AOctreeVoxelVolume::GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNo
 
 	const FOctreeNode& Node = StaticNodePool[NodeIndex];
 
-	// 리프 노드이거나, 디버그 최대 깊이에 도달한 경우에만 노드 정보를 추가
+	// Add node info if it's a leaf node or at debug max depth
 	if (Node.State != EOctreeNodeState::Mixed || CurrentDepth == DebugOctreeMaxDepth)
 	{
 		OutNodes.Add({NodeIndex, NodeBounds, Node.State});
 	}
-	else // Mixed 상태이고 더 깊이 들어갈 수 있으면 자식 노드 탐색
+	else // If Mixed state and can go deeper, traverse children
 	{
 		for (int i = 0; i < 8; ++i)
 		{
@@ -298,13 +298,13 @@ void AOctreeVoxelVolume::BakeStaticData()
 		if (FPlatformMisc::MessageBoxExt(EAppMsgType::YesNo, *Message.ToString(), *Title.ToString()) == EAppReturnType::No)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("Baking cancelled by user. Please set a 'Static Object Filter' to define what to bake."));
-			return; // 베이킹 중단
+			return; // Baking aborted
 		}
 	}
 
 	
 	
-	// --- 1. 사전 준비 및 장애물 스캔 ---
+	// --- 1. Prepare and scan for obstacles ---
 	TSet<FIntVector> AllStaticObstacles;
 	ScanForAllStaticObstacles(AllStaticObstacles);
 
@@ -315,11 +315,11 @@ void AOctreeVoxelVolume::BakeStaticData()
 		return;
 	}
 
-	// --- 2. UI 프로그레스 바 설정 ---
+	// --- 2. Set up UI progress bar ---
 	FScopedSlowTask BakeTask(AllStaticObstacles.Num() + 2, FText::FromString(TEXT("Baking Octree Data...")));
 	BakeTask.MakeDialog(); // UI 대화상자 표시
 
-	// --- 3. 옥트리 빌드 ---
+	// --- 3. Build Octree ---
 	BakeTask.EnterProgressFrame(0, FText::FromString(TEXT("Building Octree... (1/3)")));
 
 	StaticNodePool.Empty();
@@ -335,13 +335,13 @@ void AOctreeVoxelVolume::BakeStaticData()
 		InsertObstacleRecursive(RootNodeIndex, ObstacleVoxel, 0); // <-- 이렇게 수정합니다.
 	}
 
-	// --- 4. 옥트리 최적화 ---
+	// --- 4. Optimize Octree ---
 	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Optimizing Octree...(2/3)")));
 	if (BakeTask.ShouldCancel()) return;
 
 	OptimizeAndCollapse(RootNodeIndex, VolumeBounds);
 
-	// --- 5. 애셋 파일로 저장 ---
+	// --- 5. Save to asset file ---
 	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Saving data asset...(3/3)")));
 	if (BakeTask.ShouldCancel()) return;
 
@@ -354,11 +354,11 @@ void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticOb
 {
 	OutStaticObstacles.Empty();
 
-	// 1. [스캔 대상 설정] StaticObjectFilter의 존재 여부에 따라 스캔할 오브젝트 타입을 결정합니다.
+	// 1. [Scan Target Setup] Determine object types to scan based on StaticObjectFilter.
 	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypesToQuery;
 	if (StaticObjectFilter)
 	{
-		// 필터가 설정된 경우: 필터에 정의된 채널을 사용합니다.
+		// If filter is set: use channels defined in the filter.
 		UE_LOG(LogTemp, Log, TEXT("Using custom 'Static Object Filter' for baking."));
 		for (const TEnumAsByte<ECollisionChannel>& Channel : StaticObjectFilter->CollisionChannels)
 		{
@@ -373,12 +373,12 @@ void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticOb
 	}
 	else
 	{
-		// 필터가 없는 경우: 기본값인 WorldStatic을 사용합니다.
+		// If no filter: use default WorldStatic.
 		UE_LOG(LogTemp, Log, TEXT("'Static Object Filter' not set. Falling back to default: scanning 'WorldStatic' objects."));
 		ObjectTypesToQuery.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_WorldStatic));
 	}
 	
-	// 2. [오브젝트 스캔] 볼륨 내에서 결정된 타입의 모든 액터를 찾습니다.
+	// 2. [Object Scan] Find all actors of determined types within the volume.
 	const FBox VolumeWorldBounds = GetComponentsBoundingBox(true, true);
 	TArray<AActor*> OverlappingActors;
 	UKismetSystemLibrary::BoxOverlapActors(GetWorld(), VolumeWorldBounds.GetCenter(), VolumeWorldBounds.GetExtent(),
@@ -392,7 +392,7 @@ void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticOb
 
 	UE_LOG(LogTemp, Log, TEXT("ScanForAllStaticObstacles: Found %d potential actors. Applying filter and checking voxels..."), OverlappingActors.Num());
 
-	// 3. [필터링 및 복셀화] 각 액터를 최종 확인하고 복셀화합니다.
+	// 3. [Filtering and Voxelization] Final check and voxelization for each actor.
 	for (AActor* Actor : OverlappingActors)
 	{
 		if (!Actor) continue;
@@ -407,7 +407,7 @@ void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticOb
 			bool bShouldBake;
 			if (StaticObjectFilter)
 			{
-				// 필터가 있으면, 필터와 일치해야만 베이킹합니다.
+				// If filter is present, bake only if it matches the filter.
 				bShouldBake = StaticObjectFilter->DoesActorMatch(Actor, Comp);
 			}
 			else
@@ -417,7 +417,7 @@ void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticOb
 
 			if (bShouldBake)
 			{
-				// --- 베이킹 대상으로 확정된 오브젝트만 복셀화 진행 ---
+				// --- Proceed with voxelization for confirmed bake targets ---
 				const FBox ComponentBounds = Comp->Bounds.GetBox();
 				FIntVector MinVoxel, MaxVoxel;
 				FIntVector MinVoxelUnclamped = WorldToVoxelIndex(ComponentBounds.Min);
@@ -448,64 +448,58 @@ void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticOb
 void AOctreeVoxelVolume::InsertObstacleRecursive(int32 NodeIndex, // <-- const FBox& NodeBounds 인자를 제거합니다!
 												 const FIntVector& ObstacleVoxel, int32 CurrentDepth)
 {
-  // 1. 유효성 검사 (NodeIndex는 항상 유효해야 하지만, 방어적 코딩)
+	
+	// 1. Validate NodeIndex (should always be valid, but defensive coding)
     if (!StaticNodePool.IsValidIndex(NodeIndex))
     {
         UE_LOG(LogTemp, Error, TEXT("InsertObstacleRecursive: Invalid NodeIndex %d"), NodeIndex);
         return;
     }
 
-    // 2. 현재 노드의 참조를 가져옵니다.
-    //    주의: StaticNodePool.Emplace() 호출 전에만 유효합니다.
+	// 2. Get a reference to the current node.
+	//    Note: This reference might become invalid if StaticNodePool.Emplace() causes a reallocation.
+	//    We will re-acquire it safely after potential reallocations..
     FOctreeNode& CurrentNodeRef = StaticNodePool[NodeIndex]; 
     const FBox CurrentNodeBounds = CurrentNodeRef.Bounds; // <-- 노드에 저장된 Bounds를 사용합니다.
 
-    // 3. 노드 상태가 Solid이면 더 이상 진행할 필요 없음
+	// 3. If node state is Solid, no further action needed.
     if (CurrentNodeRef.State == EOctreeNodeState::Solid)
     {
         return;
     }
 
-    // 4. 최대 깊이에 도달하면 현재 노드를 Solid로 만듭니다.
+	// 4. If max depth reached, mark current node as Solid.
     if (CurrentDepth == MaxOctreeDepth)
     {
         CurrentNodeRef.State = EOctreeNodeState::Solid;
         return;
     }
 
-    // 5. 현재 노드가 Empty 상태이면 Mixed로 바꾸고 자식 노드를 생성합니다.
-    //    이 블록은 StaticNodePool의 재할당을 유발할 수 있으므로,
-    //    이전에 얻었던 CurrentNodeRef 참조가 무효화될 수 있습니다.
-    //    따라서 StaticNodePool[NodeIndex]를 직접 사용하여 안전하게 접근합니다.
+	// 5. If the current node is in the Empty state, change it to Mixed and create child nodes.
+	//    This block may trigger reallocation of StaticNodePool,
+	//    which can invalidate the previously obtained CurrentNodeRef reference.
+	//    Therefore, access StaticNodePool[NodeIndex] directly to ensure safety.
     if (CurrentNodeRef.State == EOctreeNodeState::Empty)
     {
-        StaticNodePool[NodeIndex].State = EOctreeNodeState::Mixed; // <-- 재할당 가능성 때문에 직접 접근
+        StaticNodePool[NodeIndex].State = EOctreeNodeState::Mixed; 
 
-        // 자식 노드를 생성하고 Bounds를 설정합니다.
+       
         for (int i = 0; i < 8; ++i)
         {
-            const int32 NewChildIndex = StaticNodePool.Emplace(FOctreeNode()); // 새 노드 추가
-            StaticNodePool[NewChildIndex].Bounds = CalculateChildBounds(CurrentNodeBounds, i); // <-- 새 자식 노드의 Bounds 설정
-            StaticNodePool[NodeIndex].ChildrenIndices[i] = NewChildIndex; // <-- 재할당 가능성 때문에 직접 접근
+            const int32 NewChildIndex = StaticNodePool.Emplace(FOctreeNode());
+            StaticNodePool[NewChildIndex].Bounds = CalculateChildBounds(CurrentNodeBounds, i);
+            StaticNodePool[NodeIndex].ChildrenIndices[i] = NewChildIndex;
         }
     }
-
-    // 6. 자식 노드로 재귀 호출하기 위한 준비
-    //    여기서부터는 StaticNodePool에 더 이상 Emplace가 없으므로 CurrentNodeRef가 다시 유효해집니다.
-    //    하지만 일관성을 위해 StaticNodePool[NodeIndex]를 계속 사용하거나,
-    //    아예 이 시점에서 FOctreeNode& Node = StaticNodePool[NodeIndex]; 를 다시 가져와도 됩니다.
-    //    이전 CurrentNodeRef는 Emplace 때문에 무효화되었을 가능성이 있기 때문입니다.
-    FOctreeNode& Node = StaticNodePool[NodeIndex]; // <-- 안전하게 다시 참조를 가져옵니다.
+	
+    FOctreeNode& Node = StaticNodePool[NodeIndex]; 
 
     const FVector VoxelWorldPos = VoxelIndexToWorld(ObstacleVoxel);
-    // GetOctantContainingVoxel 호출 시 Node.Bounds를 사용합니다.
     const int32 ChildOctant = GetOctantContainingVoxel(Node.Bounds, VoxelWorldPos); 
 
     const int32 ChildNodeIndex = Node.ChildrenIndices[ChildOctant];
     if (ChildNodeIndex != -1)
     {
-        // 재귀 호출 시 NodeBounds 인자를 제거합니다.
-        // ChildBounds는 더 이상 인자로 전달되지 않고, 재귀 호출된 함수 내부에서 Node.Bounds를 통해 접근합니다.
         InsertObstacleRecursive(ChildNodeIndex, ObstacleVoxel, CurrentDepth + 1); 
     }
     else
@@ -527,10 +521,9 @@ void AOctreeVoxelVolume::OptimizeAndCollapse(int32 NodeIndex, const FBox& NodeBo
 	FOctreeNode& Node = StaticNodePool[NodeIndex];
 	if (Node.State != EOctreeNodeState::Mixed)
 	{
-		return; // 리프 노드는 최적화 대상이 아님
+		return; 
 	}
-
-	// 자식들을 먼저 재귀적으로 최적화 (Post-order traversal)
+	
 	for (int i = 0; i < 8; ++i)
 	{
 		const int32 ChildNodeIndex = Node.ChildrenIndices[i];
@@ -546,9 +539,9 @@ void AOctreeVoxelVolume::OptimizeAndCollapse(int32 NodeIndex, const FBox& NodeBo
 		return;
 	}
 
-	// 모든 자식의 상태가 동일한지 확인
+	
 	const EOctreeNodeState FirstChildState = StaticNodePool[Node.ChildrenIndices[0]].State;
-	if (FirstChildState == EOctreeNodeState::Mixed) return; // 자식이 Mixed면 부모는 병합 불가
+	if (FirstChildState == EOctreeNodeState::Mixed) return;
 
 	bool bAllChildrenAreSame = true;
 	for (int i = 1; i < 8; ++i)
@@ -561,8 +554,7 @@ void AOctreeVoxelVolume::OptimizeAndCollapse(int32 NodeIndex, const FBox& NodeBo
 			break;
 		}
 	}
-
-	// 모두 같다면 부모 노드를 자식의 상태로 바꾸고, 자식들을 제거
+	
 	if (bAllChildrenAreSame)
 	{
 		Node.State = FirstChildState;
@@ -597,9 +589,9 @@ int32 AOctreeVoxelVolume::GetOctantContainingVoxel(const FBox& NodeBounds, const
 {
 	int32 Octant = 0;
 	const FVector Center = NodeBounds.GetCenter();
-	if (VoxelWorldPos.X >= Center.X) Octant |= 1; // 001
-	if (VoxelWorldPos.Y >= Center.Y) Octant |= 2; // 010
-	if (VoxelWorldPos.Z >= Center.Z) Octant |= 4; // 100
+	if (VoxelWorldPos.X >= Center.X) Octant |= 1; 
+	if (VoxelWorldPos.Y >= Center.Y) Octant |= 2; 
+	if (VoxelWorldPos.Z >= Center.Z) Octant |= 4; 
 	return Octant;
 }
 
@@ -627,7 +619,7 @@ void AOctreeVoxelVolume::SaveOctreeToAsset()
 	FString PackageName, AssetName;
 	if (!GetBakedAssetPath(PackageName, AssetName))
 	{
-		return; // 경로 생성 실패 시 중단
+		return;
 	}
 
 	UPackage* Package = CreatePackage(*PackageName);
@@ -656,7 +648,7 @@ void AOctreeVoxelVolume::SaveOctreeToAsset()
 	if (UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, true))
 	{
 		UE_LOG(LogTemp, Log, TEXT("Successfully saved Octree data to: %s.uasset"), *PackageName);
-		this->BakedOctreeData = NewOctreeData; // 자동으로 참조 할당
+		this->BakedOctreeData = NewOctreeData; 
 	}
 	else
 	{
@@ -664,10 +656,6 @@ void AOctreeVoxelVolume::SaveOctreeToAsset()
 	}
 }
 #endif
-
-//======================================================================
-// --- 동적 장애물 처리 구현 (AFenwickVoxelVolume에서 가져옴) ---
-//======================================================================
 
 void AOctreeVoxelVolume::InitializeDynamicLayer()
 {
@@ -722,7 +710,6 @@ void AOctreeVoxelVolume::GatherCurrentObstacleVoxels(TSet<FIntVector>& OutVoxelI
 
 		if (DynamicObjectFilter->DoesActorMatch(OverlappedActor, OverlappedComponent))
 		{
-			// --- 필터를 통과한 동적 오브젝트만 복셀화 진행 ---
 			const FBox ObstacleBounds = OverlappedComponent->Bounds.GetBox();
 			FIntVector MinVoxelIndex = WorldToVoxelIndex(ObstacleBounds.Min);
 			FIntVector MaxVoxelIndex = WorldToVoxelIndex(ObstacleBounds.Max - FVector(KINDA_SMALL_NUMBER));
@@ -787,13 +774,9 @@ void AOctreeVoxelVolume::UpdateDynamicVoxelState(const FIntVector& Index, bool b
 	}
 }
 
-//======================================================================
-// --- 쿼리 헬퍼 구현 ---
-//======================================================================
-
 bool AOctreeVoxelVolume::IsRegionEmpty_StaticOctree(const FBox& QueryBox) const
 {
-	if (RootNodeIndex == -1) return true; // 정적 레이어가 없으면 항상 비어있음
+	if (RootNodeIndex == -1) return true; 
 
 	const FBox VolumeBounds = GetComponentsBoundingBox(true, true);
 	return IsRegionEmptyRecursive(RootNodeIndex, VolumeBounds, QueryBox);
@@ -803,19 +786,19 @@ bool AOctreeVoxelVolume::IsRegionEmptyRecursive(int32 NodeIndex, const FBox& Nod
 {
 	if (!NodeBounds.Intersect(QueryBox))
 	{
-		return true; // 쿼리 영역과 겹치지 않음
+		return true;
 	}
 
-	if (!StaticNodePool.IsValidIndex(NodeIndex)) return true; // 잘못된 인덱스는 안전하게 처리
+	if (!StaticNodePool.IsValidIndex(NodeIndex)) return true;
 	const FOctreeNode& Node = StaticNodePool[NodeIndex];
 
 	if (Node.State == EOctreeNodeState::Solid)
 	{
-		return false; // 장애물 발견
+		return false; 
 	}
 	if (Node.State == EOctreeNodeState::Empty)
 	{
-		return true; // 이 노드 영역은 안전함
+		return true;
 	}
 
 	// Mixed 상태: 자식 노드 순회
@@ -826,7 +809,7 @@ bool AOctreeVoxelVolume::IsRegionEmptyRecursive(int32 NodeIndex, const FBox& Nod
 			const FBox ChildBounds = CalculateChildBounds(NodeBounds, i);
 			if (!IsRegionEmptyRecursive(Node.ChildrenIndices[i], ChildBounds, QueryBox))
 			{
-				return false; // 자식 중 하나에서 장애물 발견
+				return false;
 			}
 		}
 	}
@@ -836,7 +819,6 @@ bool AOctreeVoxelVolume::IsRegionEmptyRecursive(int32 NodeIndex, const FBox& Nod
 
 bool AOctreeVoxelVolume::IsRegionEmpty_DynamicGrid(const FIntVector& MinCorner, const FIntVector& MaxCorner) const
 {
-	// FThreadSafeBitmaskGrid에서 가져온 SIMD 최적화 버전 구현
 	const FIntVector ClampedMin(FMath::Max(MinCorner.X, 0), FMath::Max(MinCorner.Y, 0), FMath::Max(MinCorner.Z, 0));
 	const FIntVector ClampedMax(FMath::Min(MaxCorner.X, MapSize.X - 1), FMath::Min(MaxCorner.Y, MapSize.Y - 1),
 	                            FMath::Min(MaxCorner.Z, MapSize.Z - 1));

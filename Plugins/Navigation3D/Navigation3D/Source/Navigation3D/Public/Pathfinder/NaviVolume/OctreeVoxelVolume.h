@@ -41,6 +41,9 @@ public:
 	/** 동적 장애물 비트마스크의 복사본을 반환합니다. (스레드 안전) */
 	FORCEINLINE TArray<F128BitChunk> GetDynamicObstacleBitmask() const { return DynamicObstacleBitmask; }
 
+	TObjectPtr<UVoxelObstacleFilter> GetStaticObstacleFilter() const { return StaticObjectFilter;}
+	void SetStaticObstacleFilter(TObjectPtr<UVoxelObstacleFilter> Filter) {StaticObjectFilter=Filter;}
+	
 #if WITH_EDITOR
 	// 옥트리 베이킹 함수
 	virtual void BakeStaticData() override;
