@@ -10,8 +10,7 @@
 #include "Components/SphereComponent.h"
 #include "Pathfinder/NavVolume/OctreeVoxelVolume.h"
 #include "Engine/Engine.h" 
-
-#include "Pathfinder/Strategy/JPSPlusStrategy.h"
+#include "Pathfinder/Strategy/AStarStrategy.h"
 
 UPathfindingComponent::UPathfindingComponent()
 {
@@ -89,7 +88,6 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
     if (bRequestDataValid)
     {
         CurrentTargetLocation = TargetLocation;
-        FoundPath.Empty(); // 경로 초기화
 
     	CurrentRequestID = PathSubsystem->RequestPath(Request);
     	if (CurrentRequestID != -1)
@@ -416,8 +414,8 @@ void UPathfindingComponent::UpdateSteering(float DeltaTime)
 void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
                                           FActorComponentTickFunction* ThisTickFunction)
 {
+	
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
 	if (CurrentState == EPathfindingState::FollowPath)
 	{
 		if (!IsPathAheadValid())
@@ -491,37 +489,37 @@ void UPathfindingComponent::HandleVoxelPathResult(const TArray<FIntVector>& Path
 void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess)
 {
 	if (bSuccess && Path.Num() > 1)
-    {
-        
-        FoundPath = Path; 
-        FoundPathIndices.Empty();
-		
-		if (GetOwner() && FoundPath.Num() > 0)
-		{
-			FoundPath[0] = GetOwner()->GetActorLocation(); 
-		}
-		
-        CurrentPathDestinationIndex = 1;
-		bIsReachDestination = false;
-        CurrentState = EPathfindingState::FollowPath;
-		
-        if (PathSplinePtr.IsValid())
-        {
-            PathSplinePtr->ClearSplinePoints();
-            for (const FVector& Point : FoundPath)
-            {
-                PathSplinePtr->AddSplinePoint(Point, ESplineCoordinateSpace::World, false);
-            }
-            PathSplinePtr->UpdateSpline();
-            DistanceAlongSpline = 0.f;
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("PathSplinePtr is not valid. Cannot set up spline path."));
-        }
+	{
+		FoundPath.Empty();
+		FoundPath = Path;
+		FoundPathIndices.Empty();
 
-        GetWorld()->GetTimerManager().UnPauseTimer(PathOptimizationTimer);
-    }
+		bIsReachDestination = false;
+		CurrentState = EPathfindingState::FollowPath;
+
+		if (PathSplinePtr.IsValid())
+		{
+			PathSplinePtr->ClearSplinePoints();
+			for (const FVector& Point : FoundPath)
+			{
+				PathSplinePtr->AddSplinePoint(Point, ESplineCoordinateSpace::World, false);
+			}
+			PathSplinePtr->UpdateSpline();
+
+			const FVector CurrentLocation = GetOwner()->GetActorLocation();
+			const float ClosestInputKey = PathSplinePtr->FindInputKeyClosestToWorldLocation(CurrentLocation);
+			DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplineInputKey(ClosestInputKey);
+
+			int32 ClosestPointIndex = FMath::RoundToInt(ClosestInputKey);
+			CurrentPathDestinationIndex = FMath::Clamp(ClosestPointIndex + 1, 1, FoundPath.Num() - 1);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("PathSplinePtr is not valid. Cannot set up spline path."));
+		}
+
+		GetWorld()->GetTimerManager().UnPauseTimer(PathOptimizationTimer);
+	}
     else
     {
         UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed or path is too short."));
@@ -673,15 +671,19 @@ void UPathfindingComponent::InvalidatePathAndRequestRepath()
 
 	UE_LOG(LogTemp, Warning, TEXT("Path Invalidated! Stopping movement and scheduling a repath..."));
 
-	FoundPathIndices.Empty();
+	// Begin Test
+	//FoundPathIndices.Empty();
+	//GetWorld()->GetTimerManager().PauseTimer(PathOptimizationTimer);
 
-	GetWorld()->GetTimerManager().PauseTimer(PathOptimizationTimer);
+	//if (UWorld* World = GetWorld())
+	//{
+	//	OnRepathTimerFired();
+	//}
 
-	if (UWorld* World = GetWorld())
-	{
-		//subsystem에서 스케줄링 해줄거니까 repath 시간 둘 필요 없음
-		OnRepathTimerFired();
-	}
+
+	RequestPathToLocation(CurrentTargetLocation);
+
+	// End Test
 }
 
 void UPathfindingComponent::OnRepathTimerFired()

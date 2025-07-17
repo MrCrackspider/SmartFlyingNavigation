@@ -283,4 +283,7 @@ public:
 	FTimerHandle PathOptimizationTimer;
 
 #pragma endregion
+
+
+	uint32 TestValue = 0;
 };
