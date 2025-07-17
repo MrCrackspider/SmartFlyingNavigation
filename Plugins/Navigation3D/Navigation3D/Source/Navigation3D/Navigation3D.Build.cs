@@ -22,13 +22,7 @@ public class Navigation3D : ModuleRules
 			);
 			
 		
-		PublicDependencyModuleNames.AddRange(
-			new string[]
-			{
-				"Core",
-				// ... add other public dependencies that you statically link with here ...
-			}
-			);
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore" });
 			
 		
 		PrivateDependencyModuleNames.AddRange(
@@ -39,13 +33,11 @@ public class Navigation3D : ModuleRules
 				"Slate",
 				"SlateCore",
 				"UnrealEd",
-				"AssetTools",     // FAssetToolsModule, 에셋 생성/관리 기능
-				// ... add private dependencies that you statically link with here ...	
-				
-				"LevelEditor",    // 메뉴 등록 및 탭 스포너에 필요
+				"AssetTools", 
+				"PropertyEditor",
+				"LevelEditor",
 				"EditorStyle",
-				// ▼▼▼▼▼ 이 모듈을 반드시 추가해야 합니다. ▼▼▼▼▼
-				"WorkspaceMenuStructure",// FEditorStyle을 사용하기 위해 필요
+				"WorkspaceMenuStructure",
 				"InputCore"
 			}
 			);
