@@ -3,6 +3,7 @@
 
 #include "GameMode/EpicGameMode.h"
 #include "Pathfinder/Subsystem/PathfindingSubsystem.h"
+#include "Engine/Engine.h" // GEngine를 위해 필요
 #include "Engine/GameInstance.h"
 
 void AEpicGameMode::BeginPlay()
@@ -17,8 +18,8 @@ void AEpicGameMode::BeginPlay()
 
     
     //UPathfindingSubsystem* PathSubsystem = GameInstance->GetSubsystem<UPathfindingSubsystem>();
-	UPathfindingSubsystem* PathSubsystem = World->GetSubsystem<UPathfindingSubsystem>();
-    if (!PathSubsystem)
+    UPathfindingSubsystem* PathfindingSubsystem = GEngine->GetEngineSubsystem<UPathfindingSubsystem>();
+    if (!PathfindingSubsystem)
     {
         UE_LOG(LogTemp, Error, TEXT("PathfindingSubsystem is null!"));
         return;

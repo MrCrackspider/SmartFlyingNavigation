@@ -41,7 +41,7 @@ private:
 };
 
 UCLASS(Config=Game)
-class NAVIGATION3D_API UPathfindingSubsystem : public UWorldSubsystem, public FTickableGameObject
+class NAVIGATION3D_API UPathfindingSubsystem : public UEngineSubsystem, public FTickableGameObject
 {
 	GENERATED_BODY()
 

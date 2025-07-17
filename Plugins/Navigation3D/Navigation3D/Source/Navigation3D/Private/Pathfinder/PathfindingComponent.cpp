@@ -9,6 +9,7 @@
 #include "Components/BoxComponent.h"
 #include "Pathfinder/PathActor.h"
 #include "Pathfinder/NavVolume/OctreeVoxelVolume.h"
+#include "Engine/Engine.h" 
 
 #include "Pathfinder/Strategy/JPSPlusStrategy.h"
 
@@ -50,26 +51,8 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
     Request.AgentRadius = this->AgentRadius; // 월드 유닛 에이전트 반경
 	Request.Strategy = PathfindingStrategy;
     bool bRequestDataValid = false;
-
-    if (AOctreeVoxelVolume* GridVolume = Cast<AOctreeVoxelVolume>(TargetVolume))
-    {
-        // ----- 그리드 볼륨일 경우 -----
-        UE_LOG(LogTemp, Log, TEXT("Requesting path on a Grid Volume (Fenwick)."));
-
-        Request.NodeType = EPathfindingNodeType::Grid;
-    	Request.OnVoxelPathComplete.BindDynamic(this, &UPathfindingComponent::HandleVoxelPathResult);
- 
-        // FThreadSafeBitmaskGrid 스냅샷 생성
-        FThreadSafeBitmaskGrid GridData;
-        GridData.GridSize = GridVolume->MapSize;
-       // GridData = GridVolume->VoxelExtent; // VoxelSize도 복사
-        GridVolume->GetCombinedBitmask(GridData.ObstacleBitmasks); // 비트마스크 복사
-
-        // NavigationData에 그리드 데이터 스냅샷을 넣음
-        Request.NavigationData.Emplace<FThreadSafeBitmaskGrid>(MoveTemp(GridData));
-        bRequestDataValid = true;
-    }
-    else if (AOctreeVoxelVolume* OctreeVolume = Cast<AOctreeVoxelVolume>(TargetVolume))
+	
+    if (AOctreeVoxelVolume* OctreeVolume = Cast<AOctreeVoxelVolume>(TargetVolume))
     {
         // ----- 옥트리 볼륨일 경우 -----
         UE_LOG(LogTemp, Log, TEXT("Requesting path on an Octree Volume."));
@@ -340,7 +323,7 @@ void UPathfindingComponent::BeginPlay()
 	UWorld* World = GetWorld();
 	if (!ensure(World)) return;
 
-	PathSubsystem = World->GetSubsystem<UPathfindingSubsystem>();
+	PathSubsystem = GEngine->GetEngineSubsystem<UPathfindingSubsystem>();
 	AvoidanceSubsystem = World->GetSubsystem<UAvoidanceSubsystem>();
 
 	if (!ensure(PathSubsystem))

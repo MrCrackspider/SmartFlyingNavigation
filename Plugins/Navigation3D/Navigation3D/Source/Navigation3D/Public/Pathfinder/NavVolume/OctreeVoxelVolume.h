@@ -39,6 +39,8 @@ public:
 	/** 설정된 최대 옥트리 깊이를 반환합니다. */
 	FORCEINLINE int32 GetMaxOctreeDepth() const { return MaxOctreeDepth; }
 
+	FORCEINLINE void SetMaxOctreeDepth(int32 Depth) { MaxOctreeDepth = Depth; }
+	
 	/** 동적 장애물 비트마스크의 복사본을 반환합니다. (스레드 안전) */
 	FORCEINLINE TArray<F128BitChunk> GetDynamicObstacleBitmask() const { return DynamicObstacleBitmask; }
 
