@@ -46,6 +46,9 @@ public:
 
 	TObjectPtr<UVoxelObstacleFilter> GetStaticObstacleFilter() const { return StaticObjectFilter;}
 	void SetStaticObstacleFilter(TObjectPtr<UVoxelObstacleFilter> Filter) {StaticObjectFilter=Filter;}
+
+	TObjectPtr<UOctreeDataAsset> GetBakedOctreeData() {return BakedOctreeData;};
+	void SetBakedOctreeData(TObjectPtr<UOctreeDataAsset> NewData) {BakedOctreeData = NewData;}
 	
 #if WITH_EDITOR
 	// 옥트리 베이킹 함수

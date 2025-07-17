@@ -268,22 +268,19 @@ public:
 	UPROPERTY()
 	TObjectPtr<UPathfindingStrategy> PathfindingStrategy;
 
-	UPROPERTY()
+	UPROPERTY() 
 	TObjectPtr<UPathfindingSubsystem> PathSubsystem;
 
 	UPROPERTY()
 	TObjectPtr<UAvoidanceSubsystem> AvoidanceSubsystem;
-
+	
 	TWeakObjectPtr<USplineComponent> PathSplinePtr;
 
 	TFuture<TArray<FIntVector>> PathfindingTaskFuture;
 	FTimerHandle RepathCooldownTimer;
-
+	
 	/* 경로 최적화 검사를 위한 타이머 핸들 */
 	FTimerHandle PathOptimizationTimer;
 
 #pragma endregion
-
-
-	uint32 TestValue = 0;
 };

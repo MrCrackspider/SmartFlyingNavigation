@@ -2,6 +2,7 @@
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "Misc/ScopedSlowTask.h"
+#include "EditorAssetLibrary.h" 
 
 // 베이킹에 필요한 헤더
 #if WITH_EDITOR
@@ -304,23 +305,6 @@ void AOctreeVoxelVolume::BakeStaticData()
 {
 	Super::BakeStaticData();
 
-	if (!StaticObjectFilter)
-	{
-		const FText Title = FText::FromString(TEXT("Baking Confirmation"));
-
-		const FText Message = FText::FromString(
-			TEXT("The 'Static Object Filter' is not set.\n\nThe system will fall back to the default behavior: baking all 'WorldStatic' objects as permanent obstacles.\n\nIs this okay?")
-		);
-
-		if (FPlatformMisc::MessageBoxExt(EAppMsgType::YesNo, *Message.ToString(), *Title.ToString()) == EAppReturnType::No)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("Baking cancelled by user. Please set a 'Static Object Filter' to define what to bake."));
-			return; // Baking aborted
-		}
-	}
-
-	
-	
 	// --- 1. Prepare and scan for obstacles ---
 	TSet<FIntVector> AllStaticObstacles;
 	ScanForAllStaticObstacles(AllStaticObstacles);
@@ -620,26 +604,33 @@ bool AOctreeVoxelVolume::GetBakedAssetPath(FString& OutPackagePath, FString& Out
 		return false;
 	}
 
-	const FString BaseDirectory = BakedDataSaveDirectory.Path;
-	const FString DataDirectory = FPaths::Combine(BaseDirectory, TEXT("Data"));
-	const FString FinalDirectory = FPaths::Combine(DataDirectory, TEXT("Octree"));
-
+	// 1. 에셋 이름을 생성합니다. (이 부분은 좋습니다)
 	OutAssetName = FString::Printf(TEXT("DA_Octree_%s"), *GetActorLabel());
-	OutPackagePath = FPaths::Combine(FinalDirectory, OutAssetName);
+
+	// 2. UPROPERTY에 저장된 상대 경로("Woojae") 앞에 "/Game/"을 붙여
+	//    유효한 패키지 디렉토리 경로를 생성합니다.
+	const FString PackageDirectory = FPaths::Combine(TEXT("/Game"), BakedDataSaveDirectory.Path);
+	// 결과 예시: "/Game/Woojae"
+
+	// 3. 패키지 디렉토리와 에셋 이름을 결합하여 최종 패키지 경로를 만듭니다.
+	OutPackagePath = FPaths::Combine(PackageDirectory, OutAssetName);
+	// 결과 예시: "/Game/Woojae/DA_Octree_MyActor"
 
 	return true;
 }
 
-
 void AOctreeVoxelVolume::SaveOctreeToAsset()
 {
-	FString PackageName, AssetName;
-	if (!GetBakedAssetPath(PackageName, AssetName))
+	FString OutPackageName, AssetName;
+	if (!GetBakedAssetPath(OutPackageName, AssetName))
 	{
 		return;
 	}
+	
+	 FString DirectoryPath = FPaths::GetPath(OutPackageName);
+     UEditorAssetLibrary::MakeDirectory(DirectoryPath);
 
-	UPackage* Package = CreatePackage(*PackageName);
+	UPackage* Package = CreatePackage(*OutPackageName);
 	Package->FullyLoad();
 
 	UOctreeDataAsset* NewOctreeData = NewObject<UOctreeDataAsset>(
@@ -647,7 +638,7 @@ void AOctreeVoxelVolume::SaveOctreeToAsset()
 	);
 	if (!NewOctreeData)
 	{
-		UE_LOG(LogTemp, Error, TEXT("Failed to create new UOctreeDataAsset object for package: %s"), *PackageName);
+		UE_LOG(LogTemp, Error, TEXT("Failed to create new UOctreeDataAsset object for package: %s"), *OutPackageName);
 		return;
 	}
 	
@@ -664,12 +655,12 @@ void AOctreeVoxelVolume::SaveOctreeToAsset()
 
 	if (UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, true))
 	{
-		UE_LOG(LogTemp, Log, TEXT("Successfully saved Octree data to: %s.uasset"), *PackageName);
+		UE_LOG(LogTemp, Log, TEXT("Successfully saved Octree data to: %s.uasset"), *OutPackageName);
 		this->BakedOctreeData = NewOctreeData; 
 	}
 	else
 	{
-		UE_LOG(LogTemp, Error, TEXT("Failed to save Octree data package: %s"), *PackageName);
+		UE_LOG(LogTemp, Error, TEXT("Failed to save Octree data package: %s"), *OutPackageName);
 	}
 }
 #endif
