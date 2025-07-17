@@ -379,7 +379,7 @@ void SPathfindingTuner::OnMaxOctreeDepthCommitted(int32 NewValue, ETextCommit::T
 {
    // CachedOctreeVolume이 유효한지 확인합니다.
    if (CachedOctreeVolume.IsValid())
-   {
+   { 
       // GEditor가 유효한지 확인합니다.
       if (GEditor)
       {
