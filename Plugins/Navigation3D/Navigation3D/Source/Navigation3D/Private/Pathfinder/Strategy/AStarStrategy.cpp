@@ -278,8 +278,8 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 	}
 
 	OutPath.Empty();
-	OutPath.Add(RawPath[0]); // 수정된 실제 시작점 추가
-
+	OutPath.Add(RawPath[0]);
+	
 	int32 CurrentPointIndex = 0;
 	while (CurrentPointIndex < RawPath.Num() - 1)
 	{
@@ -289,14 +289,13 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 		{
 			if (HasLineOfSightWithRadius(OutPath.Last(), RawPath[LookAheadIndex]))
 			{
-				break; // 찾았다!
+				break;
 			}
 			LookAheadIndex--;
 		}
 		
-		OutPath.Add(RawPath[LookAheadIndex]); // 가시선이 확보된 가장 먼 지점을 경로에 추가
+		OutPath.Add(RawPath[LookAheadIndex]);
 		
-		// 만약 마지막 지점을 추가한 것이라면 루프를 종료합니다.
 		if (LookAheadIndex == RawPath.Num() - 1)
 		{
 			break;

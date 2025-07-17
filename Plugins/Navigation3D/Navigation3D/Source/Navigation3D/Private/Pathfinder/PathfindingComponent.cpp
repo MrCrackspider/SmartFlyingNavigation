@@ -7,7 +7,7 @@
 #include "Engine/World.h"
 #include "DrawDebugHelpers.h"
 #include "Components/BoxComponent.h"
-#include "Pathfinder/PathActor.h"
+#include "Components/SphereComponent.h"
 #include "Pathfinder/NavVolume/OctreeVoxelVolume.h"
 #include "Engine/Engine.h" 
 
@@ -19,7 +19,15 @@ UPathfindingComponent::UPathfindingComponent()
 
 	PathSplinePtr = CreateDefaultSubobject<USplineComponent>(TEXT("Spline"));
 
-	PathfindingStrategyClass = UJPSPlusStrategy::StaticClass();
+	PathfindingStrategyClass = UAStarStrategy::StaticClass();
+
+	DebugSphereComponent = CreateDefaultSubobject<USphereComponent>(TEXT("DebugAgentRadiusSphere"));
+
+	DebugSphereComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision); // 충돌 기능은 완전히 끕니다.
+	DebugSphereComponent->SetCanEverAffectNavigation(false); // 네비게이션에 영향을 주지 않도록 합니다.
+	DebugSphereComponent->bHiddenInGame = true; // 실제 게임에서는 숨깁니다. (플레이 시에는 Tick의 DrawDebugSphere가 그려줌)
+	DebugSphereComponent->SetSphereRadius(AgentRadius); // 초기 반지름을 AgentRadius로 설정합니다.
+	
 }
 
 bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
@@ -119,6 +127,26 @@ void UPathfindingComponent::SetTargetActor(AActor* NewTarget)
 // Avoidance Interface
 //======================================================================================
 
+#if WITH_EDITOR
+void UPathfindingComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+
+	// 변경된 프로퍼티의 이름을 가져옵니다.
+	const FName PropertyName = (PropertyChangedEvent.Property != nullptr) ? PropertyChangedEvent.Property->GetFName() : NAME_None;
+
+	// 변경된 프로퍼티가 'AgentRadius'가 맞는지 확인합니다.
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(UPathfindingComponent, AgentRadius))
+	{
+		if (DebugSphereComponent)
+		{
+			// DebugSphereComponent의 반지름을 새로운 AgentRadius 값으로 업데이트합니다.
+			DebugSphereComponent->SetSphereRadius(AgentRadius);
+		}
+	}
+}
+#endif
+
 FVector UPathfindingComponent::GetPreferredVelocity() const
 {
 	if (CurrentState != EPathfindingState::FollowPath || !GetOwner() || bIsReachDestination)
@@ -182,9 +210,7 @@ void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 	DistanceAlongSpline += ForwardDistance;
 	const float SplineLength = PathSplinePtr->GetSplineLength();
 	DistanceAlongSpline = FMath::Clamp(DistanceAlongSpline, 0.f, SplineLength);
-	// UE_LOG(LogTemp, Warning, TEXT("DistanceAlongSpline: %f"), DistanceAlongSpline);
 
-	//DistanceAlongSpline으로 현재 목표포인트인덱스 업데이트
 	if (!bIsReachDestination)
 	{
 		const FVector CurrentLocation = GetOwner()->GetActorLocation();
@@ -295,18 +321,13 @@ void UPathfindingComponent::CheckForPathOptimization()
 
 	// 2) FoundPathIndices 는 이미 voxel 인덱스 배열이니 그대로 사용
 	const TArray<FIntVector>& VoxPath = FoundPathIndices;
-
-	// 3) Agent 반경도 voxel 단위로
-	const int32 AgentRadiusInVoxels =
-		FMath::CeilToInt((AgentRadius / Volume->VoxelExtent) - 0.5f);
-
-	// 4) 호출!
+	
 	if (PathfindingStrategy->ShouldRepathForOptimization(
 			CurrentAgentVoxel,
 			VoxPath,
 			CurrentPathDestinationIndex,
 			GoalVoxel,
-			AgentRadiusInVoxels))
+			AgentRadius))
 	{
 		UE_LOG(LogTemp, Log, TEXT("Strategy suggests a shorter path → Requesting repath"));
 		RequestPathToLocation(CurrentTargetLocation);
@@ -322,7 +343,7 @@ void UPathfindingComponent::BeginPlay()
 
 	UWorld* World = GetWorld();
 	if (!ensure(World)) return;
-
+	
 	PathSubsystem = GEngine->GetEngineSubsystem<UPathfindingSubsystem>();
 	AvoidanceSubsystem = World->GetSubsystem<UAvoidanceSubsystem>();
 
@@ -354,6 +375,15 @@ void UPathfindingComponent::BeginPlay()
 	if (TargetVolume)
 	{
 		TargetVolume->RegisterStreamingAgent(GetOwner());
+	}
+}
+void UPathfindingComponent::OnRegister()
+{
+	Super::OnRegister();
+	
+	if (DebugSphereComponent && GetOwner() && GetOwner()->GetRootComponent())
+	{
+		DebugSphereComponent->AttachToComponent(GetOwner()->GetRootComponent(), FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 	}
 }
 
@@ -390,10 +420,6 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 
 	if (CurrentState == EPathfindingState::FollowPath)
 	{
-		// 1) 먼저 로컬 스티어링 / 위치 업데이트
-		//UpdateSteering(DeltaTime);
-
-		// 2) 경로가 물리적으로 막혔는지 체크 (동적 장애물)
 		if (!IsPathAheadValid())
 		{
 			UE_LOG(LogTemp, Warning, TEXT("Dynamic obstacle is on path. Start Repath"));
@@ -401,14 +427,27 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 			return;
 		}
 
-		// 3) 전략 기반 최적화 재탐색 제안
 		CheckForPathOptimization();
 	}
-
 	
-	if (PathfindingTaskFuture.IsValid()) //thread돌아가는지 확인
+	if (PathfindingTaskFuture.IsValid())
 	{
 		HandlePathfindingResult();
+	}
+	
+	if (bShowAgentRadius && GetOwner())
+	{
+		DrawDebugSphere(
+			GetWorld(),
+			GetOwner()->GetActorLocation(),
+			AgentRadius,
+			24,
+			FColor::Green,
+			false,
+			-1.f,
+			0,
+			1.f 
+		);
 	}
 }
 
@@ -711,17 +750,12 @@ bool UPathfindingComponent::IsSplinePathSafe() const
 	ObjectQueryParams.AddObjectTypesToQuery(ECollisionChannel::ECC_WorldDynamic);
 	ObjectQueryParams.AddObjectTypesToQuery(ECollisionChannel::ECC_PhysicsBody);
 
-	//현재 포인트부터 다음포인트까지 훑어야 하기 때문에 0~SplineLength가 아니라 현재포인트Distance~ 다음포인트 Distance까지 해야함.
-
 	const float CurrentDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex - 1);
 	const float NextDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex);
 
-	// UE_LOG(LogTemp, Warning, TEXT("CurrentDistance: %f, NextDistance: %f"), CurrentDistance, NextDistance);
-
+	
 	for (float Distance = CurrentDistance; Distance < NextDistance; Distance += SafetyCheckStepSize)
 	{
-		// UE_LOG(LogTemp, Warning, TEXT("Checking... Distance: %f"), Distance);
-		
 		FVector StartPoint = PathSplinePtr->GetLocationAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World);
 		FVector EndPoint = PathSplinePtr->GetLocationAtDistanceAlongSpline(
 			FMath::Min(Distance + SafetyCheckStepSize, SplineLength), ESplineCoordinateSpace::World);

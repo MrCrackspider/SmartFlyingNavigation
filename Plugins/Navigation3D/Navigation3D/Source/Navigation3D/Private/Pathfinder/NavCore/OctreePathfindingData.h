@@ -105,84 +105,72 @@ private:
 		);
 	}
 
-	  bool IntersectsCapsule(const FBox& Box, const FVector& Start, const FVector& End, float Radius) const
-    {
-        // 1. AABB(Box)에서 캡슐의 중심선(Start-End)에 가장 가까운 점(ClosestPointOnBox)을 찾습니다.
-        //    FBox::GetClosestPointTo()는 주어진 점에 대해 박스 내에서 가장 가까운 점을 반환합니다.
-        //    먼저 캡슐 라인 세그먼트에서 박스 중심에 가장 가까운 점을 찾고,
-        //    그 다음 그 점에서 박스에 가장 가까운 점을 찾습니다.
-        const FVector PointOnSegment = FMath::ClosestPointOnSegment(Box.GetCenter(), Start, End);
-        const FVector ClosestPointOnBox = Box.GetClosestPointTo(PointOnSegment);
+	bool IntersectsCapsule(const FBox& Box, const FVector& Start, const FVector& End, float Radius) const
+	{
+		const FVector PointOnSegment = FMath::ClosestPointOnSegment(Box.GetCenter(), Start, End);
+		const FVector ClosestPointOnBox = Box.GetClosestPointTo(PointOnSegment);
 
-        // 2. ClosestPointOnBox와 캡슐 중심선 사이의 제곱 거리를 계산합니다.
-        const float DistSq = FMath::PointDistToSegmentSquared(ClosestPointOnBox, Start, End);
+		const float DistSq = FVector::DistSquared(ClosestPointOnBox, PointOnSegment);
 
-        // 3. 그 거리가 캡슐의 반지름 제곱보다 작거나 같으면 교차(충돌)한 것입니다.
-        return DistSq <= (Radius * Radius);
-    }
+		return DistSq <= (Radius * Radius);
+	}
+	
+	bool CheckForSolidNodesInCapsuleRecursive(int32 NodeIndex, const FVector& Start, const FVector& End,
+	                                          float Radius) const
+	{
+		if (!StaticNodePool.IsValidIndex(NodeIndex))
+		{
+			return false;
+		}
 
-    /**
-     * 캡슐과 충돌하는 Solid 노드가 있는지 Octree를 재귀적으로 탐색합니다.
-     * @param NodeIndex 현재 탐색 중인 노드의 인덱스
-     * @param Start 캡슐의 시작점
-     * @param End 캡슐의 끝점
-     * @param Radius 캡슐의 반지름
-     * @return 충돌하는 노드를 찾으면 true, 아니면 false
-     */
-    bool CheckForSolidNodesInCapsuleRecursive(int32 NodeIndex, const FVector& Start, const FVector& End, float Radius) const
-    {
-        if (!StaticNodePool.IsValidIndex(NodeIndex))
-        {
-            return false;
-        }
+		const FOctreeNode& Node = StaticNodePool[NodeIndex];
+		const FBox& NodeBounds = GetNodeBounds(NodeIndex);
 
-        const FOctreeNode& Node = StaticNodePool[NodeIndex];
-        const FBox& NodeBounds = GetNodeBounds(NodeIndex);
+		// 1. [가지치기] 현재 노드의 경계(NodeBounds)가 캡슐과 교차하지 않으면,
+		//    이 노드와 모든 자식 노드는 더 이상 검사할 필요가 없습니다.
+		if (!IntersectsCapsule(NodeBounds, Start, End, Radius))
+		{
+			return false;
+		}
 
-        // 1. [가지치기] 현재 노드의 경계(NodeBounds)가 캡슐과 교차하지 않으면,
-        //    이 노드와 모든 자식 노드는 더 이상 검사할 필요가 없습니다.
-        if (!IntersectsCapsule(NodeBounds, Start, End, Radius))
-        {
-            return false;
-        }
+		// 2. [충돌 검사] 현재 노드가 리프 노드인 경우
+		if (Node.State != EOctreeNodeState::Mixed)
+		{
+			// 2a. 정적 'Solid' 노드와 충돌했습니다.
+			if (Node.State == EOctreeNodeState::Solid)
+			{
+				return true; // 충돌!
+			}
 
-        // 2. [충돌 검사] 현재 노드가 리프 노드인 경우
-        if (Node.State != EOctreeNodeState::Mixed)
-        {
-            // 2a. 정적 'Solid' 노드와 충돌했습니다.
-            if (Node.State == EOctreeNodeState::Solid)
-            {
-                return true; // 충돌!
-            }
-            
-            // 2b. 'Empty' 노드이지만, 동적 장애물에 의해 막혔을 수 있습니다.
-            //     캡슐이 이 노드와 교차하므로, 이 노드 영역 전체를 검사합니다.
-            if (IsRegionDynamicallyBlocked(NodeBounds))
-            {
-                return true; // 충돌!
-            }
+			// 2b. 'Empty' 노드이지만, 동적 장애물에 의해 막혔을 수 있습니다.
+			//     캡슐이 이 노드와 교차하므로, 이 노드 영역 전체를 검사합니다.
+			if (IsRegionDynamicallyBlocked(NodeBounds))
+			{
+				return true; // 충돌!
+			}
 
-            // 'Empty'이고 동적으로도 막히지 않았으므로 이 경로는 안전합니다.
-            return false;
-        }
+			// 'Empty'이고 동적으로도 막히지 않았으므로 이 경로는 안전합니다.
+			return false;
+		}
 
-        // 3. [재귀 탐색] 현재 노드가 'Mixed' 노드인 경우, 8개의 자식 노드에 대해 재귀적으로 검사를 계속합니다.
-        for (int32 i = 0; i < 8; ++i)
-        {
-            const int32 ChildIndex = Node.ChildrenIndices[i];
-            if (ChildIndex != -1)
-            {
-                // 자식 노드 중 하나라도 충돌을 감지하면, 즉시 true를 반환하여 탐색을 중단합니다.
-                if (CheckForSolidNodesInCapsuleRecursive(ChildIndex, Start, End, Radius))
-                {
-                    return true;
-                }
-            }
-        }
+		// 3. [재귀 탐색] 현재 노드가 'Mixed' 노드인 경우, 8개의 자식 노드에 대해 재귀적으로 검사를 계속합니다.
+		for (int32 i = 0; i < 8; ++i)
+		{
+			const int32 ChildIndex = Node.ChildrenIndices[i];
+			if (ChildIndex != -1)
+			{
+				// 자식 노드 중 하나라도 충돌을 감지하면, 즉시 true를 반환하여 탐색을 중단합니다.
+				if (CheckForSolidNodesInCapsuleRecursive(ChildIndex, Start, End, Radius))
+				{
+					return true;
+				}
+			}
+		}
 
-        // 모든 자식 노드를 검사했지만 충돌이 없었습니다.
-        return false;
-    }
+		// 모든 자식 노드를 검사했지만 충돌이 없었습니다.
+		return false;
+	}
+
 	void FindLeavesInBoxRecursive(TArray<int32>& OutLeaves, int32 NodeIndex, const FBox& QueryBox) const
 	{
 		if (!StaticNodePool.IsValidIndex(NodeIndex)) return;
@@ -213,6 +201,7 @@ private:
 			}
 		}
 	}
+
 public:
 	// --- 공개 API 함수 구현 ---
 
@@ -229,7 +218,7 @@ public:
 		// 루트 노드부터 재귀적인 탐색을 시작합니다.
 		return CheckForSolidNodesInCapsuleRecursive(RootNodeIndex, Start, End, Radius);
 	}
-	
+
 	/** 월드 좌표를 포함하는 리프 노드의 인덱스를 찾습니다. */
 	int32 FindLeafNodeAt(const FVector& WorldPos) const
 	{
@@ -262,13 +251,13 @@ public:
 	FBox GetNodeBounds(int32 NodeIndex) const
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(Octree_GetNodeBounds);
-    
+
 		if (!StaticNodePool.IsValidIndex(NodeIndex))
 		{
 			return FBox(ForceInit);
 		}
-		
-		return StaticNodePool[NodeIndex].Bounds; 
+
+		return StaticNodePool[NodeIndex].Bounds;
 	}
 
 	/** 특정 노드와 인접한 모든 'Empty' 리프 노드를 찾습니다. */
@@ -316,7 +305,7 @@ public:
 	bool IsRegionDynamicallyBlocked(const FBox& QueryBox) const
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(Octree_IsRegionDynamicallyBlocked);
-		
+
 		const FIntVector MinCorner = WorldToVoxelIndex(QueryBox.Min);
 		// Max 코너는 복셀의 끝 지점까지 포함해야 하므로 1을 뺀 인덱스를 사용
 		const FIntVector MaxCorner = WorldToVoxelIndex(QueryBox.Max - FVector(KINDA_SMALL_NUMBER));
@@ -395,7 +384,7 @@ public:
 		{
 			const float CurrentRadius = InitialSearchRadius * i;
 			const FBox SearchBox(Origin - FVector(CurrentRadius), Origin + FVector(CurrentRadius));
-		
+
 			TArray<int32> CandidateLeaves;
 			FindLeavesInBoxRecursive(CandidateLeaves, RootNodeIndex, SearchBox);
 
@@ -424,7 +413,7 @@ public:
 				return BestNodeIndex;
 			}
 		}
-		
+
 		return -1;
 	}
 };
