@@ -26,6 +26,8 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     SolverIterations = 5;
     SideBiasMagnitude = 1.f;
     InterpSpeed = 10.f;
+
+    bShowVelocityDebugLine = true;
 }
 
 void UAvoidanceSubsystem::PostInitialize()
@@ -144,7 +146,10 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
                     Agent->SetMovementMode(EPathMovementMode::Linear);
                 }
 
-                DebugVisualizeVelocities(Agent, ResultPair.Value, FinalVelocity);
+                if (bShowVelocityDebugLine)
+                {
+                    DebugVisualizeVelocities(Agent, ResultPair.Value, FinalVelocity);
+                }
             }
         }
 
@@ -177,6 +182,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
                 AgentDataForThread.Emplace(FAgentThreadData{
                     AgentComponent->GetUniqueID(),
                     AgentComponent->GetOwner()->GetActorLocation(),
+                    AgentComponent->GetOwner()->GetActorUpVector(),
                     AgentComponent->GetCurrentVelocity(),
                     AgentComponent->GetPreferredVelocity(),
                     AgentComponent->GetAvoidanceRadius(),
@@ -430,7 +436,7 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
         {
             bShouldYield = true;
         }
-        else if (FMath::IsNearlyEqual(CurrentAgent.AvoidanceRadius, ObstacleAgent->AvoidanceRadius) && CurrentAgent.UniqueID > ObstacleAgent->UniqueID)
+        else if (FMath::IsNearlyEqual(CurrentAgent.AvoidanceRadius, ObstacleAgent->AvoidanceRadius) && CurrentAgent.PreferredVelocity.Size() > ObstacleAgent->PreferredVelocity.Size())
         {
             bShouldYield = true;
         }
@@ -438,19 +444,17 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
 
     if (bShouldYield)
     {
+        //FVector ForwardVec = ObstacleAgent->CurrentVelocity.GetSafeNormal();
         FVector ForwardVec = PreferredVelocity.GetSafeNormal();
-        FVector SideVector = FVector::CrossProduct(ForwardVec, FVector::UpVector);
-        if (SideVector.IsNearlyZero())
-        {
-            SideVector = FVector::CrossProduct(ForwardVec, FVector::RightVector);
-        }
+        FVector UpVector = ObstacleAgent->UpVector;
+        FVector SideVector = FVector::CrossProduct(ForwardVec, UpVector);
         SideVector.Normalize();
 
         // bCanPass
-        //FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
-        //return ActualPreferredVelocity.GetSafeNormal() * CurrentAgent.MovementSpeed;
-        FVector ActualPreferredVelocity = SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
-        return ActualPreferredVelocity;
+        FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
+        return ActualPreferredVelocity.GetSafeNormal() * CurrentAgent.MovementSpeed;
+        //FVector ActualPreferredVelocity = SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
+        //return ActualPreferredVelocity;
     }
 
     return PreferredVelocity;

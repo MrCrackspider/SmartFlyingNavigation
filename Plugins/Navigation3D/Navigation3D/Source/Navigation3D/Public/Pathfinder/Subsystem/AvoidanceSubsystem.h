@@ -12,6 +12,7 @@ struct FAgentThreadData
 {
     uint32 AgentId;
     FVector Position;
+    FVector UpVector;
     FVector CurrentVelocity;
     FVector PreferredVelocity;
     float AvoidanceRadius;
@@ -96,5 +97,8 @@ private:
     bool bIsTaskRunning;
 
     FVector SolveOptimalVelocity(const TArray<FPlane>& Constraints, const FVector& PreferredVelocity) const;
+
+    bool bShowVelocityDebugLine;
     void DebugVisualizeVelocities(const UPathfindingComponent* Agent, const FThreadAvoidanceResult& Result, const FVector& FinalOptimalVelocity) const;
+
 };
