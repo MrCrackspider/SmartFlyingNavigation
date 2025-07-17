@@ -264,6 +264,14 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 	}
 	Algo::Reverse(RawPath);
 
+	if (RawPath.Num() <= 1)
+	{
+		OutPath.Empty();
+		OutPath.Add(ActualStartLocation);
+		OutPath.Add(ActualGoalLocation);
+		return;
+	}
+	
 	RawPath[0] = ActualStartLocation;
 
 	if (HasLineOfSightWithRadius(RawPath.Last(), ActualGoalLocation))
