@@ -446,11 +446,11 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
         }
         SideVector.Normalize();
 
-        FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
-        return ActualPreferredVelocity.GetSafeNormal() * CurrentAgent.MovementSpeed;
-
-        //FVector ActualPreferredVelocity = SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
-        //return ActualPreferredVelocity;
+        // bCanPass
+        //FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
+        //return ActualPreferredVelocity.GetSafeNormal() * CurrentAgent.MovementSpeed;
+        FVector ActualPreferredVelocity = SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
+        return ActualPreferredVelocity;
     }
 
     return PreferredVelocity;

@@ -100,7 +100,7 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("RequestPathToLocation failed: TargetVolume is not a supported type (Fenwick or Octree)."));
+        UE_LOG(LogTemp, Error, TEXT("RequestPathToLocation failed: TargetVolume is not a supported type (Octree)."));
     }
 
     return false;
@@ -780,8 +780,8 @@ bool UPathfindingComponent::IsSplinePathSafe() const
 
 bool UPathfindingComponent::IsPathAheadValid() const
 {
-	AFenwickVoxelVolume* FenwickVolume = Cast<AFenwickVoxelVolume>(TargetVolume);
-	if (!FenwickVolume || FoundPathIndices.Num() < 2 || CurrentPathDestinationIndex < 0 || CurrentPathDestinationIndex
+	AOctreeVoxelVolume* OctreeVoxelVolume = Cast<AOctreeVoxelVolume>(TargetVolume);
+	if (!OctreeVoxelVolume || FoundPathIndices.Num() < 2 || CurrentPathDestinationIndex < 0 || CurrentPathDestinationIndex
 		>= FoundPathIndices.
 		Num() - 1)
 	{
@@ -797,7 +797,7 @@ bool UPathfindingComponent::IsPathAheadValid() const
 	                                        FoundPathIndices.Num() - 2);
 	for (int32 i = CurrentPathDestinationIndex; i <= LastCheckIndex; ++i)
 	{
-		if (!FenwickVolume->IsRegionWalkable(FoundPathIndices[i], AgentRadiusInVoxels))
+		if (!OctreeVoxelVolume->IsRegionWalkable(FoundPathIndices[i], AgentRadiusInVoxels))
 		{
 			UE_LOG(LogTemp, Warning,
 			       TEXT("Path Invalidated: A future path segment (from waypoint %d to %d) is blocked!"), i, i + 1);

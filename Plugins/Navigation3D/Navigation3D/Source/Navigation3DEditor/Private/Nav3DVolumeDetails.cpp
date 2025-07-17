@@ -3,8 +3,12 @@
 #include "DetailWidgetRow.h"
 #include "DetailCategoryBuilder.h"
 #include "PropertyEditorModule.h"
-#include "Pathfinder/NavVolume/FenwickVoxelVolume.h"
+// Begin Test
+//#include "Pathfinder/NavVolume/FenwickVoxelVolume.h"
+#include "Pathfinder/NavVolume/OctreeVoxelVolume.h"
+// End Test
 
+// End Test
 TSharedRef<IDetailCustomization> FNav3DVolumeDetails::MakeInstance()
 {
 	return MakeShareable(new FNav3DVolumeDetails);
@@ -16,13 +20,18 @@ void FNav3DVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
     IDetailCategoryBuilder& DebuggingCategory = DetailBuilder.EditCategory("Debugging", FText::GetEmpty(), ECategoryPriority::Important);
 
     // "Volume Setup" 카테고리에 핸들을 이용해 프로퍼티들을 추가(재배치)합니다.
-    VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AFenwickVoxelVolume, VoxelExtent));
-    VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AFenwickVoxelVolume, MapSize));
+	// Begin Test
+    VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AOctreeVoxelVolume, VoxelExtent));
+    VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AOctreeVoxelVolume, MapSize));
+    VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AOctreeVoxelVolume, DebugOctreeMaxDepth));
+    //VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AFenwickVoxelVolume, VoxelExtent));
+    //VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AFenwickVoxelVolume, MapSize));
     // VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AFenwickVoxelVolume, VolumeBoundsVisualizer));
     // VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AFenwickVoxelVolume, VisualVolumeMeshAsset));
     // VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AFenwickVoxelVolume, BakedDataSaveDirectory));
     // VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AFenwickVoxelVolume, StreamingRangeInChunks));
-	
+	// End Test
+
 	TArray<TWeakObjectPtr<UObject>> SelectedObjects;
 	DetailBuilder.GetObjectsBeingCustomized(SelectedObjects);
 	
@@ -30,7 +39,7 @@ void FNav3DVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
 	{
 		for (const TWeakObjectPtr<UObject>& SelectedObject : SelectedObjects)
 		{
-			if (AFenwickVoxelVolume* Volume = Cast<AFenwickVoxelVolume>(SelectedObject.Get()))
+			if (AOctreeVoxelVolume* Volume = Cast<AOctreeVoxelVolume>(SelectedObject.Get()))
 			{
 				Volume->BakeStaticData();
 			}
@@ -52,7 +61,7 @@ void FNav3DVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
 		.OnClicked_Lambda(OnRequestPathClicked) // 람다함수를 버튼 클릭 이벤트에 바인딩
 	];
 
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AFenwickVoxelVolume, bDrawDebugBox));
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AFenwickVoxelVolume, BakeExcludeActors));
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AOctreeVoxelVolume, bDrawDebugBox));
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AOctreeVoxelVolume, BakeExcludeActors));
 	
 }

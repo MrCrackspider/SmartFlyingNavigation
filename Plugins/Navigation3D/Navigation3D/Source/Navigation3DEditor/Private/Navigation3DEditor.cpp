@@ -1,7 +1,10 @@
 #include "Navigation3DEditor.h"
 #include "PropertyEditorModule.h"
-#include "Pathfinder/PathfindingComponent.h"
-#include "Pathfinder/NavVolume/FenwickVoxelVolume.h" // Begin Test
+#include "Pathfinder/PathfindingComponent.h" 
+// Begin Test
+//#include "Pathfinder/NavVolume/FenwickVoxelVolume.h"
+#include "Pathfinder/NavVolume/OctreeVoxelVolume.h" 
+// End Test
 #include "Nav3DPathfindingDetails.h"
 #include "Nav3DVolumeDetails.h"
 
@@ -19,7 +22,7 @@ void FNavigation3DEditorModule::StartupModule()
 	);
 
 	PropertyModule.RegisterCustomClassLayout(
-		AFenwickVoxelVolume::StaticClass()->GetFName(),
+		AOctreeVoxelVolume::StaticClass()->GetFName(),
 		FOnGetDetailCustomizationInstance::CreateStatic(&FNav3DVolumeDetails::MakeInstance)
 	);
 	
@@ -35,7 +38,7 @@ void FNavigation3DEditorModule::ShutdownModule()
 
 		//클래스에 등록했던 커스텀 레이아웃 해제
 		PropertyModule.UnregisterCustomClassLayout(UPathfindingComponent::StaticClass()->GetFName());
-		PropertyModule.UnregisterCustomClassLayout(AFenwickVoxelVolume::StaticClass()->GetFName());
+		PropertyModule.UnregisterCustomClassLayout(AOctreeVoxelVolume::StaticClass()->GetFName());
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("Navigation3DEditor Module has shutdown"));
