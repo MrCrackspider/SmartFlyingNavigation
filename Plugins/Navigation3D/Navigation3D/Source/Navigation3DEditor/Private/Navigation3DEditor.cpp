@@ -1,6 +1,7 @@
 #include "Navigation3DEditor.h"
 #include "PropertyEditorModule.h"
 #include "Pathfinder/PathfindingComponent.h"
+#include "Pathfinder/NavVolume/FenwickVoxelVolume.h" // Begin Test
 #include "Nav3DPathfindingDetails.h"
 #include "Nav3DVolumeDetails.h"
 

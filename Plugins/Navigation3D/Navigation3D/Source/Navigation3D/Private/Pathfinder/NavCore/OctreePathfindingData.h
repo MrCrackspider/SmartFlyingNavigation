@@ -1,6 +1,8 @@
 ﻿#pragma once
-#include "Pathfinder/StaticVoxelChunkData.h"
-#include "Pathfinder/NaviDataAssets/OctreeDataAsset.h"
+
+#include "CoreMinimal.h" // Begin Test
+#include "Pathfinder/NavData/StaticVoxelChunkData.h"
+#include "Pathfinder/NavData/OctreeDataAsset.h"
 
 struct FOctreePathfindingData
 {

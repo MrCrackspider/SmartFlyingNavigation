@@ -7,7 +7,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Navigation3D/DynamicObstacle.h"
+#include "Pathfinder/DynamicObstacle.h"
 #include "VoxelVolumeBase.generated.h"
 
 class UBoxComponent;

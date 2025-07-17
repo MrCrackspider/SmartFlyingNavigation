@@ -1,7 +1,7 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "VoxelObstacleFilter.h"
+#include "Pathfinder/NavData/VoxelObstacleFilter.h"
 #include "GameplayTagAssetInterface.h"
 #include "Components/PrimitiveComponent.h"
 

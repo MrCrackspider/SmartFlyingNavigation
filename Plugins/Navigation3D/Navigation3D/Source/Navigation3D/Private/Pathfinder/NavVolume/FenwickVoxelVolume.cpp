@@ -1,5 +1,5 @@
-﻿#include "Pathfinder/FenwickVoxelVolume.h"
-#include "Pathfinder/StaticVoxelChunkData.h"
+﻿#include "Pathfinder/NavVolume/FenwickVoxelVolume.h"
+#include "Pathfinder/NavData/StaticVoxelChunkData.h"
 #include "Pathfinder/PathfindingComponent.h"
 
 #include "Engine/LevelStreamingDynamic.h"

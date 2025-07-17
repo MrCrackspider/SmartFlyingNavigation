@@ -3,9 +3,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "VoxelVolumeBase.h"
-#include "Pathfinder/StaticVoxelChunkData.h"
-#include "Pathfinder/NaviDataAssets/OctreeDataAsset.h"
+#include "Pathfinder/NavVolume/VoxelVolumeBase.h"
+#include "Pathfinder/NavData/StaticVoxelChunkData.h"
+#include "Pathfinder/NavData/OctreeDataAsset.h"
 #include "OctreeVoxelVolume.generated.h"
 class UVoxelObstacleFilter;
 
@@ -149,4 +149,24 @@ private:
 	TArray<F128BitChunk> DynamicObstacleBitmask;
 	TSet<FIntVector> CurrentDynamicObstacles;
 	FTimerHandle DynamicObstacleTimer;
+
+
+
+	// Begin Test
+
+	/**
+	 * Uses bitmasks to perform a very fast check if a region contains any obstacles.
+	 * This is a broad-phase check; a `false` return means the region *might* have an obstacle,
+	 * while `true` guarantees it is empty.
+	 */
+
+public:
+	void GetCombinedBitmask(TArray<F128BitChunk>& CombinedBitmask) const;
+
+	/** Bitmasks for fast obstacle checks, organized with X-axis as the inner loop. */
+	TArray<F128BitChunk> StaticObstacleBitmask;
+
+
+	// End Test
+
 };

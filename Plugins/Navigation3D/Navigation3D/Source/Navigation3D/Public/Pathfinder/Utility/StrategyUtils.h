@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Pathfinder/FenwickVoxelVolume.h"
+#include "Pathfinder/NavVolume/FenwickVoxelVolume.h"
 #include "StrategyUtils.generated.h"
 
 

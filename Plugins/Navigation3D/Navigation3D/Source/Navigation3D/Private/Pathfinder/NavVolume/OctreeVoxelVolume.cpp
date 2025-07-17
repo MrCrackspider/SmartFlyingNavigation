@@ -1,4 +1,4 @@
-﻿#include "Pathfinder/NaviVolume/OctreeVoxelVolume.h"
+﻿#include "Pathfinder/NavVolume/OctreeVoxelVolume.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "Misc/ScopedSlowTask.h"
@@ -16,7 +16,7 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Pathfinder/PathfindingComponent.h"
-
+#include "Pathfinder/NavData/VoxelObstacleFilter.h"
 
 AOctreeVoxelVolume::AOctreeVoxelVolume()
 {
@@ -879,4 +879,23 @@ bool AOctreeVoxelVolume::IsRegionEmpty_DynamicGrid(const FIntVector& MinCorner, 
 		}
 	}
 	return true;
+}
+
+void AOctreeVoxelVolume::GetCombinedBitmask(TArray<F128BitChunk>& CombinedBitmask) const
+{
+	CombinedBitmask.Empty();
+
+	if (StaticObstacleBitmask.Num() == DynamicObstacleBitmask.Num())
+	{
+		CombinedBitmask = StaticObstacleBitmask;
+		const TArray<F128BitChunk>& DynamicBitmask = DynamicObstacleBitmask;
+
+		for (int32 i = 0; i < CombinedBitmask.Num(); ++i)
+		{
+			// SIMD를 사용하여 OR 연산을 수행합니다.
+			const __m128i StaticData = _mm_load_si128(reinterpret_cast<const __m128i*>(&CombinedBitmask[i]));
+			const __m128i DynamicData = _mm_load_si128(reinterpret_cast<const __m128i*>(&DynamicBitmask[i]));
+			_mm_store_si128(reinterpret_cast<__m128i*>(&CombinedBitmask[i]), _mm_or_si128(StaticData, DynamicData));
+		}
+	}
 }

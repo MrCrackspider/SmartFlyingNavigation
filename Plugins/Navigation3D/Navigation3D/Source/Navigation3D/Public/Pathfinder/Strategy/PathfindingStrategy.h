@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Pathfinder/PathfindingRequest.h"
+#include "Pathfinder/Utility/Parallel/PathfindingRequest.h"
 #include "PathfindingStrategy.generated.h"
 
 class UPathfindingSubsystem;

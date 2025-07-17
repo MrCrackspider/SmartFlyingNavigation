@@ -1,7 +1,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "FenwickVoxelVolume.h"
 #include "Components/ActorComponent.h"
 #include "PathfindingComponent.generated.h"
 

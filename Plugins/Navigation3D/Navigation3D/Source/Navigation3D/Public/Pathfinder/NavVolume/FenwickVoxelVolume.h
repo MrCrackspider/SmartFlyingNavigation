@@ -3,10 +3,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UniformGridVolume.h"
-#include "StaticVoxelChunkData.h"
+#include "Pathfinder/NavVolume/UniformGridVolume.h"
+#include "Pathfinder/NavData/StaticVoxelChunkData.h"
 #include "Containers/BitArray.h"
-#include "Navigation3D/VoxelObstacleFilter.h"
+#include "Pathfinder/NavData/VoxelObstacleFilter.h"
 #include "FenwickVoxelVolume.generated.h"
 
 class AChunkDataHolder;

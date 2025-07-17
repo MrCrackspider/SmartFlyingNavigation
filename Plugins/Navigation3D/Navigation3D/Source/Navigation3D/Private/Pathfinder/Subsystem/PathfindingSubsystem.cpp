@@ -1,9 +1,9 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
-#include "Pathfinder/PathfindingSubsystem.h"
+#include "Pathfinder/Subsystem/PathfindingSubsystem.h"
 #include "Pathfinder/Strategy/PathfindingStrategy.h"
 #include "Pathfinder/Utility/StrategyUtils.h"
-#include "Pathfinder/Utility/MemoryPool.h"
+#include "Pathfinder/Utility/Parallel/MemoryPool.h"
 #include "Pathfinder/Utility/AStarStrategyUtils.h"
 
 void FPathfindingAsyncTasks::DoThreadedWork()

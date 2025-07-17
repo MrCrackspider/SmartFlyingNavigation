@@ -3,9 +3,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "NaviCore/OctreePathfindingData.h"
-#include "Pathfinder/ThreadSafeBitmask.h"
-#include "Pathfinder/Utility/MemoryPool.h"
+#include "Pathfinder/NavCore/OctreePathfindingData.h"
+#include "Pathfinder/Utility/Parallel/ThreadSafeBitmask.h"
+#include "Pathfinder/Utility/Parallel/MemoryPool.h"
 #include "PathfindingRequest.generated.h"
 
 DECLARE_DYNAMIC_DELEGATE_TwoParams(FVoxelPathfindingResultDelegate, const TArray<FIntVector>&, Path, bool, bSuccess);

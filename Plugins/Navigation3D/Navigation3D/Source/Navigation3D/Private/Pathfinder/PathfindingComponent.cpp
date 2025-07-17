@@ -1,15 +1,14 @@
 ﻿#include "Pathfinder/PathfindingComponent.h"
 #include "Components/SplineComponent.h"
-#include "Pathfinder/FenwickVoxelVolume.h"
-#include "Pathfinder/PathfindingSubsystem.h"
-#include "Pathfinder/AvoidanceSubsystem.h" // 새로운 회피 서브시스템 헤더
+#include "Pathfinder/Subsystem/PathfindingSubsystem.h"
+#include "Pathfinder/Subsystem/AvoidanceSubsystem.h" 
 #include "Pathfinder/Strategy/PathfindingStrategy.h"
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
 #include "DrawDebugHelpers.h"
 #include "Components/BoxComponent.h"
 #include "Pathfinder/PathActor.h"
-#include "Pathfinder/NaviVolume/OctreeVoxelVolume.h"
+#include "Pathfinder/NavVolume/OctreeVoxelVolume.h"
 
 #include "Pathfinder/Strategy/JPSPlusStrategy.h"
 
@@ -52,7 +51,7 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	Request.Strategy = PathfindingStrategy;
     bool bRequestDataValid = false;
 
-    if (AFenwickVoxelVolume* GridVolume = Cast<AFenwickVoxelVolume>(TargetVolume))
+    if (AOctreeVoxelVolume* GridVolume = Cast<AOctreeVoxelVolume>(TargetVolume))
     {
         // ----- 그리드 볼륨일 경우 -----
         UE_LOG(LogTemp, Log, TEXT("Requesting path on a Grid Volume (Fenwick)."));

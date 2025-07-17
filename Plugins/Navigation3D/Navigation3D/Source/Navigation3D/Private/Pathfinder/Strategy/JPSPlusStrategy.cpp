@@ -1,7 +1,7 @@
 ﻿// JPSStrategy.cpp
 #include "Pathfinder/Strategy/JPSPlusStrategy.h"
 #include "Pathfinder/Utility/StrategyUtils.h"
-#include "Pathfinder/Utility/MemoryPool.h"
+#include "Pathfinder/Utility/Parallel/MemoryPool.h"
 #include "Algo/Reverse.h"
 #include "DrawDebugHelpers.h"
 

@@ -2,7 +2,7 @@
 
 
 #include "GameMode/EpicGameMode.h"
-#include "Pathfinder/PathfindingSubsystem.h"
+#include "Pathfinder/Subsystem/PathfindingSubsystem.h"
 #include "Engine/GameInstance.h"
 
 void AEpicGameMode::BeginPlay()

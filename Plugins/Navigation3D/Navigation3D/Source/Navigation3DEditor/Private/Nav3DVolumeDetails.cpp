@@ -2,9 +2,8 @@
 #include "DetailLayoutBuilder.h"
 #include "DetailWidgetRow.h"
 #include "DetailCategoryBuilder.h"
-#include "DetailLayoutBuilder.h"
 #include "PropertyEditorModule.h"
-#include "Pathfinder/FenwickVoxelVolume.h"
+#include "Pathfinder/NavVolume/FenwickVoxelVolume.h"
 
 TSharedRef<IDetailCustomization> FNav3DVolumeDetails::MakeInstance()
 {

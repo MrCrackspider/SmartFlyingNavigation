@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include "CoreMinimal.h"
 #include "Containers/Queue.h"
-#include "Pathfinder/StaticVoxelChunkData.h" // F128BitChunk
+#include "Pathfinder/NavData/StaticVoxelChunkData.h" // F128BitChunk
 // SIMD
 #include "emmintrin.h" // SSE2
 #include "smmintrin.h" // SSE4.1

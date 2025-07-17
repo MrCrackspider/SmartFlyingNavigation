@@ -1,7 +1,7 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "Pathfinder/StaticVoxelChunkData.h"
+#include "Pathfinder/NavData/StaticVoxelChunkData.h"
 #include "Serialization/Archive.h"
 const FName UStaticVoxelChunkData::VoxelChunkAssetType = TEXT("VoxelChunk");
 

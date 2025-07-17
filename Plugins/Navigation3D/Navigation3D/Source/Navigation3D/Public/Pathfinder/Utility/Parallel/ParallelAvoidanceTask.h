@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Async/AsyncWork.h"
-#include "Pathfinder/AvoidanceSubsystem.h" 
+#include "Pathfinder/Subsystem/AvoidanceSubsystem.h" 
 
 class FParallelAvoidanceTask : public FNonAbandonableTask
 {

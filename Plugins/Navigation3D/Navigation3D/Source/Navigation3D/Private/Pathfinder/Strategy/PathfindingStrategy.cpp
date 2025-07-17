@@ -2,7 +2,7 @@
 
 #include "Pathfinder/Strategy/PathfindingStrategy.h"
 
-#include "Pathfinder/PathfindingRequest.h"
+#include "Pathfinder/Utility/Parallel/PathfindingRequest.h"
 
 void UPathfindingStrategy::Initialize()
 {

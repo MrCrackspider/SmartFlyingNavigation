@@ -4,9 +4,9 @@
 
 #include "CoreMinimal.h"
 #include "AStarStrategy.h"
-#include "Pathfinder/PathfindingRequest.h"
-#include "PathfindingStrategy.h"
-#include "Pathfinder/ThreadSafeBitmask.h"
+#include "Pathfinder/Utility/Parallel/PathfindingRequest.h"
+#include "Pathfinder/Strategy/PathfindingStrategy.h"
+#include "Pathfinder/Utility/Parallel/ThreadSafeBitmask.h"
 #include "JPSPlusStrategy.generated.h"
 
 

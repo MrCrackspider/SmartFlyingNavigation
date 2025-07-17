@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "VoxelVolumeBase.h"
+#include "Pathfinder/NavVolume/VoxelVolumeBase.h"
 #include "GameFramework/Actor.h"
 #include "UniformGridVolume.generated.h"
 

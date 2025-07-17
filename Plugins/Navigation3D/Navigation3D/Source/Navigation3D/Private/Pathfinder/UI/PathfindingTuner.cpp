@@ -4,7 +4,7 @@
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Input/SNumericEntryBox.h"
 #include "Widgets/Layout/SExpandableArea.h"
-#include "Pathfinder/PathfindingSubsystem.h"
+#include "Pathfinder/Subsystem/PathfindingSubsystem.h"
 #include "Styling/AppStyle.h"
 
 void SPathfindingTuner::Construct(const FArguments& InArgs)
