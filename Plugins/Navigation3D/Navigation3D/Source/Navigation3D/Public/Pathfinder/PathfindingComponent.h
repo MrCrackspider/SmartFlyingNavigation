@@ -124,6 +124,7 @@ protected:
 	//subsystem에서 길찾기가 비동기로 완료 되었을 때 실행될 함수
 	UFUNCTION()
 	void HandleVoxelPathResult(const TArray<FIntVector>& PathIndices, bool bSuccess);
+	void PartialSplinePointUpdate(int32 StartIndex);
 	UFUNCTION()
 	void HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess);
 
@@ -201,7 +202,11 @@ public:
 	UPROPERTY(Category = "Pathfinding|Dynamic Repath", EditAnywhere, BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
 	int32 PathValidationLookAhead = 3;
-
+	
+	UPROPERTY(Category = "Pathfinding|Dynamic Repath", EditAnywhere, BlueprintReadWrite,
+		meta = (AllowPrivateAccess = true))
+	int32 PartialPointSplineNum = 4;
+	
 	UPROPERTY()
 	float LastKnownBaseRadius;
 	UPROPERTY()
