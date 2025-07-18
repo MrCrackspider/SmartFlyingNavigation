@@ -261,7 +261,7 @@ FVector UPathfindingComponent::GetPreferredVelocity() const
 void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float DeltaTime)
 {
 	AActor* Owner = GetOwner();
-	if (!Owner || !PathSplinePtr.IsValid() || FoundPath.IsEmpty()) return;
+	if (!Owner || !IsValid(PathSplinePtr.Get()) || FoundPath.IsEmpty()) return;
 
 	// 1. Actual movement (same as before)
 	const FVector CurrentLocation = Owner->GetActorLocation();
@@ -299,7 +299,7 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 
 void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 {
-	if (!PathSplinePtr.IsValid())
+	if (!IsValid(PathSplinePtr))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("PathfindingComponent: TargetSpline is not set."));
 		return;
@@ -363,7 +363,7 @@ bool UPathfindingComponent::IsOnSplineLine() const
 		return false;
 	}
 
-	if (!PathSplinePtr.IsValid())
+	if (!IsValid(PathSplinePtr))
 	{
 		UE_LOG(LogTemp, Error, TEXT("PathfindingComponent: PathSplinePtr is not set for %s!"), *MyActor->GetName());
 		return false;
@@ -445,6 +445,8 @@ void UPathfindingComponent::HandleVoxelPathResult(const TArray<FIntVector>& Path
 
 void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 {
+	PathSplinePtr->ClearSplinePoints(); // FIX-ME
+
 	PathSplinePtr->RemoveSplinePoint(0);
 	
 	int32 AddIndex = StartIndex + PartialPointSplineNum;
@@ -476,7 +478,7 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 		
 		CurrentState = EPathfindingState::FollowPath;
 
-		if (PathSplinePtr.IsValid())
+		if (IsValid(PathSplinePtr))
 		{
 			PathSplinePtr->ClearSplinePoints();
 
@@ -534,7 +536,7 @@ void UPathfindingComponent::UpdateAgentRadiusFromScale(bool bForceUpdate)
 
 	LastKnownScale = CurrentScale;
 	LastKnownBaseRadius = BaseAgentRadius;
-	
+
 	const float MaxScale = CurrentScale.GetMax();
 	AgentRadius = BaseAgentRadius * MaxScale;
 
@@ -609,7 +611,7 @@ void UPathfindingComponent::UpdateLinearPreferredVelocity(float DeltaTime)
 void UPathfindingComponent::UpdateSplinePreferredVelocity(float DeltaTime)
 {
 	AActor* MyActor = GetOwner();
-	if (!MyActor || !PathSplinePtr.IsValid() || PathSplinePtr->GetNumberOfSplinePoints() < 2)
+	if (!MyActor || !IsValid(PathSplinePtr) || PathSplinePtr->GetNumberOfSplinePoints() < 2)
 	{
 		return;
 	}
@@ -622,7 +624,7 @@ void UPathfindingComponent::UpdateSplinePreferredVelocity(float DeltaTime)
 
 bool UPathfindingComponent::IsSplinePathSafe() const
 {
-	if (!PathSplinePtr.IsValid() || !GetWorld())
+	if (!IsValid(PathSplinePtr) || !GetWorld())
 	{
 		return true;
 	}

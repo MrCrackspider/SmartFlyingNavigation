@@ -284,7 +284,7 @@ public:
 	TObjectPtr<UAvoidanceSubsystem> AvoidanceSubsystem;
 
 	UPROPERTY()
-	TWeakObjectPtr<USplineComponent> PathSplinePtr;
+	TObjectPtr<USplineComponent> PathSplinePtr;
 
 	FTimerHandle RepathCooldownTimer;
 	
