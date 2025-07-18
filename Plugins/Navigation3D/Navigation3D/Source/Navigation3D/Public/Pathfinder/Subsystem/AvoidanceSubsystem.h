@@ -17,7 +17,6 @@ struct FAgentThreadData
     FVector PreferredVelocity;
     float AvoidanceRadius;
     float MovementSpeed;
-    uint32 UniqueID;
 };
 
 // 스레드 계산 결과를 담을 구조체
@@ -45,7 +44,9 @@ public:
     virtual void Tick(float DeltaTime) override;
     virtual TStatId GetStatId() const override;
 
+    UFUNCTION(BlueprintCallable, Category = "Avoidance Subsystem")
     void RegisterAgent(UPathfindingComponent* AgentComponent);
+    UFUNCTION(BlueprintCallable, Category = "Avoidance Subsystem")
     void UnregisterAgent(UPathfindingComponent* AgentComponent);
 
     static void RunAvoidanceCalculation(

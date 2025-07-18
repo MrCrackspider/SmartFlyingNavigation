@@ -186,8 +186,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
                     AgentComponent->GetCurrentVelocity(),
                     AgentComponent->GetPreferredVelocity(),
                     AgentComponent->GetAvoidanceRadius(),
-                    AgentComponent->GetMovementSpeed(),
-                    AgentComponent->GetUniqueID()
+                    AgentComponent->GetMovementSpeed()
                     });
             }
         }
