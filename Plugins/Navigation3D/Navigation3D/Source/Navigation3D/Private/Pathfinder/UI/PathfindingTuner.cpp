@@ -561,9 +561,9 @@ TSharedRef<SWidget> SPathfindingTuner::BuildBakedDataSettingsSection()
         .HeaderContent()
         [
             SNew(STextBlock)
-               .Text(LOCTEXT("BakedDataSettingsCategory", "베이크된 데이터 설정 (Baked Data Settings)"))
-               .Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
-               .ShadowOffset(FVector2D(1.0f, 1.0f))
+                .Text(LOCTEXT("BakedDataSettingsCategory", "베이크된 데이터 설정 (Baked Data Settings)"))
+                .Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
+                .ShadowOffset(FVector2D(1.0f, 1.0f))
         ]
         .BodyContent()
         [
@@ -585,8 +585,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildBakedDataSettingsSection()
                 + SHorizontalBox::Slot()
                 .FillWidth(0.6f)
                 [
-                    // ▼▼▼ UI 개선 부분 ▼▼▼
-                    SNew(SVerticalBox) // 세로 박스로 감싸서 두 줄로 만듭니다.
+                    SNew(SVerticalBox)
 
                     // 1. 기존의 오브젝트 선택 박스
                     + SVerticalBox::Slot()
@@ -598,18 +597,41 @@ TSharedRef<SWidget> SPathfindingTuner::BuildBakedDataSettingsSection()
                         .OnObjectChanged(this, &SPathfindingTuner::OnBakedOctreeDataChanged)
                     ]
 
-                    // 2. 선택된 에셋의 전체 경로를 보여주는 텍스트 블록 (새로 추가)
+                    // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+                    // 2. 선택된 에셋의 디렉토리 경로를 '레이블과 함께' 보여주는 부분 (수정됨)
+                    // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
                     + SVerticalBox::Slot()
                     .AutoHeight()
                     .Padding(0, 4, 0, 0) // 위에 살짝 공간을 줍니다.
                     [
-                    	SNew(STextBlock)
-						 // 바인딩할 함수 이름을 새로운 함수로 변경합니다.
-						 .Text(this, &SPathfindingTuner::GetBakedDataFullPathAsText) 
-						 .Font(FAppStyle::GetFontStyle("PropertyWindow.ItalicFont"))
-						 .ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)))
+                        SNew(SHorizontalBox)
+
+                        // "Path:" 레이블
+                        + SHorizontalBox::Slot()
+                        .AutoWidth() // 레이블의 크기만큼만 공간을 차지합니다.
+                        .VAlign(VAlign_Center)
+                        .Padding(0, 0, 5, 0) // 오른쪽 여백을 줘서 경로와 분리합니다.
+                        [
+                            SNew(STextBlock)
+                            .Text(LOCTEXT("PathLabel", "Path:"))
+                            .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont")) // 일반 폰트 사용
+                            .ColorAndOpacity(FSlateColor(FLinearColor(0.7f, 0.7f, 0.7f))) // 약간 밝은 회색
+                        ]
+
+                        // 실제 경로 텍스트
+                        + SHorizontalBox::Slot()
+                        .FillWidth(1.0f) // 남은 공간을 모두 차지합니다.
+                        .VAlign(VAlign_Center)
+                        [
+                            SNew(STextBlock)
+                            .Text(this, &SPathfindingTuner::GetBakedDataFullPathAsText) // C++ 함수는 그대로 사용
+                            .Font(FAppStyle::GetFontStyle("PropertyWindow.ItalicFont"))
+                            .ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)))
+                        ]
                     ]
-                    // ▲▲▲ UI 개선 끝 ▲▲▲
+                    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+                    // 수정 끝
+                    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
                 ]
             ]
         ];
@@ -772,7 +794,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
         ]
     .InitiallyCollapsed(bInitiallyCollapsedAgent)
     .OnAreaExpansionChanged_Raw(this, &SPathfindingTuner::OnAgentSettingsCategoryExpansionChanged);
-}
+} 
 
 bool SPathfindingTuner::IsAgentSettingsCategoryExpanded() const
 {
