@@ -16,16 +16,21 @@ UPathfindingComponent::UPathfindingComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 
+#if WITH_EDITOR
+	// 에디터 뷰포트에서도 TickComponent()가 호출되도록
+	bTickInEditor = true;
+#endif
+	
 	PathSplinePtr = CreateDefaultSubobject<USplineComponent>(TEXT("Spline"));
 
 	PathfindingStrategyClass = UAStarStrategy::StaticClass();
 
 	DebugSphereComponent = CreateDefaultSubobject<USphereComponent>(TEXT("DebugAgentRadiusSphere"));
 
-	DebugSphereComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision); // 충돌 기능은 완전히 끕니다.
-	DebugSphereComponent->SetCanEverAffectNavigation(false); // 네비게이션에 영향을 주지 않도록 합니다.
-	DebugSphereComponent->bHiddenInGame = true; // 실제 게임에서는 숨깁니다. (플레이 시에는 Tick의 DrawDebugSphere가 그려줌)
-	DebugSphereComponent->SetSphereRadius(AgentRadius); // 초기 반지름을 AgentRadius로 설정합니다.
+	DebugSphereComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	DebugSphereComponent->SetCanEverAffectNavigation(false);
+	DebugSphereComponent->bHiddenInGame = true;
+	DebugSphereComponent->SetSphereRadius(BaseAgentRadius);
 	
 }
 
@@ -77,8 +82,7 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
         OctreeData.DynamicObstacleBitmask = OctreeVolume->GetDynamicObstacleBitmask();
         OctreeData.MapSize = OctreeVolume->MapSize;
         OctreeData.VoxelSize = OctreeVolume->VoxelExtent;
-        OctreeData.AgentRadius = this->AgentRadius;
-
+       
         // NavigationData에 옥트리 데이터 스냅샷을 넣음
         Request.NavigationData.Emplace<FOctreePathfindingData>(MoveTemp(OctreeData));
         bRequestDataValid = true;
@@ -130,19 +134,14 @@ void UPathfindingComponent::PostEditChangeProperty(FPropertyChangedEvent& Proper
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 
-	// 변경된 프로퍼티의 이름을 가져옵니다.
 	const FName PropertyName = (PropertyChangedEvent.Property != nullptr) ? PropertyChangedEvent.Property->GetFName() : NAME_None;
 
-	// 변경된 프로퍼티가 'AgentRadius'가 맞는지 확인합니다.
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(UPathfindingComponent, AgentRadius))
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(UPathfindingComponent, BaseAgentRadius))
 	{
-		if (DebugSphereComponent)
-		{
-			// DebugSphereComponent의 반지름을 새로운 AgentRadius 값으로 업데이트합니다.
-			DebugSphereComponent->SetSphereRadius(AgentRadius);
-		}
+		UpdateAgentRadiusFromScale(true); // 이 안에서 GetActorScale3D() 사용!
 	}
 }
+
 #endif
 
 FVector UPathfindingComponent::GetPreferredVelocity() const
@@ -416,6 +415,9 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 {
 	
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	UpdateAgentRadiusFromScale(); // 인게임에서 Scale 변화에 따른 길찾기를 위해 호출.
+	
 	if (CurrentState == EPathfindingState::FollowPath)
 	{
 		if (!IsPathAheadValid())
@@ -431,21 +433,6 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	if (PathfindingTaskFuture.IsValid())
 	{
 		HandlePathfindingResult();
-	}
-	
-	if (bShowAgentRadius && GetOwner())
-	{
-		DrawDebugSphere(
-			GetWorld(),
-			GetOwner()->GetActorLocation(),
-			AgentRadius,
-			24,
-			FColor::Green,
-			false,
-			-1.f,
-			0,
-			1.f 
-		);
 	}
 }
 
@@ -538,6 +525,30 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
         }
     }
 }
+
+void UPathfindingComponent::UpdateAgentRadiusFromScale(bool bForceUpdate)
+{
+	AActor* Owner = GetOwner();
+	if (!Owner) return;
+
+	const FVector CurrentScale = Owner->GetActorScale3D();
+
+	if (!bForceUpdate && CurrentScale == LastKnownScale && BaseAgentRadius == LastKnownBaseRadius)
+		return;
+
+	LastKnownScale = CurrentScale;
+	LastKnownBaseRadius = BaseAgentRadius;
+
+	const float MaxScale = CurrentScale.GetMax();
+	AgentRadius = BaseAgentRadius * MaxScale;
+
+	if (DebugSphereComponent)
+	{
+		DebugSphereComponent->SetSphereRadius(AgentRadius);
+	}
+}
+
+
 //======================================================================================
 // Internal Logic
 //======================================================================================

@@ -22,6 +22,7 @@ void FNav3DPathfindingDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuid
 	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, TargetVolume));
 	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PathfindingStrategyClass));
 	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, RotationAxisLock));
+	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, BaseAgentRadius));
 	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, AgentRadius));
 	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, MovementSpeed));
 	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, RotationInterpSpeed));

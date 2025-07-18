@@ -61,6 +61,7 @@ public:
 #if WITH_EDITOR
 	// 에디터에서 프로퍼티가 변경될 때 호출되는 함수입니다.
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+	
 #endif
 #pragma endregion
 
@@ -126,6 +127,7 @@ protected:
 	UFUNCTION()
 	void HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess);
 
+	void UpdateAgentRadiusFromScale(bool bForceUpdate = false);
 	/** 비동기 길찾기 작업이 완료되었을 때 결과를 처리합니다. */
 	void HandlePathfindingResult();
 
@@ -165,10 +167,12 @@ public:
 		meta = (AllowPrivateAccess = true))
 	TSubclassOf<UPathfindingStrategy> PathfindingStrategyClass;
 
-	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,
-		meta = (AllowPrivateAccess = true))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding", meta = (AllowPrivateAccess = true))
 	float AgentRadius = 50.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding", meta = (ClampMin = "0.0", AllowPrivateAccess = true))
+	float BaseAgentRadius = 50.0f;
+	
 	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
 	float AvoidanceRadius = 150.f;
@@ -199,6 +203,11 @@ public:
 	int32 PathValidationLookAhead = 3;
 
 	UPROPERTY()
+	float LastKnownBaseRadius;
+	UPROPERTY()
+	FVector LastKnownScale;
+
+	UPROPERTY()
 	bool bIsReachDestination = false;
 
 	// --- 스플라인 안전성 검사 설정 ---
@@ -209,9 +218,7 @@ public:
 	// --- 디버깅 ---
 	UPROPERTY(Category = "Pathfinding|Debug", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
 	bool bDrawDebugPath = true;
-	UPROPERTY(Category = "Pathfinding|Debug", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
-	bool bShowAgentRadius = true;
-
+	
 	// --- 동적 목표 설정 ---
 	UPROPERTY(Category = "Pathfinding|Dynamic Goal", EditAnywhere, BlueprintReadWrite,
 		meta = (AllowPrivateAccess = "true"))
