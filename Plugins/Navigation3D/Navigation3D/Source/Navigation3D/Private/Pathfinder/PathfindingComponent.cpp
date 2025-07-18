@@ -36,76 +36,99 @@ UPathfindingComponent::UPathfindingComponent()
 
 bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 {
-    // --- 1. 사전 유효성 검사 (기존과 동일) ---
-    if (PathfindingTaskFuture.IsValid() && !PathfindingTaskFuture.IsReady())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("RequestPathToLocation: Already requesting a path. New request ignored."));
-        return false;
-    }
+	if (PathfindingTaskFuture.IsValid() && !PathfindingTaskFuture.IsReady())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("RequestPathToLocation: Already requesting a path. New request ignored."));
+		return false;
+	}
 
-    if (!PathfindingStrategy || !TargetVolume)
-    {
-        UE_LOG(LogTemp, Error, TEXT("RequestPathToLocation failed: Strategy or TargetVolume is not set."));
-        return false;
-    }
-
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        World->GetTimerManager().ClearTimer(RepathCooldownTimer);
-    }
-
-    // --- 2. "요청서" 작성 시작 ---
-    FPathfindingRequest Request;
-    Request.RequestingObject = this;
-    Request.StartLocation = GetOwner()->GetActorLocation();
-    Request.EndLocation = TargetLocation;
-    Request.AgentRadius = this->AgentRadius; // 월드 유닛 에이전트 반경
-	Request.Strategy = PathfindingStrategy;
-    bool bRequestDataValid = false;
+	if (!PathfindingStrategy || !TargetVolume)
+	{
+		UE_LOG(LogTemp, Error, TEXT("RequestPathToLocation failed: Strategy or TargetVolume is not set."));
+		return false;
+	}
 	
-    if (AOctreeVoxelVolume* OctreeVolume = Cast<AOctreeVoxelVolume>(TargetVolume))
-    {
-        // ----- 옥트리 볼륨일 경우 -----
-        UE_LOG(LogTemp, Log, TEXT("Requesting path on an Octree Volume."));
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(RepathCooldownTimer);
+	}
 
-        // 요청서에 옥트리용이라고 명시
-        Request.NodeType = EPathfindingNodeType::Octree;
-    	Request.OnWorldPathComplete.BindDynamic(this, &UPathfindingComponent::HandleWorldPathResult);
- 
-        // FOctreePathfindingData 스냅샷 생성
-        FOctreePathfindingData OctreeData;
-        OctreeData.StaticNodePool = OctreeVolume->GetStaticNodePool();
-        OctreeData.RootNodeIndex = OctreeVolume->GetRootNodeIndex();
-        OctreeData.MaxOctreeDepth = OctreeVolume->GetMaxOctreeDepth();
-        OctreeData.VolumeBounds = OctreeVolume->VolumeBox->Bounds.GetBox();
-        OctreeData.DynamicObstacleBitmask = OctreeVolume->GetDynamicObstacleBitmask();
-        OctreeData.MapSize = OctreeVolume->MapSize;
-        OctreeData.VoxelSize = OctreeVolume->VoxelExtent;
-       
-        // NavigationData에 옥트리 데이터 스냅샷을 넣음
-        Request.NavigationData.Emplace<FOctreePathfindingData>(MoveTemp(OctreeData));
-        bRequestDataValid = true;
-    }
+	FPathfindingRequest Request;
+	Request.RequestingObject = this;
+	Request.StartLocation = GetOwner()->GetActorLocation();
+	Request.EndLocation = TargetLocation;
+	Request.AgentRadius = this->AgentRadius;
+	Request.Strategy = PathfindingStrategy;
+	bool bRequestDataValid = false;
 
-    // --- 4. 유효한 요청 데이터가 만들어졌으면 서브시스템에 전달 ---
-    if (bRequestDataValid)
-    {
-        CurrentTargetLocation = TargetLocation;
+	if (AOctreeVoxelVolume* OctreeVolume = Cast<AOctreeVoxelVolume>(TargetVolume))
+	{
+		UE_LOG(LogTemp, Log, TEXT("Requesting path on an Octree Volume."));
 
-    	CurrentRequestID = PathSubsystem->RequestPath(Request);
-    	if (CurrentRequestID != -1)
-    	{
-    		// 상태 변경 등...
-    		return true;
-    	}
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("RequestPathToLocation failed: TargetVolume is not a supported type (Octree)."));
-    }
+		Request.NodeType = EPathfindingNodeType::Octree;
+		Request.OnWorldPathComplete.BindDynamic(this, &UPathfindingComponent::HandleWorldPathResult);
 
-    return false;
+		// --- 3. Create a thread-safe data snapshot using the optimized helper function. ---
+		FOctreePathfindingData OctreeSnapshot;
+		CreateOctreeDataSnapshot(OctreeVolume, OctreeSnapshot);
+        
+		// Move the created snapshot into the request payload.
+		Request.NavigationData.Emplace<FOctreePathfindingData>(MoveTemp(OctreeSnapshot));
+		bRequestDataValid = true;
+	}
+
+	// --- 4. Dispatch the request if the data is valid. ---
+	if (bRequestDataValid)
+	{
+		CurrentTargetLocation = TargetLocation;
+		FoundPath.Empty();
+
+		CurrentRequestID = PathSubsystem->RequestPath(Request);
+		if (CurrentRequestID != -1)
+		{
+			return true; // Request successfully queued.
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("RequestPathToLocation failed: TargetVolume is not a supported type (currently only Octree is implemented here)."));
+	}
+	
+	return false;
+}
+
+void UPathfindingComponent::CreateOctreeDataSnapshot(const AOctreeVoxelVolume* OctreeVolume, FOctreePathfindingData& SnapshotData) const
+{
+	// --- Step 1: Copy small, trivial member variables directly. ---
+	SnapshotData.RootNodeIndex = OctreeVolume->GetRootNodeIndex();
+	SnapshotData.MaxOctreeDepth = OctreeVolume->GetMaxOctreeDepth();
+	SnapshotData.VolumeBounds = OctreeVolume->VolumeBox->Bounds.GetBox();
+	SnapshotData.MapSize = OctreeVolume->MapSize;
+	SnapshotData.VoxelSize = OctreeVolume->VoxelExtent;
+
+	// --- Step 2: Perform a high-speed bulk memory copy for the static node pool. ---
+	const TArray<FOctreeNode>& SourceNodePool = OctreeVolume->GetStaticNodePool();
+	const int32 NodeCount = SourceNodePool.Num();
+	if (NodeCount > 0)
+	{
+		// Pre-allocate memory without initializing elements to avoid overhead.
+		SnapshotData.StaticNodePool.SetNumUninitialized(NodeCount);
+        
+		// Copy the entire block of memory from the source array to the destination.
+		FMemory::Memcpy(SnapshotData.StaticNodePool.GetData(), SourceNodePool.GetData(), NodeCount * sizeof(FOctreeNode));
+	}
+
+	// --- Step 3: Perform a high-speed bulk memory copy for the dynamic obstacle bitmask. ---
+	const TArray<F128BitChunk>& SourceBitmask = OctreeVolume->GetDynamicObstacleBitmask();
+	const int32 ChunkCount = SourceBitmask.Num();
+	if (ChunkCount > 0)
+	{
+		// Pre-allocate memory without initializing elements.
+		SnapshotData.DynamicObstacleBitmask.SetNumUninitialized(ChunkCount);
+        
+		// Copy the entire block of memory.
+		FMemory::Memcpy(SnapshotData.DynamicObstacleBitmask.GetData(), SourceBitmask.GetData(), ChunkCount * sizeof(F128BitChunk));
+	}
 }
 
 bool UPathfindingComponent::RequestPathToTargetActor()
@@ -263,6 +286,12 @@ bool UPathfindingComponent::IsOnSplineLine()
 		return false;
 	}
 
+	if (!PathSplinePtr.IsValid())
+	{
+		UE_LOG(LogTemp, Error, TEXT("PathfindingComponent: PathSplinePtr is not set for %s!"), *MyActor->GetName());
+		return false;
+	}
+	
 	const FVector MyLocation = MyActor->GetActorLocation();
 	const FVector SplineLocation = PathSplinePtr->GetLocationAtDistanceAlongSpline(
 		DistanceAlongSpline, ESplineCoordinateSpace::World);
@@ -590,15 +619,7 @@ void UPathfindingComponent::InvalidatePathAndRequestRepath()
 	UE_LOG(LogTemp, Warning, TEXT("Path Invalidated! Stopping movement and scheduling a repath..."));
 
 	// Begin Test
-	//FoundPathIndices.Empty();
-	//GetWorld()->GetTimerManager().PauseTimer(PathOptimizationTimer);
-
-	//if (UWorld* World = GetWorld())
-	//{
-	//	OnRepathTimerFired();
-	//}
-
-
+	
 	RequestPathToLocation(CurrentTargetLocation);
 
 	// End Test

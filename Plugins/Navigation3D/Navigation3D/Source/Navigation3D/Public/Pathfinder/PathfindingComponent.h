@@ -8,9 +8,10 @@ class USplineComponent;
 class UPathfindingStrategy;
 class UPathfindingSubsystem;
 class UAvoidanceSubsystem;
-class APathActor;
 class USphereComponent; 
 class AVoxelVolumeBase;
+struct FOctreePathfindingData;
+class AOctreeVoxelVolume;
 /**
  * 길찾기 컴포넌트의 현재 상태를 나타냅니다.
  */
@@ -127,6 +128,8 @@ protected:
 	void PartialSplinePointUpdate(int32 StartIndex);
 	UFUNCTION()
 	void HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess);
+	
+	void CreateOctreeDataSnapshot(const AOctreeVoxelVolume* OctreeVolume, FOctreePathfindingData& SnapshotData) const;
 
 	void UpdateAgentRadiusFromScale(bool bForceUpdate = false);
 	/** 비동기 길찾기 작업이 완료되었을 때 결과를 처리합니다. */
