@@ -62,7 +62,7 @@ public:
 
 #if WITH_EDITORONLY_DATA
 
-	UPROPERTY(EditAnywhere, Category = "Octree|Baking", meta=(ContentDir))
+	UPROPERTY(meta=(ContentDir))
 	FDirectoryPath BakedDataSaveDirectory;
 
 	void SafeRemoveInstances(UInstancedStaticMeshComponent* Component, TArray<int32>& InstanceIndicesToRemove);

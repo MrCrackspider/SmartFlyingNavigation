@@ -15,7 +15,7 @@
 #include "Internationalization/Text.h"
 #include "Widgets/Input/SFilePathPicker.h"
 #include "DesktopPlatformModule.h" // 이제 오류 없이 포함됩니다.
-#include "IDesktopPlatform.h"
+#include "IDesktopPlatform.h" 
 
 // AOctreeVoxelVolume 클래스 헤더 (당신의 프로젝트 경로에 맞게 수정)
 #include "Pathfinder/NavData/VoxelObstacleFilter.h"
@@ -25,279 +25,272 @@
 #include "Widgets/Layout/SUniformGridPanel.h"
 // 필터 데이터 에셋 클래스 헤더 (당신의 실제 클래스 이름으로 변경)
 
-#define LOCTEXT_NAMESPACE "PathfindingTuner"
+#define LOCTEXT_NAMESPACE "PathfindingTuner" 
 
 void SPathfindingTuner::Construct(const FArguments& InArgs)
 {
-	PathfindingSubsystem = GEngine->GetEngineSubsystem<UPathfindingSubsystem>();
+    PathfindingSubsystem = GEngine->GetEngineSubsystem<UPathfindingSubsystem>();
 
-	// --- 액터 선택 감지 로직 (FTSTicker 기반의 다중 선택 폴링으로 변경) ---
-	if (GEditor)
-	{
-		TWeakPtr<SPathfindingTuner> WeakThisPtr = SharedThis(this);
-		// FTSTicker를 사용하여 주기적으로 액터 선택 변경을 감지합니다.
-		ActorSelectionTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+	MapSizeOptions.Add(MakeShared<int32>(128));
+	MapSizeOptions.Add(MakeShared<int32>(256));
+	MapSizeOptions.Add(MakeShared<int32>(512));
+	
+    // --- 액터 선택 감지 로직 (FTSTicker 기반의 다중 선택 폴링으로 변경) ---
+    if (GEditor)
+    {
+       TWeakPtr<SPathfindingTuner> WeakThisPtr = SharedThis(this);
+       // FTSTicker를 사용하여 주기적으로 액터 선택 변경을 감지합니다.
+       ActorSelectionTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
 
-			FTickerDelegate::CreateLambda([WeakThisPtr](float DeltaTime)
-			{
-				if (TSharedPtr<SPathfindingTuner> Pinned = WeakThisPtr.Pin())
-				{
-					if (!GEditor)
-					{
-						return true; // 에디터가 유효하지 않으면 틱 중지
-					}
+          FTickerDelegate::CreateLambda([WeakThisPtr](float DeltaTime)
+          {
+             if (TSharedPtr<SPathfindingTuner> Pinned = WeakThisPtr.Pin())
+             {
+                if (!GEditor)
+                {
+                   return true; // 에디터가 유효하지 않으면 틱 중지
+                }
 
-					// 현재 선택된 액터 목록을 가져옵니다.
-					TArray<UObject*> CurrentSelectedObjects;
-					if (USelection* Sel = GEditor->GetSelectedActors())
-					{
-						Sel->GetSelectedObjects(CurrentSelectedObjects);
-					}
+                // 현재 선택된 액터 목록을 가져옵니다.
+                TArray<UObject*> CurrentSelectedObjects;
+                if (USelection* Sel = GEditor->GetSelectedActors())
+                {
+                   Sel->GetSelectedObjects(CurrentSelectedObjects);
+                }
 
-					// AActor 타입 중 AOctreeVoxelVolume 또는 UPathfindingComponent를 가진 액터만 필터링합니다.
-					TArray<TWeakObjectPtr<AActor>> FilteredSelectedActors;
-					for (UObject* Obj : CurrentSelectedObjects)
-					{
-						if (AActor* Actor = Cast<AActor>(Obj))
-						{
-							if (Actor->IsA(AOctreeVoxelVolume::StaticClass()) || Actor->FindComponentByClass<
-								UPathfindingComponent>())
-							{
-								FilteredSelectedActors.Add(Actor);
-							}
-						}
-					}
+                // AActor 타입 중 AOctreeVoxelVolume 또는 UPathfindingComponent를 가진 액터만 필터링합니다.
+                TArray<TWeakObjectPtr<AActor>> FilteredSelectedActors;
+                for (UObject* Obj : CurrentSelectedObjects)
+                {
+                   if (AActor* Actor = Cast<AActor>(Obj))
+                   {
+                      if (Actor->IsA(AOctreeVoxelVolume::StaticClass()) || Actor->FindComponentByClass<
+                         UPathfindingComponent>())
+                      {
+                         FilteredSelectedActors.Add(Actor);
+                      }
+                   }
+                }
 
-					// 이전 필터링된 선택 목록과 현재 필터링된 선택 목록을 비교하여 변경 여부를 확인합니다.
-					bool bSelectionReallyChanged = false;
-					if (FilteredSelectedActors.Num() != Pinned->LastSelectedActors.Num())
-					{
-						bSelectionReallyChanged = true;
-					}
-					else
-					{
-						// 개수가 같다면, 각 요소가 동일한지 확인합니다. (Set 비교)
-						TSet<TWeakObjectPtr<AActor>> LastSelectedSet(Pinned->LastSelectedActors);
-						for (TWeakObjectPtr<AActor> CurrentActorPtr : FilteredSelectedActors)
-						{
-							if (!LastSelectedSet.Contains(CurrentActorPtr))
-							{
-								bSelectionReallyChanged = true;
-								break;
-							}
-						}
-						if (!bSelectionReallyChanged) // 역방향으로도 확인 (완벽한 Set 비교)
-						{
-							TSet<TWeakObjectPtr<AActor>> CurrentSelectedSet(FilteredSelectedActors);
-							for (TWeakObjectPtr<AActor> LastActorPtr : Pinned->LastSelectedActors)
-							{
-								if (!CurrentSelectedSet.Contains(LastActorPtr))
-								{
-									bSelectionReallyChanged = true;
-									break;
-								}
-							}
-						}
-					}
-					if (bSelectionReallyChanged)
-					{
-						// 선택이 변경되었으면 LastSelectedActors를 업데이트하고 내부 로직을 호출합니다.
-						Pinned->LastSelectedActors = FilteredSelectedActors; // 새로운 선택 목록으로 업데이트
-						Pinned->OnActorSelectionChanged(); // UI 업데이트 및 속성 집계 로직 호출
-					}
+                // 이전 필터링된 선택 목록과 현재 필터링된 선택 목록을 비교하여 변경 여부를 확인합니다.
+                bool bSelectionReallyChanged = false;
+                if (FilteredSelectedActors.Num() != Pinned->LastSelectedActors.Num())
+                {
+                   bSelectionReallyChanged = true;
+                }
+                else
+                {
+                   // 개수가 같다면, 각 요소가 동일한지 확인합니다. (Set 비교)
+                   TSet<TWeakObjectPtr<AActor>> LastSelectedSet(Pinned->LastSelectedActors);
+                   for (TWeakObjectPtr<AActor> CurrentActorPtr : FilteredSelectedActors)
+                   {
+                      if (!LastSelectedSet.Contains(CurrentActorPtr))
+                      {
+                         bSelectionReallyChanged = true;
+                         break;
+                      }
+                   }
+                   if (!bSelectionReallyChanged) // 역방향으로도 확인 (완벽한 Set 비교)
+                   {
+                      TSet<TWeakObjectPtr<AActor>> CurrentSelectedSet(FilteredSelectedActors);
+                      for (TWeakObjectPtr<AActor> LastActorPtr : Pinned->LastSelectedActors)
+                      {
+                         if (!CurrentSelectedSet.Contains(LastActorPtr))
+                         {
+                            bSelectionReallyChanged = true;
+                            break;
+                         }
+                      }
+                   }
+                }
+                if (bSelectionReallyChanged)
+                {
+                   // 선택이 변경되었으면 LastSelectedActors를 업데이트하고 내부 로직을 호출합니다.
+                   Pinned->LastSelectedActors = FilteredSelectedActors; // 새로운 선택 목록으로 업데이트
+                   Pinned->OnActorSelectionChanged(); // UI 업데이트 및 속성 집계 로직 호출
+                }
 
-					return true; // 계속 틱을 돌립니다.
-				}
-				return false;
-			})
-		);
-
-
-		// 위젯 초기화 시 현재 선택 상태를 한 번 호출하여 UI를 초기화합니다.
-		// FTSTicker 람다가 첫 틱에서 이 작업을 수행할 것이므로, 여기서는 명시적으로 호출하지 않아도 됩니다.
-		// 하지만 즉시 UI를 업데이트하려면 아래처럼 LastSelectedActors를 채우고 OnSelectionChangedInternal을 호출합니다.
-		TArray<UObject*> InitialSelectedObjects;
-		USelection* EditorSelection = GEditor->GetSelectedActors();
-		if (EditorSelection)
-		{
-			EditorSelection->GetSelectedObjects(InitialSelectedObjects);
-		}
-
-		LastSelectedActors.Empty(); // 초기화
-		for (UObject* Obj : InitialSelectedObjects)
-		{
-			if (AActor* Actor = Cast<AActor>(Obj))
-			{
-				if (Actor->IsA(AOctreeVoxelVolume::StaticClass()) || Actor->FindComponentByClass<
-					UPathfindingComponent>())
-				{
-					LastSelectedActors.Add(Actor);
-				}
-			}
-		}
-		OnActorSelectionChanged(); // 초기 UI 업데이트
-	}
+                return true; // 계속 틱을 돌립니다.
+             }
+             return false;
+          })
+       );
 
 
-	ChildSlot
-	[
+       // 위젯 초기화 시 현재 선택 상태를 한 번 호출하여 UI를 초기화합니다.
+       // FTSTicker 람다가 첫 틱에서 이 작업을 수행할 것이므로, 여기서는 명시적으로 호출하지 않아도 됩니다.
+       // 하지만 즉시 UI를 업데이트하려면 아래처럼 LastSelectedActors를 채우고 OnSelectionChangedInternal을 호출합니다.
+       TArray<UObject*> InitialSelectedObjects;
+       USelection* EditorSelection = GEditor->GetSelectedActors();
+       if (EditorSelection)
+       {
+          EditorSelection->GetSelectedObjects(InitialSelectedObjects);
+       }
+
+       LastSelectedActors.Empty(); // 초기화
+       for (UObject* Obj : InitialSelectedObjects)
+       {
+          if (AActor* Actor = Cast<AActor>(Obj))
+          {
+             if (Actor->IsA(AOctreeVoxelVolume::StaticClass()) || Actor->FindComponentByClass<
+                UPathfindingComponent>())
+             {
+                LastSelectedActors.Add(Actor);
+             }
+          }
+       }
+       OnActorSelectionChanged(); // 초기 UI 업데이트
+    }
 
 
-		SNew(SVerticalBox)
-
-		// --- 1. '성능 설정' 카테고리 ---
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(2)
-		[
-			BuildPerformanceSettingsSection() // 함수 호출로 분리
-		]
-
-		// --- 2. '옥트리 볼륨 설정' 카테고리 ---
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(2)
-		[
-			BuildOctreeVolumeSettingsSection() // 함수 호출로 분리
-		]
+    ChildSlot
+    [
 
 
-		// --- 3. '베이크된 데이터 설정' 카테고리 (새로 추가) ---
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(2)
-		[
-			BuildBakedDataSettingsSection() // <--- 이 함수 호출 추가
-		]
+       SNew(SVerticalBox)
+
+       // --- 1. '성능 설정' 카테고리 ---
+       + SVerticalBox::Slot()
+       .AutoHeight()
+       .Padding(2)
+       [
+          BuildPerformanceSettingsSection() // 함수 호출로 분리
+       ]
+
+       // --- 2. '옥트리 볼륨 설정' 카테고리 ---
+       + SVerticalBox::Slot()
+       .AutoHeight()
+       .Padding(2)
+       [
+          BuildOctreeVolumeSettingsSection() // 함수 호출로 분리
+       ]
 
 
-		// --- 4. '에이전트 설정' 카테고리 (새로 추가) ---
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(2)
-		[
-			BuildAgentSettingsSection() // <--- 이 함수 호출 추가
-		]
+       // --- 3. '베이크된 데이터 설정' 카테고리 (새로 추가) ---
+       + SVerticalBox::Slot()
+       .AutoHeight()
+       .Padding(2)
+       [
+          BuildBakedDataSettingsSection() // <--- 이 함수 호출 추가
+       ]
 
-		// Bake 버튼
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(8.0f, 15.0f)
-		[
-			SNew(SButton)
-			.Text(LOCTEXT("BakeButtonText", "Bake Octree Data"))
-			.OnClicked(this, &SPathfindingTuner::OnBakeButtonClicked)
-		]
-	];
+
+       // --- 4. '에이전트 설정' 카테고리 (새로 추가) ---
+       + SVerticalBox::Slot()
+       .AutoHeight()
+       .Padding(2)
+       [
+          BuildAgentSettingsSection() // <--- 이 함수 호출 추가
+       ]
+
+       // Bake 버튼
+       + SVerticalBox::Slot()
+       .AutoHeight()
+       .Padding(8.0f, 15.0f)
+       [
+          SNew(SButton)
+          .Text(LOCTEXT("BakeButtonText", "Bake Octree Data"))
+          .OnClicked(this, &SPathfindingTuner::OnBakeButtonClicked)
+       ]
+    ];
 }
-
 // --- UI Section Builder Implementations ---
 
 TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
 {
-	const bool bInitiallyCollapsedPerformance = !bIsPerformanceCategoryExpanded;
+    const bool bInitiallyCollapsedPerformance = !bIsPerformanceCategoryExpanded;
 
-	return SNew(SExpandableArea)
-		.HeaderContent()
-		[
-			SNew(STextBlock)
-			.Text(FText::FromString(TEXT("성능 설정 (Performance)")))
-			.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
-			.ShadowOffset(FVector2D(1.0f, 1.0f))
-		]
-		.BodyContent()
-		[
-			SNew(SVerticalBox)
-			// 작업 스레드 개수 설정 UI
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f, 5.0f)
-			[
-				SNew(SHorizontalBox)
-				.ToolTipText(FText::FromString(
-					TEXT("길찾기 연산에 사용할 워커 스레드의 개수를 설정합니다. \n값을 높이면 동시에 더 많은 길찾기 요청을 처리할 수 있지만, CPU 사용량이 증가합니다.")))
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.4f)
-				.VAlign(VAlign_Center)
-				.Padding(0, 0, 10, 0)
-				[
-					SNew(STextBlock)
-					.Text(FText::FromString(TEXT("작업 스레드 개수")))
-					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-				]
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.6f)
-				.VAlign(VAlign_Center)
-				[
-					SNew(SNumericEntryBox<int32>)
-					.Value(this, &SPathfindingTuner::GetCurrentNumThreads)
-					.OnValueChanged(this, &SPathfindingTuner::OnNumThreadsChanged)
-					.OnValueCommitted(this, &SPathfindingTuner::OnNumThreadsCommitted)
-					.MinValue(1)
-					.MaxValue(64)
-					.MinSliderValue(1)
-					.MaxSliderValue(16)
-					.SliderExponent(1.0f)
-					.Delta(1)
-				]
-			]
-		]
-		.InitiallyCollapsed(bInitiallyCollapsedPerformance)
-		.OnAreaExpansionChanged_Raw(this, &SPathfindingTuner::OnPerformanceCategoryExpansionChanged);
+    return SNew(SExpandableArea)
+        .HeaderContent()
+        [
+            SNew(STextBlock)
+                .Text(FText::FromString(TEXT("성능 설정 (Performance)")))
+                .Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
+                .ShadowOffset(FVector2D(1.0f, 1.0f))
+        ]
+        .BodyContent()
+        [
+            SNew(SVerticalBox)
+                // 작업 스레드 개수 설정 UI
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(8.0f, 5.0f)
+                [
+                    SNew(SHorizontalBox)
+                        .ToolTipText(FText::FromString(TEXT("길찾기 연산에 사용할 워커 스레드의 개수를 설정합니다. \n값을 높이면 동시에 더 많은 길찾기 요청을 처리할 수 있지만, CPU 사용량이 증가합니다.")))
+                        + SHorizontalBox::Slot()
+                        .FillWidth(0.4f)
+                        .VAlign(VAlign_Center)
+                        .Padding(0, 0, 10, 0)
+                        [
+                            SNew(STextBlock)
+                                .Text(FText::FromString(TEXT("작업 스레드 개수")))
+                                .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                        ]
+                        + SHorizontalBox::Slot()
+                        .FillWidth(0.6f)
+                        .VAlign(VAlign_Center)
+                        [
+                            SNew(SNumericEntryBox<int32>)
+                                .Value(this, &SPathfindingTuner::GetCurrentNumThreads)
+                                .OnValueCommitted(this, &SPathfindingTuner::OnNumThreadsCommitted)
+                                .MinValue(1)
+                                .MaxValue(64)
+                                .MinSliderValue(1)
+                                .MaxSliderValue(16)
+                                .SliderExponent(1.0f)
+                                .Delta(1)
+                        ]
+                ]
+        ]
+    .InitiallyCollapsed(bInitiallyCollapsedPerformance)
+    .OnAreaExpansionChanged_Raw(this, &SPathfindingTuner::OnPerformanceCategoryExpansionChanged);
 }
 
 TSharedRef<SWidget> SPathfindingTuner::BuildOctreeVolumeSettingsSection()
 {
-	const bool bInitiallyCollapsedOctreeSettings = !bIsOctreeSettingsCategoryExpanded;
+    const bool bInitiallyCollapsedOctreeSettings = !bIsOctreeSettingsCategoryExpanded;
 
-	return SNew(SExpandableArea)
-		.HeaderContent()
+    return SNew(SExpandableArea)
+    	.IsEnabled(this, &SPathfindingTuner::IsOctreeSettingsEnabled)
+        .HeaderContent()
+        [
+            SNew(STextBlock)
+                .Text(LOCTEXT("OctreeSettingsCategory", "옥트리 볼륨 설정 (Octree Volume Settings)"))
+                .Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
+                .ShadowOffset(FVector2D(1.0f, 1.0f))
+        ]
+        .BodyContent()
+        [
+        	SNew(SVerticalBox)
+		// 타겟 볼륨 액터 '표시'
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(8.0f, 5.0f)
 		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("OctreeSettingsCategory", "옥트리 볼륨 설정 (Octree Volume Settings)"))
-			.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
-			.ShadowOffset(FVector2D(1.0f, 1.0f))
-		]
-		.BodyContent()
-		[
-			SNew(SVerticalBox)
-			// 타겟 볼륨 액터 선택
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f, 5.0f)
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.FillWidth(0.4f)
+			.VAlign(VAlign_Center)
 			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.4f)
-				.VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("TargetVolumeLabel", "Target Octree Volume:"))
-					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-				]
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.6f)
-				[
-					SNew(SObjectPropertyEntryBox)
-					.AllowedClass(AOctreeVoxelVolume::StaticClass())
-					.ObjectPath(this, &SPathfindingTuner::GetSelectedOctreeVolumePath)
-					.OnObjectChanged_Lambda([this](const FAssetData& AssetData)
-					{
-						if (UObject* Object = AssetData.GetAsset())
-						{
-							CachedOctreeVolume = Cast<AOctreeVoxelVolume>(Object);
-						}
-						else
-						{
-							CachedOctreeVolume = nullptr;
-						}
-						Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
-					})
-					.DisplayBrowse(false)
-
-				]
+				SNew(STextBlock)
+				// 레이블 텍스트를 좀 더 명확하게 바꿉니다.
+				.Text(LOCTEXT("SelectedVolumeLabel", "Selected Volume(s):"))
+				.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
 			]
-			+ SVerticalBox::Slot()
+			+ SHorizontalBox::Slot()
+			.FillWidth(0.6f)
+			.VAlign(VAlign_Center)
+			[
+				// SObjectPropertyEntryBox 대신 STextBlock을 사용합니다.
+				SNew(STextBlock)
+				// 이 함수는 선택 상태에 따라 다른 텍스트를 반환합니다. (이전 답변 참고)
+				.Text(this, &SPathfindingTuner::GetSelectedVolumeDisplayText)
+				.Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont")) // 중요한 정보이므로 굵게 표시
+			]
+		]
+
+        	+ SVerticalBox::Slot()
 			.AutoHeight()
 			.Padding(8.0f, 5.0f)
 			[
@@ -332,81 +325,145 @@ TSharedRef<SWidget> SPathfindingTuner::BuildOctreeVolumeSettingsSection()
 					[
 						SNew(SButton)
 						.Text(FText::FromString(TEXT("...")))
-						.ToolTipText(LOCTEXT("BakedDataSaveDirectoryBrowseTooltip",
-						                     "Choose a directory from this computer"))
+						.ToolTipText(LOCTEXT("BakedDataSaveDirectoryBrowseTooltip", "Choose a directory from this computer"))
 						.OnClicked(this, &SPathfindingTuner::OnBrowseButtonClicked)
 					]
 				]
 			]
-			// MaxOctreeDepth 설정
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f, 5.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.4f)
-				.VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("MaxOctreeDepthLabel", "Max Octree Depth:"))
-					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-				]
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.6f)
-				[
-					SNew(SNumericEntryBox<int32>)
-					.Value(this, &SPathfindingTuner::GetMaxOctreeDepth)
-					.OnValueCommitted(this, &SPathfindingTuner::OnMaxOctreeDepthCommitted)
-					.MinValue(0)
-					.MaxValue(10)
-					.MinSliderValue(0)
-					.MaxSliderValue(8)
-					.Delta(1)
-				]
-			]
-			// VoxelSize 설정
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f, 5.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.4f)
-				.VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("VoxelSizeLabel", "Voxel Size:"))
-					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-				]
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.6f)
-				[
-					SNew(SNumericEntryBox<float>)
-					.Value(this, &SPathfindingTuner::GetVoxelSize)
-					.OnValueCommitted(this, &SPathfindingTuner::OnVoxelSizeCommitted)
-					.MinValue(1.0f)
-					.MaxValue(1000.0f)
-					.MinSliderValue(10.0f)
-					.MaxSliderValue(500.0f)
-					.Delta(1.0f)
-				]
-			]
-			// StaticObjectFilter 설정
+                // MaxOctreeDepth 설정
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(8.0f, 5.0f)
+                [
+                    SNew(SHorizontalBox)
+                    + SHorizontalBox::Slot()
+                    .FillWidth(0.4f)
+                    .VAlign(VAlign_Center)
+                    [
+                        SNew(STextBlock)
+                        .Text(LOCTEXT("MaxOctreeDepthLabel", "Max Octree Depth:"))
+                        .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                    ]
+                    + SHorizontalBox::Slot()
+                    .FillWidth(0.6f)
+                    [
+                        SNew(SNumericEntryBox<int32>)
+                        .Value(this, &SPathfindingTuner::GetMaxOctreeDepth)
+                        .OnValueCommitted(this, &SPathfindingTuner::OnMaxOctreeDepthCommitted)
+                        .MinValue(0)
+                        .MaxValue(10)
+                        .MinSliderValue(0)
+                        .MaxSliderValue(8)
+                        .Delta(1)
+                    ]
+                ]
+                // VoxelSize 설정
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(8.0f, 5.0f)
+                [
+                    SNew(SHorizontalBox)
+                    + SHorizontalBox::Slot()
+                    .FillWidth(0.4f)
+                    .VAlign(VAlign_Center)
+                    [
+                        SNew(STextBlock)
+                        .Text(LOCTEXT("VoxelSizeLabel", "Voxel Size:"))
+                        .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                    ]
+                    + SHorizontalBox::Slot()
+                    .FillWidth(0.6f)
+                    [
+                        SNew(SNumericEntryBox<float>)
+                        .Value(this, &SPathfindingTuner::GetVoxelSize)
+                        .OnValueCommitted(this, &SPathfindingTuner::OnVoxelSizeCommitted)
+                        .MinValue(1.0f)
+                        .MaxValue(1000.0f)
+                        .MinSliderValue(10.0f)
+                        .MaxSliderValue(500.0f)
+                        .Delta(1.0f)
+                    ]
+	                
+                ]
 
 
-		]
-		.InitiallyCollapsed(bInitiallyCollapsedOctreeSettings)
-		.OnAreaExpansionChanged_Raw(this, &SPathfindingTuner::OnOctreeSettingsCategoryExpansionChanged);
+        	+ SVerticalBox::Slot()
+		 .AutoHeight()
+		 .Padding(8.0f, 5.0f)
+		 [
+			 SNew(SHorizontalBox)
+			 + SHorizontalBox::Slot()
+			 .FillWidth(0.4f)
+			 .VAlign(VAlign_Center)
+			 [
+				 SNew(STextBlock)
+				 .Text(LOCTEXT("MapSizeLabel", "Map Size:"))
+				 .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+			 ]
+			 + SHorizontalBox::Slot()
+			 .FillWidth(0.6f)
+			 [
+				 SNew(SComboBox<TSharedPtr<int32>>)
+				 .OptionsSource(&MapSizeOptions)
+				 .OnSelectionChanged(this, &SPathfindingTuner::OnMapSizeSelectionChanged)
+				 .OnGenerateWidget_Lambda([](TSharedPtr<int32> Item)
+				 {
+					 return SNew(STextBlock).Text(FText::AsNumber(*Item));
+				 })
+				 .Content()
+				 [
+					 SNew(STextBlock)
+					 .Text(this, &SPathfindingTuner::GetSelectedMapSizeText)
+				 ]
+			 ]
+		 ]
+        ]
+    	
+    .InitiallyCollapsed(bInitiallyCollapsedOctreeSettings)
+    .OnAreaExpansionChanged_Raw(this, &SPathfindingTuner::OnOctreeSettingsCategoryExpansionChanged);
 }
 
 FText SPathfindingTuner::GetBakedDataSaveDirectoryAsText() const
 {
-	if (CachedOctreeVolume.IsValid())
+	// 이전에 만든 헬퍼 함수를 사용해 선택된 볼륨 목록을 가져옵니다.
+	const TArray<AOctreeVoxelVolume*> SelectedVolumes = GetSelectedVolumes();
+
+	if (SelectedVolumes.IsEmpty())
 	{
-		return FText::FromString(CachedOctreeVolume->BakedDataSaveDirectory.Path);
+		// 선택된 볼륨이 없으면 빈 텍스트를 반환합니다.
+		return FText::GetEmpty();
 	}
-	return FText::GetEmpty();
+
+	// 첫 번째 볼륨의 경로를 '기준'으로 삼습니다.
+	const FString FirstPath = SelectedVolumes[0]->BakedDataSaveDirectory.Path;
+
+	// 두 번째 볼륨부터 순회하며 기준 경로와 다른 것이 있는지 확인합니다.
+	for (int32 i = 1; i < SelectedVolumes.Num(); ++i)
+	{
+		if (SelectedVolumes[i]->BakedDataSaveDirectory.Path != FirstPath)
+		{
+			// 경로가 하나라도 다르면, 빈 텍스트를 반환합니다.
+			// 이렇게 하면 SEditableTextBox의 HintText("Multiple Values" 등으로 설정 가능)가 표시됩니다.
+			return FText::GetEmpty();
+		}
+	}
+
+	// 모든 볼륨의 경로가 동일하면, 그 경로를 반환합니다.
+	return FText::FromString(FirstPath);
+}
+
+/** LastSelectedActors에서 AOctreeVoxelVolume 타입의 액터만 반환합니다. */
+TArray<AOctreeVoxelVolume*> SPathfindingTuner::GetSelectedVolumes() const
+{
+	TArray<AOctreeVoxelVolume*> SelectedVolumes;
+	for (const TWeakObjectPtr<AActor>& ActorPtr : LastSelectedActors)
+	{
+		if (AOctreeVoxelVolume* Volume = Cast<AOctreeVoxelVolume>(ActorPtr.Get()))
+		{
+			SelectedVolumes.Add(Volume);
+		}
+	}
+	return SelectedVolumes;
 }
 
 void SPathfindingTuner::OnBakedDataSaveDirectoryTextCommitted(const FText& InText, ETextCommit::Type CommitInfo)
@@ -424,8 +481,7 @@ FReply SPathfindingTuner::OnBrowseButtonClicked()
 	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
 	if (DesktopPlatform)
 	{
-		const void* ParentWindowHandle = FSlateApplication::Get().GetActiveTopLevelWindow()->GetNativeWindow()->
-		                                                          GetOSWindowHandle();
+		const void* ParentWindowHandle = FSlateApplication::Get().GetActiveTopLevelWindow()->GetNativeWindow()->GetOSWindowHandle();
 		FString SelectedDirectory;
 		const FString DefaultPath = FPaths::ProjectContentDir();
 		const FString Title = TEXT("Select Save Directory");
@@ -449,9 +505,7 @@ FReply SPathfindingTuner::OnBrowseButtonClicked()
 			if (!StandardizedSelectedDir.StartsWith(StandardizedContentDir))
 			{
 				// 선택된 경로가 Content 폴더 내에 있지 않은 경우
-				FMessageDialog::Open(EAppMsgType::Ok,
-				                     LOCTEXT("InvalidPathMsg",
-				                             "Please select a directory inside the project's Content folder."));
+				FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("InvalidPathMsg", "Please select a directory inside the project's Content folder."));
 				return FReply::Handled(); // 경로 설정을 거부하고 함수 종료
 			}
 			// --- [유효성 검사 로직 끝] ---
@@ -465,887 +519,1141 @@ FReply SPathfindingTuner::OnBrowseButtonClicked()
 	return FReply::Handled();
 }
 
+// SPathfindingTuner.cpp
+
 void SPathfindingTuner::SetBakedDataSaveDirectory(const FString& NewPath)
 {
-	if (CachedOctreeVolume.IsValid())
+	// 1. 헬퍼 함수를 사용해 선택된 모든 유효한 볼륨을 가져옵니다.
+	const TArray<AOctreeVoxelVolume*> SelectedVolumes = GetSelectedVolumes();
+
+	// 2. 변경할 대상이 있는지 확인합니다.
+	if (SelectedVolumes.IsEmpty())
 	{
-		CachedOctreeVolume->Modify();
-		CachedOctreeVolume->BakedDataSaveDirectory.Path = NewPath;
+		ShowNoOctreeSelectedWarning();
+		return;
 	}
+
+	// 3. Undo/Redo를 위해 트랜잭션을 시작합니다. (루프 바깥에!)
+	const FScopedTransaction Transaction(LOCTEXT("SetSaveDirectoryTransaction_Setter", "Set Baked Data Save Directory"));
+
+	// 4. 선택된 모든 볼륨을 순회합니다.
+	for (AOctreeVoxelVolume* Volume : SelectedVolumes)
+	{
+		if (Volume)
+		{
+			// 5. 각 볼륨에 대해 Modify()를 호출하고 값을 설정합니다.
+			Volume->Modify();
+			Volume->BakedDataSaveDirectory.Path = NewPath;
+			Volume->MarkPackageDirty();
+		}
+	}
+    
+	// 6. (중요) UI를 새로고침하여 변경 사항을 즉시 반영합니다.
+	// 이 함수가 호출되었다는 것은 값이 변경되었다는 의미이므로,
+	// UI의 텍스트 박스도 갱신되어야 합니다.
+	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 }
 
 TSharedRef<SWidget> SPathfindingTuner::BuildBakedDataSettingsSection()
 {
-	return SNew(SExpandableArea) // 또는 SBorder 등 다른 레이아웃 위젯
-		.HeaderContent()
-		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("BakedDataSettingsCategory", "베이크된 데이터 설정 (Baked Data Settings)"))
-			.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
-			.ShadowOffset(FVector2D(1.0f, 1.0f))
-		]
-		.BodyContent()
-		[
-			SNew(SVerticalBox)
-			// BakedOctreeData 에셋 선택
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f, 5.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.4f)
-				.VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("BakedOctreeDataLabel", "Baked Octree Data Asset:"))
-					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-				]
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.6f)
-				[
-					SNew(SObjectPropertyEntryBox)
-					                             .AllowedClass(UOctreeDataAsset::StaticClass())
- // UOctreeDataAsset 클래스만 허용
-					                             .ObjectPath(this, &SPathfindingTuner::GetBakedOctreeDataPath)
-					                             .OnObjectChanged(this, &SPathfindingTuner::OnBakedOctreeDataChanged)
-					                             .DisplayUseSelected(false) // 돋보기 아이콘 숨김
-					                             .DisplayBrowse(false) // 폴더 아이콘 숨김
-				]
-			]
-		];
+    return SNew(SExpandableArea)
+        .IsEnabled(this, &SPathfindingTuner::IsOctreeSettingsEnabled)
+        .HeaderContent()
+        [
+            SNew(STextBlock)
+               .Text(LOCTEXT("BakedDataSettingsCategory", "베이크된 데이터 설정 (Baked Data Settings)"))
+               .Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
+               .ShadowOffset(FVector2D(1.0f, 1.0f))
+        ]
+        .BodyContent()
+        [
+            SNew(SVerticalBox)
+            // BakedOctreeData 에셋 선택
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(8.0f, 5.0f)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .FillWidth(0.4f)
+                .VAlign(VAlign_Center)
+                [
+                    SNew(STextBlock)
+                    .Text(LOCTEXT("BakedOctreeDataLabel", "Baked Octree Data Asset:"))
+                    .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                ]
+                + SHorizontalBox::Slot()
+                .FillWidth(0.6f)
+                [
+                    // ▼▼▼ UI 개선 부분 ▼▼▼
+                    SNew(SVerticalBox) // 세로 박스로 감싸서 두 줄로 만듭니다.
+
+                    // 1. 기존의 오브젝트 선택 박스
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SNew(SObjectPropertyEntryBox)
+                        .AllowedClass(UOctreeDataAsset::StaticClass())
+                        .ObjectPath(this, &SPathfindingTuner::GetBakedOctreeDataPath)
+                        .OnObjectChanged(this, &SPathfindingTuner::OnBakedOctreeDataChanged)
+                    ]
+
+                    // 2. 선택된 에셋의 전체 경로를 보여주는 텍스트 블록 (새로 추가)
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0, 4, 0, 0) // 위에 살짝 공간을 줍니다.
+                    [
+                    	SNew(STextBlock)
+						 // 바인딩할 함수 이름을 새로운 함수로 변경합니다.
+						 .Text(this, &SPathfindingTuner::GetBakedDataFullPathAsText) 
+						 .Font(FAppStyle::GetFontStyle("PropertyWindow.ItalicFont"))
+						 .ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)))
+                    ]
+                    // ▲▲▲ UI 개선 끝 ▲▲▲
+                ]
+            ]
+        ];
+}
+
+// SPathfindingTuner.cpp (소스 파일에 구현)
+FText SPathfindingTuner::GetBakedDataFullPathAsText() const
+{
+	const TArray<AOctreeVoxelVolume*> SelectedVolumes = GetSelectedVolumes();
+	if (SelectedVolumes.IsEmpty())
+	{
+		return FText::GetEmpty();
+	}
+
+	const UOctreeDataAsset* FirstDataAsset = SelectedVolumes[0]->GetBakedOctreeData();
+
+	for (int32 i = 1; i < SelectedVolumes.Num(); ++i)
+	{
+		if (SelectedVolumes[i]->GetBakedOctreeData() != FirstDataAsset)
+		{
+			return LOCTEXT("MultipleValues", "Multiple Values");
+		}
+	}
+
+	if (FirstDataAsset)
+	{
+		// ▼▼▼ 핵심 변경 부분 ▼▼▼
+		// 전체 경로에서 파일 이름을 제외한 디렉토리 경로만 가져옵니다.
+		const FString FullPath = FirstDataAsset->GetPathName();
+		const FString DirectoryPath = FPaths::GetPath(FullPath);
+		return FText::FromString(DirectoryPath);
+		// ▲▲▲ 핵심 변경 끝 ▲▲▲
+	}
+
+	return LOCTEXT("NonePath", "None");
 }
 
 TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
 {
-	const bool bInitiallyCollapsedAgent = !bIsAgentSettingsCategoryExpanded;
+      const bool bInitiallyCollapsedAgent = !bIsAgentSettingsCategoryExpanded;
 
-	return SNew(SExpandableArea)
-		.HeaderContent()
-		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("AgentSettingsCategory", "에이전트 설정 (Agent Settings)"))
-			.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
-			.ShadowOffset(FVector2D(1.0f, 1.0f))
-		]
-		.BodyContent()
-		[
-			SNew(SVerticalBox)
-			// --- 0. 선택된 에이전트 정보 표시 (새로 추가) ---
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f, 5.0f) // 다른 설정 항목과 패딩 통일
-			[
-				SNew(SHorizontalBox) // 수평 박스 추가
-				+ SHorizontalBox::Slot()
-				  .FillWidth(0.4f) // 레이블이 차지할 공간
-				  .VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					                .Text(LOCTEXT("SelectedActorLabel", "Selected Actor:")) // 고정 레이블
-					                .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont")) // 일반 폰트 사용
-				]
-				+ SHorizontalBox::Slot()
-				  .FillWidth(0.6f) // 액터 이름이 차지할 공간
-				  .VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					                .Text(this, &SPathfindingTuner::GetSelectedAgentName) // 바인딩된 액터 이름
-					                .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont")) // 일반 폰트 사용
-					                .ColorAndOpacity(FLinearColor(0.8f, 0.8f, 1.0f, 1.0f)) // 색상 유지
-					                .ShadowOffset(FVector2D(1.0f, 1.0f))
-				]
-			]
-			// Radius 설정
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f, 5.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.4f)
-				.VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("AgentRadiusLabel", "Agent Radius:"))
-					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-				]
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.6f)
-				[
-					SNew(SNumericEntryBox<float>)
-					.Value(this, &SPathfindingTuner::GetAgentRadius)
-					.OnValueCommitted(this, &SPathfindingTuner::OnAgentRadiusCommitted)
-					.MinValue(0.1f)
-					.MaxValue(1000.0f)
-					.MinSliderValue(10.0f)
-					.MaxSliderValue(200.0f)
-					.Delta(1.0f)
-				]
-			]
+    return SNew(SExpandableArea)
+    	.IsEnabled(this, &SPathfindingTuner::IsAgentSettingsEnabled)
+        .HeaderContent()
+        [
+            SNew(STextBlock)
+                .Text(LOCTEXT("AgentSettingsCategory", "에이전트 설정 (Agent Settings)"))
+                .Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
+                .ShadowOffset(FVector2D(1.0f, 1.0f))
+        ]
+        .BodyContent()
+        [
+            SNew(SVerticalBox)
+           // --- 0. 선택된 에이전트 정보 표시 (새로 추가) ---
+      + SVerticalBox::Slot()
+      .AutoHeight()
+           .Padding(8.0f, 5.0f) // 다른 설정 항목과 패딩 통일
+         [
+            SNew(SHorizontalBox) // 수평 박스 추가
+            + SHorizontalBox::Slot()
+            .FillWidth(0.4f) // 레이블이 차지할 공간
+            .VAlign(VAlign_Center)
+            [
+               SNew(STextBlock)
+               .Text(LOCTEXT("SelectedActorLabel", "Selected Actor:")) // 고정 레이블
+               .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont")) // 일반 폰트 사용
+            ]
+            + SHorizontalBox::Slot()
+            .FillWidth(0.6f) // 액터 이름이 차지할 공간
+            .VAlign(VAlign_Center)
+            [
+               SNew(STextBlock)
+               .Text(this, &SPathfindingTuner::GetSelectedAgentName) // 바인딩된 액터 이름
+               .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont")) // 일반 폰트 사용
+               .ColorAndOpacity(FLinearColor(0.8f, 0.8f, 1.0f, 1.0f)) // 색상 유지
+               .ShadowOffset(FVector2D(1.0f, 1.0f))
+            ]
+      ]
+                // Radius 설정
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(8.0f, 5.0f)
+                [
+                    SNew(SHorizontalBox)
+                    + SHorizontalBox::Slot()
+                    .FillWidth(0.4f)
+                    .VAlign(VAlign_Center)
+                    [
+                        SNew(STextBlock)
+                        .Text(LOCTEXT("AgentRadiusLabel", "Agent Radius:"))
+                        .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                    ]
+                    + SHorizontalBox::Slot()
+                    .FillWidth(0.6f)
+                    [
+                        SNew(SNumericEntryBox<float>)
+                        .Value(this, &SPathfindingTuner::GetAgentRadius)
+                        .OnValueCommitted(this, &SPathfindingTuner::OnAgentRadiusCommitted)
+                        .MinValue(0.1f)
+                        .MaxValue(1000.0f)
+                        .MinSliderValue(10.0f)
+                        .MaxSliderValue(200.0f)
+                        .Delta(1.0f)
+                    ]
+                ]
 
-			// Movement Speed 설정
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f, 5.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.4f)
-				.VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("MovementSpeedLabel", "Movement Speed:"))
-					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-				]
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.6f)
-				[
-					SNew(SNumericEntryBox<float>)
-					.Value(this, &SPathfindingTuner::GetMovementSpeed)
-					.OnValueCommitted(this, &SPathfindingTuner::OnMovementSpeedCommitted)
-					.MinValue(1.0f)
-					.MaxValue(1000.0f)
-					.MinSliderValue(100.0f)
-					.MaxSliderValue(500.0f)
-					.Delta(10.0f)
-				]
-			]
+                // Movement Speed 설정
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(8.0f, 5.0f)
+                [
+                    SNew(SHorizontalBox)
+                    + SHorizontalBox::Slot()
+                    .FillWidth(0.4f)
+                    .VAlign(VAlign_Center)
+                    [
+                        SNew(STextBlock)
+                        .Text(LOCTEXT("MovementSpeedLabel", "Movement Speed:"))
+                        .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                    ]
+                    + SHorizontalBox::Slot()
+                    .FillWidth(0.6f)
+                    [
+                        SNew(SNumericEntryBox<float>)
+                        .Value(this, &SPathfindingTuner::GetMovementSpeed)
+                        .OnValueCommitted(this, &SPathfindingTuner::OnMovementSpeedCommitted)
+                        .MinValue(1.0f)
+                        .MaxValue(1000.0f)
+                        .MinSliderValue(100.0f)
+                        .MaxSliderValue(500.0f)
+                        .Delta(10.0f)
+                    ]
+                ]
 
-			// Target Actor 선택
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f, 5.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.4f)
-				.VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("TargetActorLabel", "Target Actor:"))
-					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-				]
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.6f)
-				[
-					SNew(SObjectPropertyEntryBox)
-					                             .AllowedClass(AActor::StaticClass()) // 모든 액터 클래스 허용
-					                             .ObjectPath(this, &SPathfindingTuner::GetTargetActorPath)
-					                             .OnObjectChanged(this, &SPathfindingTuner::OnTargetActorChanged)
-					                             .DisplayBrowse(false)
-
-				]
-			]
-		]
-		.InitiallyCollapsed(bInitiallyCollapsedAgent)
-		.OnAreaExpansionChanged_Raw(this, &SPathfindingTuner::OnAgentSettingsCategoryExpansionChanged);
+                // Target Actor 선택
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(8.0f, 5.0f)
+                [
+                    SNew(SHorizontalBox)
+                    + SHorizontalBox::Slot()
+                    .FillWidth(0.4f)
+                    .VAlign(VAlign_Center)
+                    [
+                        SNew(STextBlock)
+                        .Text(LOCTEXT("TargetActorLabel", "Target Actor:"))
+                        .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                    ]
+                    + SHorizontalBox::Slot()
+                    .FillWidth(0.6f)
+                    [
+                        SNew(SObjectPropertyEntryBox)
+                        .AllowedClass(AActor::StaticClass()) // 모든 액터 클래스 허용
+                        .ObjectPath(this, &SPathfindingTuner::GetTargetActorPath) 
+                        .OnObjectChanged(this, &SPathfindingTuner::OnTargetActorChanged)
+                       .DisplayBrowse(false)
+                    
+                    ]
+                ]
+        ]
+    .InitiallyCollapsed(bInitiallyCollapsedAgent)
+    .OnAreaExpansionChanged_Raw(this, &SPathfindingTuner::OnAgentSettingsCategoryExpansionChanged);
 }
 
 bool SPathfindingTuner::IsAgentSettingsCategoryExpanded() const
 {
-	return bIsAgentSettingsCategoryExpanded;
+    return bIsAgentSettingsCategoryExpanded;
 }
 
 void SPathfindingTuner::OnAgentSettingsCategoryExpansionChanged(bool bIsExpanded)
 {
-	bIsAgentSettingsCategoryExpanded = bIsExpanded;
+    bIsAgentSettingsCategoryExpanded = bIsExpanded;
 }
 
 // Radius
 TOptional<float> SPathfindingTuner::GetAgentRadius() const
 {
-	// 만약 AgentRadius 값이 혼합 상태라면 (여러 액터의 값이 다르면)
-	if (bIsAgentRadiusMixed)
-	{
-		return TOptional<float>(); // UI에 "---" (혼합 값)을 표시하도록 빈 Optional 반환
-	}
-	// 혼합 상태가 아니거나 단일 액터만 선택된 경우, 캐시된 값을 반환
-	return CachedAgentRadiusValue;
+   // 만약 AgentRadius 값이 혼합 상태라면 (여러 액터의 값이 다르면)
+   if (bIsAgentRadiusMixed)
+   {
+      return TOptional<float>(); // UI에 "---" (혼합 값)을 표시하도록 빈 Optional 반환
+   }
+   // 혼합 상태가 아니거나 단일 액터만 선택된 경우, 캐시된 값을 반환
+   return CachedAgentRadiusValue; 
 }
 
 // SPathfindingTuner.cpp (OnAgentRadiusCommitted 함수)
 
+// SPathfindingTuner.cpp
 void SPathfindingTuner::OnAgentRadiusCommitted(float NewValue, ETextCommit::Type CommitType)
 {
-	// GEditor가 유효하고, 선택된 액터가 하나라도 있는지 확인합니다.
-	if (GEditor && LastSelectedActors.Num() > 0)
-	{
-		GEditor->BeginTransaction(LOCTEXT("SetAgentRadius", "Set Agent Radius"));
-		int32 ModifiedCount = 0; // 몇 개의 에이전트가 수정되었는지 카운트
 
-		// 선택된 모든 액터를 순회합니다.
-		for (TWeakObjectPtr<AActor> ActorPtr : LastSelectedActors)
+	// IsAgentSettingsEnabled() 덕분에 이 함수가 호출될 때는
+	// GEditor가 유효하고, PathfindingComponent를 가진 액터가 최소 하나 이상 선택된 상태임이 보장됩니다.
+    
+	GEditor->BeginTransaction(LOCTEXT("SetAgentRadius", "Set Agent Radius"));
+    
+	for (const TWeakObjectPtr<AActor>& ActorPtr : LastSelectedActors)
+	{
+		if (AActor* Actor = ActorPtr.Get())
 		{
-			if (AActor* Actor = ActorPtr.Get()) // 액터 포인터가 유효한지 확인
+			if (UPathfindingComponent* Comp = Actor->FindComponentByClass<UPathfindingComponent>())
 			{
-				// 액터에서 UPathfindingComponent를 찾습니다.
-				UPathfindingComponent* Comp = Actor->FindComponentByClass<UPathfindingComponent>();
-				if (Comp) // 컴포넌트가 유효한지 확인
-				{
-					Comp->Modify(); // 컴포넌트 수정 가능 상태로 만듭니다.
-					Comp->AgentRadius = NewValue; // 새로운 값 할당
-					Actor->MarkPackageDirty(); // 액터의 패키지를 더티로 표시하여 저장 가능하게 함
-					ModifiedCount++;
-				}
+				Comp->Modify();
+				Comp->AgentRadius = NewValue;
 			}
 		}
-		GEditor->EndTransaction();
-
-		// 로그 메시지 출력
-		if (ModifiedCount > 0)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("AgentRadius committed to: %f for %d selected agents."), NewValue,
-			       ModifiedCount);
-		}
-		else
-		{
-			UE_LOG(LogTemp, Warning,
-			       TEXT("OnAgentRadiusCommitted: No PathfindingComponent found among selected actors."));
-		}
-
-		// UI 캐시된 값 업데이트 및 혼합 상태 해제
-		CachedAgentRadiusValue = NewValue;
-		bIsAgentRadiusMixed = false;
-		Invalidate(EInvalidateWidgetReason::LayoutAndVolatility); // UI 새로고침
 	}
-	else
-	{
-		// 선택된 액터가 없거나 GEditor가 유효하지 않을 때 경고
-		UE_LOG(LogTemp, Warning,
-		       TEXT("OnAgentRadiusCommitted: No agents selected or GEditor is not valid. Cannot set AgentRadius."));
-		ShowNoAgentSelectedWarning(); // 이 함수는 제거하거나 실제 경고 메시지 박스 등으로 대체
-	}
+    
+	GEditor->EndTransaction();
+
+	UE_LOG(LogTemp, Log, TEXT("AgentRadius committed to: %f"), NewValue);
+    
+	// UI 캐시된 값 업데이트 및 혼합 상태 해제
+	CachedAgentRadiusValue = NewValue;
+	bIsAgentRadiusMixed = false;
+	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 }
 
 // Movement Speed
 TOptional<float> SPathfindingTuner::GetMovementSpeed() const
 {
-	if (bIsMovementSpeedMixed)
-	{
-		return TOptional<float>();
-	}
-	return CachedMovementSpeedValue;
+   if (bIsMovementSpeedMixed)
+   {
+      return TOptional<float>();
+   }
+   return CachedMovementSpeedValue;
 }
 
 // SPathfindingTuner.cpp (OnMovementSpeedCommitted 함수)
 
 void SPathfindingTuner::OnMovementSpeedCommitted(float NewValue, ETextCommit::Type CommitType)
 {
-	if (GEditor && LastSelectedActors.Num() > 0)
-	{
-		GEditor->BeginTransaction(LOCTEXT("SetMovementSpeed", "Set Movement Speed"));
-		int32 ModifiedCount = 0;
-		for (TWeakObjectPtr<AActor> ActorPtr : LastSelectedActors)
-		{
-			if (AActor* Actor = ActorPtr.Get())
-			{
-				if (UPathfindingComponent* Comp = Actor->FindComponentByClass<UPathfindingComponent>())
-				{
-					Comp->Modify();
-					Comp->MovementSpeed = NewValue;
-					Actor->MarkPackageDirty();
-					ModifiedCount++;
-				}
-			}
-		}
-		GEditor->EndTransaction();
+   if (GEditor && LastSelectedActors.Num() > 0)
+   {
+      GEditor->BeginTransaction(LOCTEXT("SetMovementSpeed", "Set Movement Speed"));
+      int32 ModifiedCount = 0;
+      for (TWeakObjectPtr<AActor> ActorPtr : LastSelectedActors)
+      {
+         if (AActor* Actor = ActorPtr.Get())
+         {
+            if (UPathfindingComponent* Comp = Actor->FindComponentByClass<UPathfindingComponent>())
+            {
+               Comp->Modify();
+               Comp->MovementSpeed = NewValue;
+               Actor->MarkPackageDirty();
+               ModifiedCount++;
+            }
+         }
+      }
+      GEditor->EndTransaction();
 
-		if (ModifiedCount > 0)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("MovementSpeed committed to: %f for %d selected agents."), NewValue,
-			       ModifiedCount);
-		}
-		else
-		{
-			UE_LOG(LogTemp, Warning,
-			       TEXT("OnMovementSpeedCommitted: No PathfindingComponent found among selected actors."));
-		}
+      if (ModifiedCount > 0)
+      {
+         UE_LOG(LogTemp, Warning, TEXT("MovementSpeed committed to: %f for %d selected agents."), NewValue, ModifiedCount);
+      }
+      else
+      {
+         UE_LOG(LogTemp, Warning, TEXT("OnMovementSpeedCommitted: No PathfindingComponent found among selected actors."));
+      }
 
-		CachedMovementSpeedValue = NewValue;
-		bIsMovementSpeedMixed = false;
-		Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
-	}
-	else
-	{
-		UE_LOG(LogTemp, Warning,
-		       TEXT("OnMovementSpeedCommitted: No agents selected or GEditor is not valid. Cannot set MovementSpeed."));
-	}
+      CachedMovementSpeedValue = NewValue;
+      bIsMovementSpeedMixed = false;
+      Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+   }
+   else
+   {
+      UE_LOG(LogTemp, Warning, TEXT("OnMovementSpeedCommitted: No agents selected or GEditor is not valid. Cannot set MovementSpeed."));
+   }
 }
 
 // Target Actor
 FString SPathfindingTuner::GetTargetActorPath() const
 {
-	// 만약 TargetActor 값이 혼합 상태라면
-	if (bIsTargetActorMixed)
-	{
-		return FString("---"); // UI에 "---" (혼합 값)을 표시하도록 빈 문자열 반환
-	}
+   // 만약 TargetActor 값이 혼합 상태라면
+   if (bIsTargetActorMixed)
+   {
+      return FString("---"); // UI에 "---" (혼합 값)을 표시하도록 빈 문자열 반환
+   }
 
-	// 혼합 상태가 아니거나 단일 액터만 선택된 경우, 캐시된 값을 반환
-	if (AActor* TargetActor = CachedTargetActorValue.Get()) // TWeakObjectPtr에서 실제 포인터 가져와 유효성 검사
-	{
-		return TargetActor->GetPathName(); // 액터의 경로 반환
-	}
-
-	return FString(); // 유효한 액터가 없으면 빈 문자열 반환
+   // 혼합 상태가 아니거나 단일 액터만 선택된 경우, 캐시된 값을 반환
+   if (AActor* TargetActor = CachedTargetActorValue.Get()) // TWeakObjectPtr에서 실제 포인터 가져와 유효성 검사
+   {
+      return TargetActor->GetPathName(); // 액터의 경로 반환
+   }
+    
+   return FString(); // 유효한 액터가 없으면 빈 문자열 반환
 }
 
 // SPathfindingTuner.cpp (OnTargetActorChanged 함수)
 
 void SPathfindingTuner::OnTargetActorChanged(const FAssetData& AssetData)
 {
-	// GEditor가 유효하고, 선택된 액터가 하나라도 있는지 확인합니다.
-	if (GEditor && LastSelectedActors.Num() > 0)
-	// <--- CachedPathfindingComponent.IsValid() 대신 LastSelectedActors.Num() > 0 사용
-	{
-		GEditor->BeginTransaction(LOCTEXT("SetTargetActor", "Set Target Actor"));
+    // GEditor가 유효하고, 선택된 액터가 하나라도 있는지 확인합니다.
+    if (GEditor && LastSelectedActors.Num() > 0) // <--- CachedPathfindingComponent.IsValid() 대신 LastSelectedActors.Num() > 0 사용
+    {
+        GEditor->BeginTransaction(LOCTEXT("SetTargetActor", "Set Target Actor"));
+        
+        // AssetData에서 새로운 TargetActor를 가져옵니다.
+        AActor* NewTargetActor = Cast<AActor>(AssetData.GetAsset());
+        int32 ModifiedCount = 0; // 몇 개의 에이전트가 수정되었는지 카운트
 
-		// AssetData에서 새로운 TargetActor를 가져옵니다.
-		AActor* NewTargetActor = Cast<AActor>(AssetData.GetAsset());
-		int32 ModifiedCount = 0; // 몇 개의 에이전트가 수정되었는지 카운트
+        // 선택된 모든 액터를 순회합니다.
+        for (TWeakObjectPtr<AActor> ActorPtr : LastSelectedActors)
+        {
+            if (AActor* Actor = ActorPtr.Get()) // 액터 포인터가 유효한지 확인
+            {
+                // 액터에서 UPathfindingComponent를 찾습니다.
+                UPathfindingComponent* Comp = Actor->FindComponentByClass<UPathfindingComponent>();
+                if (Comp) // 컴포넌트가 유효한지 확인
+                {
+                    Comp->Modify(); // 컴포넌트 수정 가능 상태로 만듭니다.
+                    Comp->TargetActor = NewTargetActor; // 새로운 TargetActor 할당
+                    Actor->MarkPackageDirty(); // 액터의 패키지를 더티로 표시하여 저장 가능하게 함
+                    ModifiedCount++;
+                }
+            }
+        }
+        GEditor->EndTransaction();
 
-		// 선택된 모든 액터를 순회합니다.
-		for (TWeakObjectPtr<AActor> ActorPtr : LastSelectedActors)
-		{
-			if (AActor* Actor = ActorPtr.Get()) // 액터 포인터가 유효한지 확인
-			{
-				// 액터에서 UPathfindingComponent를 찾습니다.
-				UPathfindingComponent* Comp = Actor->FindComponentByClass<UPathfindingComponent>();
-				if (Comp) // 컴포넌트가 유효한지 확인
-				{
-					Comp->Modify(); // 컴포넌트 수정 가능 상태로 만듭니다.
-					Comp->TargetActor = NewTargetActor; // 새로운 TargetActor 할당
-					Actor->MarkPackageDirty(); // 액터의 패키지를 더티로 표시하여 저장 가능하게 함
-					ModifiedCount++;
-				}
-			}
-		}
-		GEditor->EndTransaction();
+        // 로그 메시지 출력
+        if (ModifiedCount > 0)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("TargetActor committed to: %s for %d selected agents."), 
+                NewTargetActor ? *NewTargetActor->GetActorLabel() : TEXT("None"), ModifiedCount);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("OnTargetActorChanged: No PathfindingComponent found among selected actors."));
+        }
 
-		// 로그 메시지 출력
-		if (ModifiedCount > 0)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("TargetActor committed to: %s for %d selected agents."),
-			       NewTargetActor ? *NewTargetActor->GetActorLabel() : TEXT("None"), ModifiedCount);
-		}
-		else
-		{
-			UE_LOG(LogTemp, Warning,
-			       TEXT("OnTargetActorChanged: No PathfindingComponent found among selected actors."));
-		}
-
-		// UI 캐시된 값 업데이트 및 혼합 상태 해제
-		CachedTargetActorValue = NewTargetActor;
-		bIsTargetActorMixed = false;
-	}
-	else
-	{
-		// 선택된 액터가 없거나 GEditor가 유효하지 않을 때 경고
-		UE_LOG(LogTemp, Warning,
-		       TEXT("OnTargetActorChanged: No agents selected or GEditor is not valid. Cannot set TargetActor."));
-		// ShowNoAgentSelectedWarning(); // 이 함수는 제거하거나 실제 경고 메시지 박스 등으로 대체
-	}
-
-	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility); // UI 새로고침
+        // UI 캐시된 값 업데이트 및 혼합 상태 해제
+        CachedTargetActorValue = NewTargetActor;
+        bIsTargetActorMixed = false;
+    }
+    else
+    {
+        // 선택된 액터가 없거나 GEditor가 유효하지 않을 때 경고
+        UE_LOG(LogTemp, Warning, TEXT("OnTargetActorChanged: No agents selected or GEditor is not valid. Cannot set TargetActor."));
+        // ShowNoAgentSelectedWarning(); // 이 함수는 제거하거나 실제 경고 메시지 박스 등으로 대체
+    }
+   
+    Invalidate(EInvalidateWidgetReason::LayoutAndVolatility); // UI 새로고침
 }
 
+
+// SPathfindingTuner.cpp
 
 FString SPathfindingTuner::GetBakedOctreeDataPath() const
 {
-	if (AOctreeVoxelVolume* OctreeVolume = GetSelectedOctreeVolume().Get())
+	// 1. 선택된 모든 볼륨을 가져옵니다.
+	const TArray<AOctreeVoxelVolume*> SelectedVolumes = GetSelectedVolumes();
+
+	if (SelectedVolumes.IsEmpty())
 	{
-		if (UOctreeDataAsset* BakedData = OctreeVolume->GetBakedOctreeData()) // GetBakedOctreeData() 결과도 널 체크
+		return FString(); // 선택된 볼륨이 없으면 빈 경로 반환
+	}
+
+	// 2. 첫 번째 볼륨의 데이터 에셋을 '기준'으로 삼습니다.
+	const UOctreeDataAsset* FirstDataAsset = SelectedVolumes[0]->GetBakedOctreeData();
+
+	// 3. 나머지 볼륨들을 순회하며 기준 에셋과 다른 것이 있는지 확인합니다.
+	for (int32 i = 1; i < SelectedVolumes.Num(); ++i)
+	{
+		if (SelectedVolumes[i]->GetBakedOctreeData() != FirstDataAsset)
 		{
-			return BakedData->GetPathName();
+			// 4. 데이터 에셋이 하나라도 다르면, 빈 경로를 반환하여 "혼합 값" 상태를 만듭니다.
+			return FString();
 		}
 	}
+
+	// 5. 모든 볼륨의 데이터 에셋이 동일하면, 그 에셋의 경로를 반환합니다.
+	if (FirstDataAsset)
+	{
+		return FirstDataAsset->GetPathName();
+	}
+
+	// 모든 에셋이 비어있는(None) 경우, 빈 경로를 반환합니다.
 	return FString();
 }
 
+// SPathfindingTuner.cpp
+
 void SPathfindingTuner::OnBakedOctreeDataChanged(const FAssetData& AssetData)
 {
-	if (AOctreeVoxelVolume* OctreeVolume = GetSelectedOctreeVolume().Get())
-	{
-		if (GEditor)
-		{
-			UObject* AssetObject = AssetData.GetAsset();
-			UOctreeDataAsset* NewBakedData = Cast<UOctreeDataAsset>(AssetObject);
-
-			if (!NewBakedData && AssetObject)
-			{
-				UE_LOG(LogTemp, Warning,
-				       TEXT("OnBakedOctreeDataChanged: Selected asset is not a UOctreeDataAsset. Ignoring."));
-				return; // 타입이 맞지 않으면 함수 종료
-			}
-
-			GEditor->BeginTransaction(LOCTEXT("SetBakedOctreeData", "Set Baked Octree Data"));
-			OctreeVolume->Modify();
-
-			// AssetData에서 UOctreeDataAsset을 가져와 할당합니다.
-			OctreeVolume->SetBakedOctreeData(NewBakedData);
-
-			GEditor->EndTransaction();
-			OctreeVolume->MarkPackageDirty(); // 액터의 패키지를 더티로 표시하여 저장 가능하게 함
-
-			UE_LOG(LogTemp, Warning, TEXT("OctreeVoxelVolume '%s' BakedOctreeData changed to: %s"),
-			       *OctreeVolume->GetName(),
-			       OctreeVolume->GetBakedOctreeData() ? *OctreeVolume->GetBakedOctreeData()->GetName() : TEXT("None"));
-		}
-	}
-	else
+	// 1. 선택된 모든 볼륨을 가져옵니다.
+	const TArray<AOctreeVoxelVolume*> SelectedVolumes = GetSelectedVolumes();
+	if (SelectedVolumes.IsEmpty())
 	{
 		ShowNoOctreeSelectedWarning();
+		return; // 변경할 대상이 없으면 종료
 	}
-	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility); // UI 업데이트
+
+	// 2. AssetData에서 새로운 데이터 에셋 오브젝트를 가져옵니다.
+	UOctreeDataAsset* NewDataAsset = Cast<UOctreeDataAsset>(AssetData.GetAsset());
+
+	// 3. Undo/Redo를 위해 트랜잭션을 시작합니다.
+	const FScopedTransaction Transaction(LOCTEXT("SetBakedDataTransaction", "Set Baked Octree Data"));
+
+	// 4. 선택된 모든 볼륨을 순회하며 값을 변경합니다.
+	for (AOctreeVoxelVolume* Volume : SelectedVolumes)
+	{
+		if (Volume)
+		{
+			Volume->Modify();
+			// AOctreeVoxelVolume에 SetBakedOctreeData 함수가 있다고 가정합니다.
+			Volume->SetBakedOctreeData(NewDataAsset);
+			Volume->MarkPackageDirty();
+		}
+	}
+    
+	// UI를 새로고침하여 변경 사항을 즉시 반영합니다.
+	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+}
+
+FText SPathfindingTuner::GetSelectedMapSizeText() const
+{
+	const TArray<AOctreeVoxelVolume*> SelectedVolumes = GetSelectedVolumes();
+	if (SelectedVolumes.IsEmpty())
+	{
+		return LOCTEXT("NoVolumeSelected", "---");
+	}
+
+	// 첫 번째 볼륨의 MapSize를 기준으로 삼습니다.
+	const FIntVector FirstMapSize = SelectedVolumes[0]->MapSize;
+
+	// 기준 MapSize가 균일한지 (X=Y=Z) 확인합니다.
+	if (FirstMapSize.X != FirstMapSize.Y || FirstMapSize.Y != FirstMapSize.Z)
+	{
+		return LOCTEXT("CustomMapSize", "Custom Size");
+	}
+
+	// 나머지 볼륨들을 순회하며 기준과 다른 값이 있는지 확인합니다.
+	for (int32 i = 1; i < SelectedVolumes.Num(); ++i)
+	{
+		if (SelectedVolumes[i]->MapSize != FirstMapSize)
+		{
+			return LOCTEXT("MultipleMapSizes", "Multiple Values");
+		}
+	}
+
+	// 모든 값이 동일하면, 그 값을 텍스트로 반환합니다.
+	return FText::AsNumber(FirstMapSize.X);
+}
+
+void SPathfindingTuner::OnMapSizeSelectionChanged(
+	TSharedPtr<int32> NewSelection, ESelectInfo::Type SelectType)
+{
+	// 사용자가 직접 선택했을 때만 실행합니다.
+	if (SelectType == ESelectInfo::Type::OnMouseClick || SelectType == ESelectInfo::Type::OnKeyPress)
+	{
+		if (!NewSelection.IsValid()) return;
+
+		const int32 NewSize = *NewSelection;
+		const FIntVector NewMapSize(NewSize, NewSize, NewSize);
+
+		const TArray<AOctreeVoxelVolume*> SelectedVolumes = GetSelectedVolumes();
+		if (SelectedVolumes.IsEmpty()) return;
+
+		const FScopedTransaction Transaction(LOCTEXT("SetMapSizeTransaction", "Set Map Size"));
+
+		for (AOctreeVoxelVolume* Volume : SelectedVolumes)
+		{
+			if (Volume)
+			{
+				Volume->Modify();
+				Volume->MapSize = NewMapSize;
+				// MapSize는 액터의 외형에 영향을 주므로, OnConstruction을 다시 실행해야 합니다.
+				Volume->RerunConstructionScripts();
+			}
+		}
+	}
+}
+
+bool SPathfindingTuner::IsAgentSettingsEnabled() const
+{
+	// 선택된 액터가 없으면 비활성화
+	if (LastSelectedActors.Num() == 0)
+	{
+		return false;
+	}
+
+	// 선택된 액터 중에 PathfindingComponent를 가진 것이 하나라도 있는지 확인
+	for (const TWeakObjectPtr<AActor>& ActorPtr : LastSelectedActors)
+	{
+		if (AActor* Actor = ActorPtr.Get())
+		{
+			// OctreeVolume은 에이전트가 아니므로 무시
+			if (Actor->IsA<AOctreeVoxelVolume>())
+			{
+				continue;
+			}
+            
+			// PathfindingComponent가 발견되면 즉시 true를 반환
+			if (Actor->FindComponentByClass<UPathfindingComponent>())
+			{
+				return true;
+			}
+		}
+	}
+
+	// 루프가 끝날 때까지 PathfindingComponent를 찾지 못했다면 비활성화
+	return false;
 }
 
 FText SPathfindingTuner::GetSelectedAgentName() const
 {
-	if (LastSelectedActors.Num() == 0)
+	// 1. 헬퍼 함수를 호출하여 선택된 에이전트 목록을 가져옵니다.
+	const TArray<AActor*> SelectedAgents = GetSelectedAgents();
+	const int32 NumSelected = SelectedAgents.Num();
+
+	if (NumSelected == 0)
 	{
-		return LOCTEXT("NoAgentSelected", "No Agent or Volume Selected");
+		// 2. 선택된 에이전트가 없을 경우
+		return LOCTEXT("NoAgentSelected", "No Agent Selected");
 	}
-	else if (LastSelectedActors.Num() > 1)
+	else if (NumSelected == 1)
 	{
-		return FText::Format(
-			LOCTEXT("MultipleActorsSelected", "Multiple Actors Selected ({0})"),
-			FText::AsNumber(LastSelectedActors.Num()));
+		// 3. 하나의 에이전트만 선택된 경우: 해당 에이전트의 이름을 반환
+		// GetActorLabel()이 에디터에서 보이는 이름이라 더 좋습니다.
+		return FText::FromString(SelectedAgents[0]->GetActorLabel());
 	}
-	else // LastSelectedActors.Num() == 1
+	else // NumSelected > 1
 	{
-		if (AActor* SelectedActor = LastSelectedActors[0].Get())
+		// 4. 여러 에이전트가 선택된 경우: 개수를 요약해서 반환
+		return FText::Format(LOCTEXT("MultipleAgentsSelected", "{0} Agents Selected"), FText::AsNumber(NumSelected));
+	}
+}
+
+TArray<AActor*> SPathfindingTuner::GetSelectedAgents() const
+{
+	TArray<AActor*> SelectedAgents;
+	for (const TWeakObjectPtr<AActor>& ActorPtr : LastSelectedActors)
+	{
+		if (AActor* Actor = ActorPtr.Get())
 		{
-			if (SelectedActor->FindComponentByClass<UPathfindingComponent>())
+			if (Actor->FindComponentByClass<UPathfindingComponent>())
 			{
-				return FText::Format(
-					LOCTEXT("SelectedAgentFormat", "Selected Agent: {0}"),
-					FText::FromString(SelectedActor->GetActorLabel()));
-			}
-			else if (SelectedActor->IsA(AOctreeVoxelVolume::StaticClass()))
-			{
-				return FText::Format(
-					LOCTEXT("SelectedVolumeFormat", "Selected Volume: {0}"),
-					FText::FromString(SelectedActor->GetActorLabel()));
-			}
-			else
-			{
-				return FText::Format(
-					LOCTEXT("SelectedActorGenericFormat", "Selected Actor: {0}"),
-					FText::FromString(SelectedActor->GetActorLabel()));
+				SelectedAgents.Add(Actor);
 			}
 		}
-		else
-		{
-			return LOCTEXT("InvalidActorSelected", "Invalid Actor Selected");
-		}
 	}
+	return SelectedAgents;
 }
 
 // --- Performance Settings Callbacks ---
 TOptional<int32> SPathfindingTuner::GetCurrentNumThreads() const
 {
-	if (PathfindingSubsystem.IsValid())
-	{
-		return PathfindingSubsystem->GetNumWorkerThreads();
-	}
-	return TOptional<int32>();
+   if (PathfindingSubsystem.IsValid())
+   {
+      return PathfindingSubsystem->GetNumWorkerThreads();
+   }
+   return TOptional<int32>();
 }
 
-void SPathfindingTuner::OnNumThreadsChanged(int32 NewValue)
-{
-	// 값이 변경되는 동안에는 아무것도 하지 않거나, UI에만 임시 반영할 수 있습니다.
-	// 실제 값 변경 및 저장은 OnNumThreadsCommitted에서 처리합니다.
-}
 
 void SPathfindingTuner::OnNumThreadsCommitted(int32 NewValue, ETextCommit::Type CommitInfo)
 {
-	if (PathfindingSubsystem.IsValid())
-	{
-		PathfindingSubsystem->SetNumWorkerThreads(NewValue);
-		PathfindingSubsystem->SaveConfig();
-		UE_LOG(LogTemp, Warning, TEXT("PathfindingTuner: Num Threads Committed to: %d. Config Saved."), NewValue);
-		Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
-	}
-	else
-	{
-		UE_LOG(LogTemp, Error, TEXT("PathfindingTuner: PathfindingSubsystem is NOT valid. Cannot commit value."));
-	}
+   if (PathfindingSubsystem.IsValid())
+   {
+      PathfindingSubsystem->SetNumWorkerThreads(NewValue);
+      PathfindingSubsystem->SaveConfig();
+      UE_LOG(LogTemp, Warning, TEXT("PathfindingTuner: Num Threads Committed to: %d. Config Saved."), NewValue);
+      Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+   }
+   else
+   {
+      UE_LOG(LogTemp, Error, TEXT("PathfindingTuner: PathfindingSubsystem is NOT valid. Cannot commit value."));
+   }
 }
 
 bool SPathfindingTuner::IsPerformanceCategoryExpanded() const
 {
-	return bIsPerformanceCategoryExpanded;
+   return bIsPerformanceCategoryExpanded;
 }
 
 void SPathfindingTuner::OnPerformanceCategoryExpansionChanged(bool bIsExpanded)
 {
-	bIsPerformanceCategoryExpanded = bIsExpanded;
+   bIsPerformanceCategoryExpanded = bIsExpanded;
 }
 
 // --- Octree Volume Settings Callbacks ---
 
-// 현재 선택된 옥트리 볼륨을 가져오는 함수
-TWeakObjectPtr<AOctreeVoxelVolume> SPathfindingTuner::GetSelectedOctreeVolume() const
+bool SPathfindingTuner::IsOctreeSettingsEnabled() const
 {
-	return CachedOctreeVolume;
-}
-
-// Target Octree Volume 필드의 ObjectPath 바인딩을 위한 함수
-FString SPathfindingTuner::GetSelectedOctreeVolumePath() const
-{
-	if (AOctreeVoxelVolume* OctreeVolume = GetSelectedOctreeVolume().Get())
+	// 1. 선택된 액터가 하나도 없으면 비활성화합니다.
+	if (LastSelectedActors.Num() == 0)
 	{
-		return OctreeVolume->GetPathName();
+		return false;
 	}
-	return FString();
+
+	// 2. 선택된 모든 액터가 AOctreeVoxelVolume인지 확인합니다.
+	for (const TWeakObjectPtr<AActor>& ActorPtr : LastSelectedActors)
+	{
+		// 포인터가 유효하지 않거나, AOctreeVoxelVolume이 아닌 다른 클래스가 섞여 있으면 비활성화합니다.
+		if (!ActorPtr.IsValid() || !ActorPtr->IsA<AOctreeVoxelVolume>())
+		{
+			return false;
+		}
+	}
+
+	// 3. 루프를 무사히 통과했다면, 선택된 모든 액터가 AOctreeVoxelVolume이라는 의미이므로 활성화합니다.
+	return true;
 }
 
 // 액터 선택 변경 시 호출되는 함수
 void SPathfindingTuner::OnActorSelectionChanged()
 {
-	// 1. CachedOctreeVolume 업데이트 (첫 번째 OctreeVoxelVolume만 캐시)
-	CachedOctreeVolume = nullptr;
-	for (TWeakObjectPtr<AActor> ActorPtr : LastSelectedActors)
+	// 1. GEditor를 통해 현재 선택된 액터 목록을 직접 가져옵니다.
+	LastSelectedActors.Empty();
+	TArray<UObject*> SelectedObjects;
+	GEditor->GetSelectedActors()->GetSelectedObjects(SelectedObjects);
+
+	for (UObject* SelectedObject : SelectedObjects)
 	{
-		if (AActor* Actor = ActorPtr.Get())
+		if (AActor* Actor = Cast<AActor>(SelectedObject))
 		{
-			if (Actor->IsA(AOctreeVoxelVolume::StaticClass()))
-			{
-				CachedOctreeVolume = Cast<AOctreeVoxelVolume>(Actor);
-				break;
-			}
+			LastSelectedActors.Add(Actor);
 		}
 	}
 
-	// 2. CachedPathfindingComponent 업데이트 (첫 번째 PathfindingComponent를 가진 액터의 컴포넌트만 캐시)
-	CachedPathfindingComponent = nullptr;
-	for (TWeakObjectPtr<AActor> ActorPtr : LastSelectedActors)
+	// 2. 값 계산 함수 호출 (이 부분은 이전 설명과 동일)
+	UpdateAgentSettingsCache();
+	UpdateOctreeSettingsCache();
+
+	// 3. UI 새로고침 (이 부분도 동일)
+	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+}
+
+// SPathfindingTuner.cpp
+
+void SPathfindingTuner::UpdateOctreeSettingsCache()
+{
+	// 먼저, 옥트리 섹션이 활성화될 조건인지 확인합니다.
+	// (IsOctreeSettingsEnabled() 함수는 이미 만들어 두었습니다)
+	if (!IsOctreeSettingsEnabled())
 	{
-		if (AActor* Actor = ActorPtr.Get())
-		{
-			UPathfindingComponent* FoundComponent = Actor->FindComponentByClass<UPathfindingComponent>();
-			if (FoundComponent)
-			{
-				CachedPathfindingComponent = FoundComponent;
-				break;
-			}
-		}
+		// 비활성화 상태라면, 모든 관련 값을 초기화하고 끝냅니다.
+		bIsMaxOctreeDepthMixed = false;
+		CachedMaxOctreeDepth.Reset();
+		return;
 	}
 
-	// 3. 다중 선택 속성 값 집계 및 캐싱 (옵션 3 핵심 로직)
-	CachedAgentRadiusValue.Reset();
-	CachedMovementSpeedValue.Reset();
-	CachedTargetActorValue = nullptr;
-	bIsAgentRadiusMixed = false;
-	bIsMovementSpeedMixed = false;
-	bIsTargetActorMixed = false;
+	// 이제, 선택된 모든 옥트리의 값을 비교합니다.
+	TOptional<int32> FirstMaxDepth;
 
-	if (LastSelectedActors.Num() > 0)
+	// 혼합 상태를 false로 초기화
+	bIsMaxOctreeDepthMixed = false;
+
+	for (const TWeakObjectPtr<AActor>& ActorPtr : LastSelectedActors)
 	{
-		bool bFirstAgentFound = false;
-		float FirstRadius = 0.0f;
-		float FirstSpeed = 0.0f;
-		AActor* FirstTargetActor = nullptr;
-
-		for (TWeakObjectPtr<AActor> ActorPtr : LastSelectedActors)
+		// 액터를 AOctreeVoxelVolume으로 변환합니다.
+		if (AOctreeVoxelVolume* Volume = Cast<AOctreeVoxelVolume>(ActorPtr.Get()))
 		{
-			if (AActor* Actor = ActorPtr.Get())
+			// 첫 번째로 발견된 옥트리의 값을 '기준'으로 삼습니다.
+			if (!FirstMaxDepth.IsSet())
 			{
-				if (UPathfindingComponent* Comp = Actor->FindComponentByClass<UPathfindingComponent>())
+				FirstMaxDepth = Volume->GetMaxOctreeDepth();
+			}
+			// 두 번째 이후 옥트리부터는 '기준' 값과 비교합니다.
+			else
+			{
+				// MaxOctreeDepth 값이 기준과 다른지 확인
+				if (FirstMaxDepth.GetValue() != Volume->GetMaxOctreeDepth())
 				{
-					if (!bFirstAgentFound)
-					{
-						FirstRadius = Comp->AgentRadius;
-						FirstSpeed = Comp->MovementSpeed;
-						FirstTargetActor = Comp->TargetActor.Get();
-						bFirstAgentFound = true;
-					}
-					else
-					{
-						if (!FMath::IsNearlyEqual(Comp->AgentRadius, FirstRadius))
-						{
-							bIsAgentRadiusMixed = true;
-						}
-						if (!FMath::IsNearlyEqual(Comp->MovementSpeed, FirstSpeed))
-						{
-							bIsMovementSpeedMixed = true;
-						}
-						if (Comp->TargetActor.Get() != FirstTargetActor)
-						{
-							bIsTargetActorMixed = true;
-						}
-						if (bIsAgentRadiusMixed && bIsMovementSpeedMixed && bIsTargetActorMixed)
-						{
-							break;
-						}
-					}
+					bIsMaxOctreeDepthMixed = true;
 				}
 			}
 		}
+	}
 
-		if (bFirstAgentFound)
+	// 비교가 끝났으면, 최종적으로 UI에 표시될 값을 캐시 변수에 저장합니다.
+	CachedMaxOctreeDepth = bIsMaxOctreeDepthMixed ? TOptional<int32>() : FirstMaxDepth;
+}
+
+void SPathfindingTuner::UpdateAgentSettingsCache()
+{
+	// 먼저, 에이전트 섹션이 활성화될 조건인지 확인합니다.
+	// (IsAgentSettingsEnabled() 함수는 이미 만들어 두었습니다)
+	if (!IsAgentSettingsEnabled())
+	{
+		// 비활성화 상태라면, 모든 관련 값을 초기화하고 끝냅니다.
+		bIsAgentRadiusMixed = false;
+		bIsMovementSpeedMixed = false;
+		CachedAgentRadiusValue.Reset();
+		CachedMovementSpeedValue.Reset();
+		return;
+	}
+
+	// 이제, 선택된 모든 에이전트의 값을 비교합니다.
+	TOptional<float> FirstRadius;
+	TOptional<float> FirstSpeed;
+
+	// 혼합 상태를 false로 초기화
+	bIsAgentRadiusMixed = false;
+	bIsMovementSpeedMixed = false;
+
+	for (const TWeakObjectPtr<AActor>& ActorPtr : LastSelectedActors)
+	{
+		// 액터에서 PathfindingComponent를 찾습니다.
+		if (UPathfindingComponent* Comp = ActorPtr.IsValid() ? ActorPtr->FindComponentByClass<UPathfindingComponent>() : nullptr)
 		{
-			if (!bIsAgentRadiusMixed) CachedAgentRadiusValue = FirstRadius;
-			if (!bIsMovementSpeedMixed) CachedMovementSpeedValue = FirstSpeed;
-			if (!bIsTargetActorMixed) CachedTargetActorValue = FirstTargetActor;
+			// 첫 번째로 발견된 에이전트의 값을 '기준'으로 삼습니다.
+			if (!FirstRadius.IsSet())
+			{
+				FirstRadius = Comp->AgentRadius;
+				FirstSpeed = Comp->MovementSpeed;
+			}
+			// 두 번째 이후 에이전트부터는 '기준' 값과 비교합니다.
+			else
+			{
+				// Radius 값이 기준과 다른지 확인
+				if (FirstRadius.GetValue() != Comp->AgentRadius)
+				{
+					bIsAgentRadiusMixed = true;
+				}
+				// Speed 값이 기준과 다른지 확인
+				if (FirstSpeed.GetValue() != Comp->MovementSpeed)
+				{
+					bIsMovementSpeedMixed = true;
+				}
+			}
 		}
 	}
 
-	// 4. UI 업데이트 요청
-	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+	// 비교가 끝났으면, 최종적으로 UI에 표시될 값을 캐시 변수에 저장합니다.
+	// 만약 값이 혼합된 상태(bIs...Mixed == true)이면, 캐시 변수를 비웁니다(Reset).
+	CachedAgentRadiusValue = bIsAgentRadiusMixed ? TOptional<float>() : FirstRadius;
+	CachedMovementSpeedValue = bIsMovementSpeedMixed ? TOptional<float>() : FirstSpeed;
 }
 
 // MaxOctreeDepth
 TOptional<int32> SPathfindingTuner::GetMaxOctreeDepth() const
 {
-	if (AOctreeVoxelVolume* OctreeVolume = GetSelectedOctreeVolume().Get())
+	// 1. 선택된 '모든' 볼륨을 가져온다.
+	const TArray<AOctreeVoxelVolume*> SelectedVolumes = GetSelectedVolumes();
+
+	if (SelectedVolumes.IsEmpty())
 	{
-		return OctreeVolume->GetMaxOctreeDepth(); // AOctreeVoxelVolume의 GetMaxOctreeDepth() 함수를 호출한다고 가정
+		return TOptional<int32>(); // 선택된 것이 없으면 값을 표시하지 않음
 	}
-	return TOptional<int32>(); // 유효한 값을 반환할 수 없을 때
+
+	// 2. 첫 번째 볼륨의 값을 '기준'으로 삼는다.
+	const int32 FirstDepth = SelectedVolumes[0]->GetMaxOctreeDepth();
+
+	// 3. 나머지 볼륨들을 순회하며 기준과 다른 값이 있는지 확인한다.
+	for (int32 i = 1; i < SelectedVolumes.Num(); ++i)
+	{
+		if (SelectedVolumes[i]->GetMaxOctreeDepth() != FirstDepth)
+		{
+			// 4. 하나라도 다르면 "혼합 값" 상태이므로, 빈 Optional을 반환한다.
+			return TOptional<int32>();
+		}
+	}
+
+	// 5. 모든 값이 동일하면, 그 값을 반환한다.
+	return FirstDepth;
 }
 
 void SPathfindingTuner::OnMaxOctreeDepthCommitted(int32 NewValue, ETextCommit::Type CommitType)
 {
-	if (CachedOctreeVolume.IsValid())
+	// 사용자가 입력을 확정했을 때만 로직을 실행합니다.
+	if (CommitType != ETextCommit::OnEnter && CommitType != ETextCommit::OnUserMovedFocus)
 	{
-		if (GEditor)
+		return;
+	}
+
+	// 변경할 대상이 있는지 먼저 확인합니다.
+	bool bHasValidTarget = false;
+	for (const TWeakObjectPtr<AActor>& ActorPtr : LastSelectedActors)
+	{
+		if (Cast<AOctreeVoxelVolume>(ActorPtr.Get()))
 		{
-			GEditor->BeginTransaction(LOCTEXT("SetMaxOctreeDepth", "Set Max Octree Depth"));
-			CachedOctreeVolume->Modify();
-			CachedOctreeVolume->SetMaxOctreeDepth(NewValue); // AOctreeVoxelVolume의 SetMaxOctreeDepth 함수를 호출한다고 가정
-			GEditor->EndTransaction();
-			CachedOctreeVolume->MarkPackageDirty();
-			UE_LOG(LogTemp, Warning, TEXT("OctreeVoxelVolume '%s' MaxOctreeDepth committed to: %d"),
-			       *CachedOctreeVolume->GetName(), NewValue);
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("OnMaxOctreeDepthCommitted: GEditor is not valid."));
+			bHasValidTarget = true;
+			break;
 		}
 	}
-	else
+
+	if (!bHasValidTarget)
 	{
 		ShowNoOctreeSelectedWarning();
-		UE_LOG(LogTemp, Warning,
-		       TEXT("OnMaxOctreeDepthCommitted: No OctreeVoxelVolume selected or cached. Cannot set MaxOctreeDepth."));
+		UE_LOG(LogTemp, Warning, TEXT("OnMaxOctreeDepthCommitted: No valid OctreeVoxelVolume selected."));
+		return;
 	}
+
+	// FScopedTransaction을 사용하면 Begin/EndTransaction을 자동으로 관리해주고 더 안전합니다.
+	const FScopedTransaction Transaction(LOCTEXT("SetMaxOctreeDepthTransaction", "Set Max Octree Depth"));
+
+	// 선택된 모든 액터를 순회합니다.
+	for (const TWeakObjectPtr<AActor>& ActorPtr : LastSelectedActors)
+	{
+		// 액터가 유효하고, AOctreeVoxelVolume 타입인지 확인합니다.
+		if (AOctreeVoxelVolume* Volume = Cast<AOctreeVoxelVolume>(ActorPtr.Get()))
+		{
+			// Undo/Redo를 위해 Modify()를 호출합니다.
+			Volume->Modify();
+
+			// 새로운 값으로 속성을 설정합니다.
+			Volume->SetMaxOctreeDepth(NewValue);
+
+			// 변경 사항을 저장하기 위해 패키지를 더티(dirty) 상태로 만듭니다.
+			Volume->MarkPackageDirty();
+		}
+	}
+    
+	// 루프가 끝난 후, 모든 액터의 값이 변경되었으므로 UI 캐시를 업데이트합니다.
+	UpdateOctreeSettingsCache();
+	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+
+	UE_LOG(LogTemp, Log, TEXT("Committed MaxOctreeDepth for all selected OctreeVoxelVolumes to: %d"), NewValue);
 }
 
-// VoxelSize
+// SPathfindingTuner.cpp
+
 TOptional<float> SPathfindingTuner::GetVoxelSize() const
 {
-	if (AOctreeVoxelVolume* OctreeVolume = GetSelectedOctreeVolume().Get())
+	// 1. 선택된 모든 볼륨을 가져옵니다.
+	const TArray<AOctreeVoxelVolume*> SelectedVolumes = GetSelectedVolumes();
+
+	if (SelectedVolumes.IsEmpty())
 	{
-		return OctreeVolume->VoxelExtent;
+		return TOptional<float>(); // 선택된 것이 없으면 값을 표시하지 않음
 	}
-	return TOptional<float>();
+
+	// 2. 첫 번째 볼륨의 VoxelExtent를 '기준'으로 삼습니다.
+	const float FirstVoxelSize = SelectedVolumes[0]->VoxelExtent;
+
+	// 3. 나머지 볼륨들을 순회하며 기준과 다른 값이 있는지 확인합니다.
+	for (int32 i = 1; i < SelectedVolumes.Num(); ++i)
+	{
+		if (!FMath::IsNearlyEqual(SelectedVolumes[i]->VoxelExtent, FirstVoxelSize))
+		{
+			// 4. 하나라도 다르면 "혼합 값" 상태이므로, 빈 Optional을 반환합니다.
+			// float 비교는 IsNearlyEqual을 사용하는 것이 안전합니다.
+			return TOptional<float>();
+		}
+	}
+
+	// 5. 모든 값이 동일하면, 그 값을 반환합니다.
+	return FirstVoxelSize;
 }
 
 void SPathfindingTuner::OnVoxelSizeCommitted(float NewValue, ETextCommit::Type CommitType)
 {
-	if (AOctreeVoxelVolume* OctreeVolume = GetSelectedOctreeVolume().Get())
+	if (CommitType != ETextCommit::OnEnter && CommitType != ETextCommit::OnUserMovedFocus)
 	{
-		GEditor->BeginTransaction(LOCTEXT("SetVoxelSize", "Set Voxel Size"));
-		OctreeVolume->Modify();
-		OctreeVolume->VoxelExtent = NewValue;
-		GEditor->EndTransaction();
-		OctreeVolume->MarkPackageDirty();
+		return;
 	}
-	else
+
+	// 1. 선택된 모든 볼륨을 가져옵니다.
+	const TArray<AOctreeVoxelVolume*> SelectedVolumes = GetSelectedVolumes();
+	if (SelectedVolumes.IsEmpty())
 	{
 		ShowNoOctreeSelectedWarning();
+		return;
 	}
+
+	// 2. Undo/Redo를 위해 트랜잭션을 시작합니다.
+	const FScopedTransaction Transaction(LOCTEXT("SetVoxelSizeTransaction", "Set Voxel Size"));
+
+	// 3. 모든 볼륨을 순회하며 값을 변경합니다.
+	for (AOctreeVoxelVolume* Volume : SelectedVolumes)
+	{
+		if (Volume)
+		{
+			Volume->Modify();
+			Volume->VoxelExtent = NewValue;
+			Volume->MarkPackageDirty();
+			Volume->RerunConstructionScripts();
+		}
+	}
+    
+	// UI를 새로고침하여 변경 사항을 즉시 반영합니다.
+	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 }
 
-// StaticObjectFilter
+// SPathfindingTuner.cpp
+
 void SPathfindingTuner::OnStaticObjectFilterChanged(const FAssetData& AssetData)
 {
-	if (AOctreeVoxelVolume* OctreeVolume = GetSelectedOctreeVolume().Get())
+	// 1. 선택된 모든 볼륨을 가져옵니다.
+	const TArray<AOctreeVoxelVolume*> SelectedVolumes = GetSelectedVolumes();
+	if (SelectedVolumes.IsEmpty())
 	{
-		GEditor->BeginTransaction(LOCTEXT("SetStaticObjectFilter", "Set Static Object Filter"));
-		OctreeVolume->Modify();
-		OctreeVolume->SetStaticObstacleFilter(Cast<UVoxelObstacleFilter>(AssetData.GetAsset())); // 실제 필터 클래스 타입으로 변경
-		GEditor->EndTransaction();
-		OctreeVolume->MarkPackageDirty();
+		return; // 변경할 대상이 없으면 종료
 	}
+
+	// 2. AssetData에서 새로운 필터 오브젝트를 가져옵니다.
+	UVoxelObstacleFilter* NewFilter = Cast<UVoxelObstacleFilter>(AssetData.GetAsset());
+
+	// 3. Undo/Redo를 위해 트랜잭션을 시작합니다.
+	const FScopedTransaction Transaction(LOCTEXT("SetStaticFilterTransaction", "Set Static Obstacle Filter"));
+
+	// 4. 선택된 모든 볼륨을 순회하며 값을 변경합니다.
+	for (AOctreeVoxelVolume* Volume : SelectedVolumes)
+	{
+		if (Volume)
+		{
+			Volume->Modify();
+			// AOctreeVoxelVolume에 SetStaticObstacleFilter 함수가 있다고 가정합니다.
+			Volume->SetStaticObstacleFilter(NewFilter);
+			Volume->MarkPackageDirty();
+		}
+	}
+    
+	// UI를 새로고침하여 변경 사항을 즉시 반영합니다.
+	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 }
 
 FString SPathfindingTuner::GetStaticObjectFilterPath() const
 {
-	if (AOctreeVoxelVolume* OctreeVolume = GetSelectedOctreeVolume().Get())
+	// 1. 선택된 모든 볼륨을 가져옵니다.
+	const TArray<AOctreeVoxelVolume*> SelectedVolumes = GetSelectedVolumes();
+
+	if (SelectedVolumes.IsEmpty())
 	{
-		if (UVoxelObstacleFilter* Filter = OctreeVolume->GetStaticObstacleFilter())
-		// AOctreeVoxelVolume의 GetStaticObstacleFilter() 함수를 호출한다고 가정
+		return FString(); // 선택된 볼륨이 없으면 빈 경로 반환
+	}
+
+	// 2. 첫 번째 볼륨의 필터를 '기준'으로 삼습니다.
+	// GetStaticObstacleFilter()가 UVoxelObstacleFilter*를 반환한다고 가정합니다.
+	const UVoxelObstacleFilter* FirstFilter = SelectedVolumes[0]->GetStaticObstacleFilter();
+
+	// 3. 나머지 볼륨들을 순회하며 기준 필터와 다른 것이 있는지 확인합니다.
+	for (int32 i = 1; i < SelectedVolumes.Num(); ++i)
+	{
+		if (SelectedVolumes[i]->GetStaticObstacleFilter() != FirstFilter)
 		{
-			return Filter->GetPathName();
+			// 4. 필터가 하나라도 다르면, 빈 경로를 반환하여 "혼합 값" 상태를 만듭니다.
+			return FString();
 		}
 	}
-	return FString();
+
+	// 5. 모든 볼륨의 필터가 동일하면, 그 필터의 경로를 반환합니다.
+	if (FirstFilter)
+	{
+		return FirstFilter->GetPathName();
+	}
+
+	return FString(); // 모든 필터가 비어있는(None) 경우
 }
 
 // DynamicObjectFilter (제거됨)
 
-// Bake 버튼 클릭 핸들러
 FReply SPathfindingTuner::OnBakeButtonClicked()
 {
-	AOctreeVoxelVolume* OctreeVolume = GetSelectedOctreeVolume().Get();
-	if (!OctreeVolume)
+	const TArray<AOctreeVoxelVolume*> SelectedVolumes = GetSelectedVolumes();
+	if (SelectedVolumes.IsEmpty())
 	{
 		ShowNoOctreeSelectedWarning();
-		UE_LOG(LogTemp, Warning, TEXT("No OctreeVoxelVolume selected or found to bake."));
 		return FReply::Handled();
 	}
 
-	// --- [추가된 예외 처리 로직 시작] ---
-	// 베이크 데이터 저장 경로가 설정되었는지 확인합니다.
-	if (OctreeVolume->BakedDataSaveDirectory.Path.IsEmpty())
+	// [사전 검사] - 옵션 2와 동일
+	for (AOctreeVoxelVolume* Volume : SelectedVolumes)
 	{
-		// 경로가 비어있으면 사용자에게 경고 메시지를 띄웁니다.
-		FMessageDialog::Open(EAppMsgType::Ok,
-		                     LOCTEXT("BakePathNotSetWarning",
-		                             "Cannot start baking.\n\nPlease set the 'Baked Data Save Directory' in the Octree Volume Settings first."));
-
-		UE_LOG(LogTemp, Error, TEXT("Baking failed: 'Baked Data Save Directory' is not set for %s."),
-		       *OctreeVolume->GetName());
-
-		// 베이크 프로세스를 중단합니다.
-		return FReply::Handled();
-	}
-
-	if (!OctreeVolume->GetStaticObstacleFilter())
-	{
-		EAppReturnType::Type UserResponse = EAppReturnType::Cancel;
-
-		TSharedRef<SWindow> ConfirmationWindow = SNew(SWindow)
-			.Title(LOCTEXT("BakingConfirmationTitle", "Baking Confirmation"))
-			.SizingRule(ESizingRule::Autosized)
-			.SupportsMaximize(false)
-			.SupportsMinimize(false);
-
-		TSharedPtr<SButton> YesButton;
-
-		// --- [UI 개선 부분 시작] ---
-		ConfirmationWindow->SetContent(
-			SNew(SBorder)
-			             .BorderImage(FAppStyle::GetBrush("Menu.Background")) // 창 배경 스타일
-			             .Padding(FMargin(10.0f))
-			[
-				SNew(SHorizontalBox)
-
-				// 1. 경고 아이콘 추가
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Top)
-				.Padding(0, 0, 12, 0)
-				[
-					SNew(SImage)
-					.Image(FAppStyle::GetBrush("MessageLog.Warning")) // 표준 경고 아이콘
-				]
-
-				// 2. 텍스트와 버튼을 담을 수직 박스
-				+ SHorizontalBox::Slot()
-				.FillWidth(1.0f)
-				[
-					SNew(SVerticalBox)
-
-					// 메시지 텍스트
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0, 0, 0, 12)
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("FilterNotSetMessage",
-						              "The 'Static Object Filter' is not set.\n\nThe system will fall back to the default behavior: baking all 'WorldStatic' objects as permanent obstacles.\n\nIs this okay?"))
-						.Font(FAppStyle::GetFontStyle("StandardDialog.LargeFont"))
-						.AutoWrapText(true) // 텍스트가 길어지면 자동 줄바꿈
-					]
-
-					// 버튼 영역
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.HAlign(HAlign_Right)
-					[
-						SNew(SUniformGridPanel)
-						.SlotPadding(FAppStyle::GetMargin("StandardDialog.SlotPadding"))
-						+ SUniformGridPanel::Slot(0, 0)
-						[
-							SAssignNew(YesButton, SButton)
-							.HAlign(HAlign_Center)
-							.ContentPadding(FAppStyle::GetMargin("StandardDialog.ContentPadding"))
-							.Text(LOCTEXT("Yes", "Yes"))
-							.OnClicked_Lambda([&]()
-							{
-								UserResponse = EAppReturnType::Yes;
-								ConfirmationWindow->RequestDestroyWindow();
-								return FReply::Handled();
-							})
-						]
-						+ SUniformGridPanel::Slot(1, 0)
-						[
-							SNew(SButton)
-							.HAlign(HAlign_Center)
-							.ContentPadding(FAppStyle::GetMargin("StandardDialog.ContentPadding"))
-							.Text(LOCTEXT("No", "No"))
-							.OnClicked_Lambda([&]()
-							{
-								UserResponse = EAppReturnType::No;
-								ConfirmationWindow->RequestDestroyWindow();
-								return FReply::Handled();
-							})
-						]
-					]
-				]
-			]
-		);
-		// --- [UI 개선 부분 끝] ---
-
-		ConfirmationWindow->SetWidgetToFocusOnActivate(YesButton);
-		FSlateApplication::Get().AddModalWindow(ConfirmationWindow, FSlateApplication::Get().GetActiveTopLevelWindow());
-
-		if (UserResponse != EAppReturnType::Yes)
+		if (Volume->BakedDataSaveDirectory.Path.IsEmpty())
 		{
-			UE_LOG(LogTemp, Warning,
-			       TEXT("Baking cancelled by user. Please set a 'Static Object Filter' to define what to bake."));
+			FText ErrorMsg = FText::Format(LOCTEXT("BakePathNotSetForOne", "Cannot start baking. 'Baked Data Save Directory' is not set for {0}."), FText::FromString(Volume->GetActorLabel()));
+			FMessageDialog::Open(EAppMsgType::Ok, ErrorMsg);
 			return FReply::Handled();
 		}
 	}
+    
+	// [다중 선택 확인]
+	if (SelectedVolumes.Num() > 1)
+	{
+		FText ConfirmationMessage = FText::Format(
+			LOCTEXT("MultiBakeConfirmation", "You have selected {0} volumes to bake.\nThis process could take a long time and may cause the editor to become unresponsive.\n\nDo you want to continue?"),
+			FText::AsNumber(SelectedVolumes.Num())
+		);
 
-	// 경로가 유효하므로 트랜잭션을 시작하고 베이크를 진행합니다.
-	GEditor->BeginTransaction(LOCTEXT("BakeOctreeData", "Bake Octree Data"));
-	OctreeVolume->Modify();
+		EAppReturnType::Type UserResponse = FMessageDialog::Open(EAppMsgType::YesNo, ConfirmationMessage);
 
-	OctreeVolume->BakeStaticData();
+		if (UserResponse != EAppReturnType::Yes)
+		{
+			// 사용자가 'No'를 선택하면 작업을 취소합니다.
+			return FReply::Handled();
+		}
+	}
+    
+	// (필요하다면 필터 미설정 경고도 여기에 통합할 수 있습니다)
 
-	GEditor->EndTransaction();
-	// OctreeVolume->MarkPackageDirty(); // BakeStaticData 내부에서 Save가 호출된다면 이 줄은 필요 없을 수 있습니다.
-	// Save 로직이 패키지를 dirty로 만들기 때문입니다.
-
-	UE_LOG(LogTemp, Log, TEXT("Bake button clicked for %s"), *OctreeVolume->GetName());
+	// [베이크 실행]
+	const FScopedTransaction Transaction(LOCTEXT("BakeOctreeDataTransaction", "Bake Octree Data"));
+	for (AOctreeVoxelVolume* Volume : SelectedVolumes)
+	{
+		Volume->Modify();
+		Volume->BakeStaticData();
+	}
 
 	return FReply::Handled();
 }
 
 void SPathfindingTuner::OnOctreeSettingsCategoryExpansionChanged(bool bIsExpanded)
 {
-	bIsOctreeSettingsCategoryExpanded = bIsExpanded;
+   bIsOctreeSettingsCategoryExpanded = bIsExpanded;
 }
 
 void SPathfindingTuner::ShowNoOctreeSelectedWarning() const
 {
-	FMessageDialog::Open(
-		EAppMsgType::Ok,
-		LOCTEXT("NoOctreeSelected",
-		        "No Octree Volume selected.\nPlease select a valid Octree Volume to proceed.")
-	);
+   FMessageDialog::Open(
+      EAppMsgType::Ok, 
+      LOCTEXT("NoOctreeSelected", 
+         "No Octree Volume selected.\nPlease select a valid Octree Volume to proceed.")
+   );
 }
 
 void SPathfindingTuner::ShowNoAgentSelectedWarning() const
 {
-	FMessageDialog::Open(
-		EAppMsgType::Ok,
-		LOCTEXT("NoAgentSelected",
-		        "No agent assigned.\nPlease select a valid pathfinding agent.")
-	);
+   FMessageDialog::Open(
+      EAppMsgType::Ok, 
+      LOCTEXT("NoAgentSelected", 
+         "No agent assigned.\nPlease select a valid pathfinding agent.")
+   );
+}
+
+FText SPathfindingTuner::GetSelectedVolumeDisplayText() const
+{
+    // LastSelectedActors에서 AOctreeVoxelVolume 타입만 필터링하여 개수를 셉니다.
+    TArray<AOctreeVoxelVolume*> SelectedVolumes;
+    for (const TWeakObjectPtr<AActor>& ActorPtr : LastSelectedActors)
+    {
+        if (AOctreeVoxelVolume* Volume = Cast<AOctreeVoxelVolume>(ActorPtr.Get()))
+        {
+            SelectedVolumes.Add(Volume);
+        }
+    }
+
+    const int32 NumSelected = SelectedVolumes.Num();
+
+    if (NumSelected == 0)
+    {
+        // 1. 선택된 볼륨이 없을 경우
+        return LOCTEXT("NoVolumeSelected", "None");
+    }
+    else if (NumSelected == 1)
+    {
+        // 2. 하나의 볼륨만 선택된 경우: 해당 볼륨의 이름을 반환
+        return FText::FromString(SelectedVolumes[0]->GetActorLabel()); // GetActorLabel()이 더 사용자 친화적일 수 있습니다.
+    }
+    else // NumSelected > 1
+    {
+        // 3. 여러 볼륨이 선택된 경우: 개수를 요약해서 반환
+        return FText::Format(LOCTEXT("MultipleVolumesSelected", "{0} Volumes Selected"), FText::AsNumber(NumSelected));
+    }
 }

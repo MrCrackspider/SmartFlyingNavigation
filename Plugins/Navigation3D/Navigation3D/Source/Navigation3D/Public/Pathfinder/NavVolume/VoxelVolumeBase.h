@@ -86,7 +86,6 @@ public:
 	TArray<AActor*> BakeExcludeActors;
 
 #if WITH_EDITOR
-	UFUNCTION(CallInEditor, Category = "Baking")
 	virtual void BakeStaticData();
 #endif
 
