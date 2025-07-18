@@ -2,7 +2,6 @@
 
 
 #include "Pathfinder/NavData/VoxelObstacleFilter.h"
-#include "GameplayTagAssetInterface.h"
 #include "Components/PrimitiveComponent.h"
 
 bool UVoxelObstacleFilter::DoesActorMatch(const AActor* InActor, const UPrimitiveComponent* InPrimitiveComponent) const

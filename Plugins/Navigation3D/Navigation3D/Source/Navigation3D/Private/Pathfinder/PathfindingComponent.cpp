@@ -151,11 +151,8 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 		Request.OnWorldPathComplete.BindDynamic(this, &UPathfindingComponent::HandleWorldPathResult);
 
 		// --- 3. Create a thread-safe data snapshot using the optimized helper function. ---
-		FOctreePathfindingData OctreeSnapshot;
-		CreateOctreeDataSnapshot(OctreeVolume, OctreeSnapshot);
+		CreateOctreeDataSnapshot(OctreeVolume, Request.NavigationData);
         
-		// Move the created snapshot into the request payload.
-		Request.NavigationData.Emplace<FOctreePathfindingData>(MoveTemp(OctreeSnapshot));
 		bRequestDataValid = true;
 	}
 

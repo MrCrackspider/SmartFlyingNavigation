@@ -4,20 +4,16 @@
 #include "Pathfinder/Strategy/AStarStrategy.h"
 #include "Pathfinder/Utility/AStarStrategyUtils.h"
 
-#include "Pathfinder/Utility/StrategyUtils.h"
-
 void UAStarStrategy::Initialize()
 {
 }
 
 bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FVector>& OutPath)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_FindPathWithStrategy); // Insights에서 이 이름으로 표시됩니다.
+	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_FindPathWithStrategy);
+	
+	const FOctreePathfindingData& OctreeData = InRequest.NavigationData;
 
-	// 1. 요청에서 옥트리 데이터 스냅샷을 가져옵니다.
-	const FOctreePathfindingData& OctreeData = InRequest.NavigationData.Get<FOctreePathfindingData>();
-
-	// 2. 시작점과 끝점이 유효한 'Empty' 리프 노드에 있는지 확인합니다.
 	const int32 StartNodeIndex = OctreeData.FindLeafNodeAt(InRequest.StartLocation);
 	int32 GoalNodeIndex = OctreeData.FindLeafNodeAt(InRequest.EndLocation);
 
@@ -28,12 +24,10 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	if (StartNodeIndex == -1 || OctreeData.StaticNodePool[StartNodeIndex].State != EOctreeNodeState::Empty)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("A* (Octree) Failed: Start location is invalid or inside a solid node."));
-		return false;
 	}
 
 	if (bIsGoalNodeInvalid)
 	{
-		// 목표 지점이 유효하지 않으면, 에이전트 크기를 고려하여 "진짜 유효한" 주변 노드를 찾습니다.
 		const int32 NewGoalNodeIndex = OctreeData.FindNearestValidLeafForAgent(
 			InRequest.EndLocation,
 			InRequest.AgentRadius,
@@ -97,7 +91,7 @@ FName UAStarStrategy::GetStrategyName() const
 
 
 // =======================================================================
-// FAstarPathfinder: 전문가(일꾼) 역할
+// FAstarPathfinder
 // =======================================================================
 
 FAstarPathfinder::FAstarPathfinder(const FOctreePathfindingData& InOctreeData, int32 InStartIndex, int32 InEndIndex,
@@ -177,7 +171,7 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 			const float NodeRadius = Pool[SuccIdx].MaxAllowedRadius;
 			if (NodeRadius < AgentRadius)
 			{
-				continue; // 좁아서 통과 불가 -> 후보에서 완전 제거
+				continue;
 			}
 
 
@@ -229,17 +223,6 @@ bool FAstarPathfinder::HasFastLineOfSight(const FVector& Start, const FVector& E
 
 	TArray<int32> CenterlineNodes;
 	return OctreeData.VoxelRayMarch(Start, End, CenterlineNodes);
-
-	// // --- 2단계: 안전 여유 공간(Clearance) 검사 ---
-	// for (const int32 NodeIndex : CenterlineNodes)
-	// {
-	// 	const float NodeMinHalfExtent = OctreeData.StaticNodePool[NodeIndex].Bounds.GetExtent().GetMin();
-	// 	if (NodeMinHalfExtent < AgentRadius)
-	// 	{
-	// 		return  false; //!OctreeData.CheckForSolidNodesInCapsule(Start, End, AgentRadius);
-	// 	}
-	// }
-	// return true;
 }
 
 void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<FVector>& OutPath)
@@ -274,7 +257,6 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 	int32 CurrentPointIndex = 0;
 	while (CurrentPointIndex < RawPath.Num() - 1)
 	{
-		// --- 이진 탐색 로직 시작 ---
 		int32 LookAheadLow = CurrentPointIndex + 1;
 		int32 LookAheadHigh = RawPath.Num() - 1;
 		int32 BestLookAheadIndex = LookAheadLow;
@@ -283,7 +265,6 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 		{
 			const int32 Mid = LookAheadLow + (LookAheadHigh - LookAheadLow) / 2;
 
-			// 현재 지점(OutPath.Last())에서 중간 지점(Mid)까지 시야가 확보되는지 확인
 			if (HasFastLineOfSight(OutPath.Last(), RawPath[Mid]))
 			{
 				BestLookAheadIndex = Mid;
@@ -297,13 +278,11 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 
 		OutPath.Add(RawPath[BestLookAheadIndex]);
 
-		// 만약 찾은 점이 최종 목적지였다면 루프를 완전히 종료
 		if (BestLookAheadIndex == RawPath.Num() - 1)
 		{
 			break;
 		}
 
-		// 현재 위치를 방금 추가한 웨이포인트로 점프
 		CurrentPointIndex = BestLookAheadIndex;
 	}
 }

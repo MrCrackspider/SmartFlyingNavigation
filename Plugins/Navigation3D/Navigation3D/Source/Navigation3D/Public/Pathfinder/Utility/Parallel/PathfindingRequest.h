@@ -4,11 +4,9 @@
 
 #include "CoreMinimal.h"
 #include "Pathfinder/NavCore/OctreePathfindingData.h"
-#include "Pathfinder/Utility/Parallel/ThreadSafeBitmask.h"
 #include "Pathfinder/Utility/Parallel/MemoryPool.h"
 #include "PathfindingRequest.generated.h"
 
-DECLARE_DYNAMIC_DELEGATE_TwoParams(FVoxelPathfindingResultDelegate, const TArray<FIntVector>&, Path, bool, bSuccess);
 DECLARE_DYNAMIC_DELEGATE_TwoParams(FWorldPathfindingResultDelegate, const TArray<FVector>&, Path, bool, bSuccess);
 
 class UPathfindingComponent;
@@ -28,22 +26,13 @@ struct FPathfindingRequest
 
 	UPROPERTY()
 	TWeakObjectPtr<UPathfindingStrategy> Strategy;
-
-	UPROPERTY()
-	FIntVector StartIndex;
-
-	UPROPERTY()
-	FIntVector EndIndex;
-
+	
 	UPROPERTY()
 	FVector StartLocation;
 
 	UPROPERTY()
 	FVector EndLocation;
-
 	
-	UPROPERTY()
-	int32 AgentRadiusInVoxels = 0;
 
 	UPROPERTY()
 	int32 AgentRadius = 0;
@@ -51,14 +40,12 @@ struct FPathfindingRequest
 	UPROPERTY()
 	int32 Priority = 0;
 
-	/** 길찾기를 요청한 컴포넌트 또는 액터. 콜백 시 유효성 검사에 사용됩니다. */
 	UPROPERTY()
 	TWeakObjectPtr<UObject> RequestingObject;
 	
-	FVoxelPathfindingResultDelegate OnVoxelPathComplete;
 	FWorldPathfindingResultDelegate OnWorldPathComplete;
 
-	TVariant<FThreadSafeBitmaskGrid, FOctreePathfindingData> NavigationData;
+	FOctreePathfindingData NavigationData;
 	
 	FPathNodeMemoryPoolBase* MemoryPool = nullptr;
 

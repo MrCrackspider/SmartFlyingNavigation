@@ -23,24 +23,19 @@ void UDynamicObstacleComponent::BeginPlay()
 		return;
 	}
 
-	// 1. 월드에 있는 모든 네비게이션 볼륨을 찾습니다.
 	TArray<AActor*> FoundVolumes;
 	UGameplayStatics::GetAllActorsOfClass(GetWorld(), AOctreeVoxelVolume::StaticClass(), FoundVolumes);
 
 	if (FoundVolumes.Num() == 0)
 	{
-		// 등록할 볼륨이 없으므로, 이 컴포넌트의 틱을 비활성화하여 성능을 절약합니다.
 		SetComponentTickEnabled(false);
 		return;
 	}
 
-	// 2. ★★★ 핵심 로직 ★★★
-	//    모든 볼륨을 순회하며, 이 액터가 어떤 볼륨의 경계 안에 있는지 확인합니다.
 	for (AActor* VolumeActor : FoundVolumes)
 	{
 		if (AOctreeVoxelVolume* Volume = Cast<AOctreeVoxelVolume>(VolumeActor))
 		{
-			// 볼륨의 경계 상자(VolumeBox)가 이 액터의 위치를 포함하는지 확인합니다.
 			if (Volume->GetVolumeBox() && Volume->GetVolumeBox()->Bounds.GetBox().IsInside(OwnerActor->GetActorLocation()))
 			{
 				AssociatedVolume = Volume;
@@ -74,7 +69,7 @@ void UDynamicObstacleComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	const FTransform CurrentTransform = GetOwner()->GetActorTransform();
-	if (!CurrentTransform.Equals(LastKnownTransform, 0.1f)) // 0.1 유닛 이상 움직이면 Dirty
+	if (!CurrentTransform.Equals(LastKnownTransform, 0.1f))
 	{
 		bIsDirty = true;
 		LastKnownTransform = CurrentTransform;

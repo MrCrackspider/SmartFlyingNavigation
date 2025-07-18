@@ -6,7 +6,6 @@
 #include "Pathfinder/Strategy/PathfindingStrategy.h"
 #include "AStarStrategy.generated.h"
 
-// --- 전방 선언 ---
 struct FPathfindingRequest;
 struct FOctreePathfindingData;
 struct FAstarPathNode;
@@ -62,11 +61,6 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "A* | Fallback Search", meta=(ClampMin="50.0"))
 	float NearbyGoalSearchRadius = 50.f;
 
-	/** 주변 탐색을 몇 번까지 확장하며 시도할지 결정합니다. (SearchRadius * Iteration) */
 	UPROPERTY(EditDefaultsOnly, Category = "A* | Fallback Search", meta=(ClampMin="1"))
 	int32 NearbyGoalSearchIterations = 5;
-
-private:
-	FThreadSafeBitmaskGrid Grid;
-	
 };
