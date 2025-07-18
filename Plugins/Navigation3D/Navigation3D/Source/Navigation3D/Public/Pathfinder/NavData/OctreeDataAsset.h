@@ -22,7 +22,7 @@ enum class ENeighborDirection : uint8
 	Back,   // -Y
 	Up,     // +Z
 	Down,   // -Z
-	Max
+	MAX
 };
 
 
