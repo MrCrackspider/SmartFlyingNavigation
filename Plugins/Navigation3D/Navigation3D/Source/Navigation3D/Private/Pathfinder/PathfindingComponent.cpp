@@ -3,7 +3,7 @@
 #include "Pathfinder/PathfindingComponent.h"
 #include "Components/SplineComponent.h"
 #include "Pathfinder/Subsystem/PathfindingSubsystem.h"
-#include "Pathfinder/Subsystem/AvoidanceSubsystem.h" 
+#include "Pathfinder/Subsystem/AvoidanceSubsystem.h"
 #include "Pathfinder/Strategy/PathfindingStrategy.h"
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
@@ -11,7 +11,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/SphereComponent.h"
 #include "Pathfinder/NavVolume/OctreeVoxelVolume.h"
-#include "Engine/Engine.h" 
+#include "Engine/Engine.h"
 #include "Pathfinder/Strategy/AStarStrategy.h"
 
 UPathfindingComponent::UPathfindingComponent()
@@ -21,7 +21,7 @@ UPathfindingComponent::UPathfindingComponent()
 #if WITH_EDITOR
 	bTickInEditor = true;
 #endif
-	
+
 	PathSplinePtr = CreateDefaultSubobject<USplineComponent>(TEXT("Spline"));
 
 	PathfindingStrategyClass = UAStarStrategy::StaticClass();
@@ -32,7 +32,6 @@ UPathfindingComponent::UPathfindingComponent()
 	DebugSphereComponent->SetCanEverAffectNavigation(false);
 	DebugSphereComponent->bHiddenInGame = true;
 	DebugSphereComponent->SetSphereRadius(BaseAgentRadius);
-	
 }
 
 void UPathfindingComponent::BeginPlay()
@@ -41,7 +40,7 @@ void UPathfindingComponent::BeginPlay()
 
 	UWorld* World = GetWorld();
 	if (!ensure(World)) return;
-	
+
 	PathSubsystem = GEngine->GetEngineSubsystem<UPathfindingSubsystem>();
 	AvoidanceSubsystem = World->GetSubsystem<UAvoidanceSubsystem>();
 
@@ -68,17 +67,18 @@ void UPathfindingComponent::BeginPlay()
 	else
 	{
 		UE_LOG(LogTemp, Error, TEXT("PathfindingComponent on Actor '%s': PathfindingStrategyClass is not set!"),
-			   *GetOwner()->GetName());
+		       *GetOwner()->GetName());
 	}
 }
 
-void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
+                                          FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	// Called to update pathfinding in response to a scale change at runtime.
-	UpdateAgentRadiusFromScale(); 
-	
+	UpdateAgentRadiusFromScale();
+
 	if (CurrentState == EPathfindingState::FollowPath)
 	{
 		if (!IsPathAheadValid())
@@ -88,7 +88,7 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 			return;
 		}
 	}
-	
+
 	if (PathfindingTaskFuture.IsValid())
 	{
 		HandlePathfindingResult();
@@ -113,10 +113,11 @@ void UPathfindingComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void UPathfindingComponent::OnRegister()
 {
 	Super::OnRegister();
-	
+
 	if (DebugSphereComponent && GetOwner() && GetOwner()->GetRootComponent())
 	{
-		DebugSphereComponent->AttachToComponent(GetOwner()->GetRootComponent(), FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		DebugSphereComponent->AttachToComponent(GetOwner()->GetRootComponent(),
+		                                        FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 	}
 }
 
@@ -133,7 +134,7 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 		UE_LOG(LogTemp, Error, TEXT("RequestPathToLocation failed: Strategy or TargetVolume is not set."));
 		return false;
 	}
-	
+
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(RepathCooldownTimer);
@@ -154,7 +155,7 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 
 		// --- 3. Create a thread-safe data snapshot using the optimized helper function. ---
 		CreateOctreeDataSnapshot(OctreeVolume, Request.NavigationData);
-        
+
 		bRequestDataValid = true;
 	}
 
@@ -172,13 +173,17 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	}
 	else
 	{
-		UE_LOG(LogTemp, Error, TEXT("RequestPathToLocation failed: TargetVolume is not a supported type (currently only Octree is implemented here)."));
+		UE_LOG(LogTemp, Error,
+		       TEXT(
+			       "RequestPathToLocation failed: TargetVolume is not a supported type (currently only Octree is implemented here)."
+		       ));
 	}
-	
+
 	return false;
 }
 
-void UPathfindingComponent::CreateOctreeDataSnapshot(const AOctreeVoxelVolume* OctreeVolume, FOctreePathfindingData& SnapshotData) const
+void UPathfindingComponent::CreateOctreeDataSnapshot(const AOctreeVoxelVolume* OctreeVolume,
+                                                     FOctreePathfindingData& SnapshotData) const
 {
 	// --- Step 1: Copy small, trivial member variables directly. ---
 	SnapshotData.RootNodeIndex = OctreeVolume->GetRootNodeIndex();
@@ -194,9 +199,10 @@ void UPathfindingComponent::CreateOctreeDataSnapshot(const AOctreeVoxelVolume* O
 	{
 		// Pre-allocate memory without initializing elements to avoid overhead.
 		SnapshotData.StaticNodePool.SetNumUninitialized(NodeCount);
-        
+
 		// Copy the entire block of memory from the source array to the destination.
-		FMemory::Memcpy(SnapshotData.StaticNodePool.GetData(), SourceNodePool.GetData(), NodeCount * sizeof(FOctreeNode));
+		FMemory::Memcpy(SnapshotData.StaticNodePool.GetData(), SourceNodePool.GetData(),
+		                NodeCount * sizeof(FOctreeNode));
 	}
 
 	// --- Step 3: Perform a high-speed bulk memory copy for the dynamic obstacle bitmask. ---
@@ -206,9 +212,10 @@ void UPathfindingComponent::CreateOctreeDataSnapshot(const AOctreeVoxelVolume* O
 	{
 		// Pre-allocate memory without initializing elements.
 		SnapshotData.DynamicObstacleBitmask.SetNumUninitialized(ChunkCount);
-        
+
 		// Copy the entire block of memory.
-		FMemory::Memcpy(SnapshotData.DynamicObstacleBitmask.GetData(), SourceBitmask.GetData(), ChunkCount * sizeof(F128BitChunk));
+		FMemory::Memcpy(SnapshotData.DynamicObstacleBitmask.GetData(), SourceBitmask.GetData(),
+		                ChunkCount * sizeof(F128BitChunk));
 	}
 }
 
@@ -238,7 +245,9 @@ void UPathfindingComponent::PostEditChangeProperty(FPropertyChangedEvent& Proper
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 
-	const FName PropertyName = (PropertyChangedEvent.Property != nullptr) ? PropertyChangedEvent.Property->GetFName() : NAME_None;
+	const FName PropertyName = (PropertyChangedEvent.Property != nullptr)
+		                           ? PropertyChangedEvent.Property->GetFName()
+		                           : NAME_None;
 
 	if (PropertyName == GET_MEMBER_NAME_CHECKED(UPathfindingComponent, BaseAgentRadius))
 	{
@@ -274,7 +283,7 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 	{
 		// Get the current rotation value
 		const FRotator CurrentRotation = Owner->GetActorRotation();
-        
+
 		// Calculate the target rotation (to look in the direction of movement)
 		FRotator TargetRotation = FinalVelocity.GetSafeNormal().ToOrientationRotator();
 
@@ -343,7 +352,7 @@ void UPathfindingComponent::ProgressNextPoint()
 	++CurrentPathDestinationIndex;
 	DistanceAlongSpline = 0;
 	PartialSplinePointUpdate(CurrentPathDestinationIndex);
-	
+
 	if (CurrentPathDestinationIndex >= FoundPath.Num())
 	{
 		OnDestinationReached.Broadcast();
@@ -368,7 +377,7 @@ bool UPathfindingComponent::IsOnSplineLine() const
 		UE_LOG(LogTemp, Error, TEXT("PathfindingComponent: PathSplinePtr is not set for %s!"), *MyActor->GetName());
 		return false;
 	}
-	
+
 	const FVector MyLocation = MyActor->GetActorLocation();
 	const FVector SplineLocation = PathSplinePtr->GetLocationAtDistanceAlongSpline(
 		DistanceAlongSpline, ESplineCoordinateSpace::World);
@@ -403,10 +412,11 @@ void UPathfindingComponent::PeriodicRepath()
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("PeriodicRepath: DestinationActor is no longer valid. Stopping repath requests."));
+		UE_LOG(LogTemp, Warning,
+		       TEXT("PeriodicRepath: DestinationActor is no longer valid. Stopping repath requests."));
 		return;
 	}
-	
+
 	RequestPathToLocation(CurrentTargetLocation);
 }
 
@@ -425,7 +435,8 @@ void UPathfindingComponent::HandleVoxelPathResult(const TArray<FIntVector>& Path
 {
 	if (bSuccess && PathIndices.Num() > 0)
 	{
-		UE_LOG(LogTemp, Log, TEXT("Pathfinding successful for %s. State changed to FollowPath."), *GetOwner()->GetName());
+		UE_LOG(LogTemp, Log, TEXT("Pathfinding successful for %s. State changed to FollowPath."),
+		       *GetOwner()->GetName());
 	}
 	else
 	{
@@ -438,7 +449,8 @@ void UPathfindingComponent::HandleVoxelPathResult(const TArray<FIntVector>& Path
 		if (UWorld* World = GetWorld())
 		{
 			//Recursive Call PeriodicRepath
-			World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath, RepathCooldown, false);
+			World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath,
+			                                  RepathCooldown, false);
 		}
 	}
 }
@@ -448,7 +460,7 @@ void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 	PathSplinePtr->ClearSplinePoints(); // FIX-ME
 
 	PathSplinePtr->RemoveSplinePoint(0);
-	
+
 	int32 AddIndex = StartIndex + PartialPointSplineNum;
 
 	if (AddIndex >= FoundPath.Num())
@@ -456,11 +468,11 @@ void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 		UE_LOG(LogTemp, Warning, TEXT("No more Spline Point!"));
 		return;
 	}
-	
+
 	PathSplinePtr->AddSplinePoint(FoundPath[AddIndex], ESplineCoordinateSpace::World, false);
 
 	UE_LOG(LogTemp, Warning, TEXT("SplinePointCount: %d"), PathSplinePtr->GetNumberOfSplinePoints());
-	
+
 	PathSplinePtr->UpdateSpline();
 }
 
@@ -469,29 +481,61 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 	if (bSuccess && Path.Num() > 1)
 	{
 		FoundPath = Path;
-		FoundPathIndices.Empty();
 
 		if (bContinuosFollowingWhenReached)
 		{
 			bIsReachDestination = false;
 		}
-		
+
 		CurrentState = EPathfindingState::FollowPath;
 
+		UWorld* World = GetWorld();
+		if (World && bDrawDebugPath) // bDrawDebugPath 같은 bool 변수를 헤더에 추가하여 켜고 끌 수 있게 만들면 좋습니다.
+		{
+			// 경로의 각 지점(Point)을 연결하는 선을 그립니다.
+			for (int32 i = 0; i < FoundPath.Num() - 1; ++i)
+			{
+				DrawDebugLine(
+					World,
+					FoundPath[i],      // 현재 지점 (시작)
+					FoundPath[i + 1],  // 다음 지점 (끝)
+					FColor::Green,     // 선 색상 (성공적인 경로는 녹색)
+					true,             // 선이 계속 유지되지 않음
+					5.0f,              // 표시될 시간 (초)
+					0,                 // 뎁스 우선순위 (기본값)
+					5.0f               // 선 두께
+				);
+			}
+
+			// 경로의 각 노드를 작은 구체로 표시하여 명확하게 볼 수 있습니다.
+			for (const FVector& Point : FoundPath)
+			{
+				DrawDebugSphere(
+					World,
+					Point,
+					15.0f,             // 구체 반지름
+					12,                // 구체 정밀도
+					FColor::Cyan,      // 구체 색상
+					true,
+					5.0f
+				);
+			}
+		}
+		
 		if (IsValid(PathSplinePtr))
 		{
 			PathSplinePtr->ClearSplinePoints();
 
-			for (int i=0;i<3;i++)
+			for (int i = 0; i < 3; i++)
 			{
 				if (i >= FoundPath.Num())
 				{
 					break;
 				}
-				
+
 				PathSplinePtr->AddSplinePoint(FoundPath[i], ESplineCoordinateSpace::World, false);
 			}
-				
+
 			PathSplinePtr->UpdateSpline();
 
 			const FVector CurrentLocation = GetOwner()->GetActorLocation();
@@ -506,22 +550,22 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 			UE_LOG(LogTemp, Warning, TEXT("PathSplinePtr is not valid. Cannot set up spline path."));
 		}
 	}
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed or path is too short."));
-        FoundPath.Empty();
-        FoundPathIndices.Empty();
-        CurrentPathDestinationIndex = 0;
-        CurrentState = EPathfindingState::Idle;
-    }
-	
-    if (bPeriodicRepath && !bIsReachDestination)
-    {
-        if (UWorld* World = GetWorld())
-        {
-            World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath, RepathCooldown, false);
-        }
-    }
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed or path is too short."));
+		FoundPath.Empty();
+		CurrentPathDestinationIndex = 0;
+		CurrentState = EPathfindingState::Idle;
+	}
+
+	if (bPeriodicRepath && !bIsReachDestination)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath,
+			                                  RepathCooldown, false);
+		}
+	}
 }
 
 void UPathfindingComponent::UpdateAgentRadiusFromScale(bool bForceUpdate)
@@ -557,13 +601,13 @@ void UPathfindingComponent::HandlePathfindingResult()
 		TArray<FIntVector> PathIndices = PathfindingTaskFuture.Get();
 		PathfindingTaskFuture.Reset();
 	}
-	
+
 	if (bPeriodicRepath && !bIsReachDestination)
 	{
 		if (UWorld* World = GetWorld())
 		{
 			World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath,
-											  RepathCooldown, false);
+			                                  RepathCooldown, false);
 		}
 	}
 }
@@ -575,7 +619,7 @@ void UPathfindingComponent::InvalidatePathAndRequestRepath()
 	UE_LOG(LogTemp, Warning, TEXT("Path Invalidated! Stopping movement and scheduling a repath..."));
 
 	// Begin Test
-	
+
 	RequestPathToLocation(CurrentTargetLocation);
 
 	// End Test
@@ -636,7 +680,7 @@ bool UPathfindingComponent::IsSplinePathSafe() const
 	}
 
 	FCollisionQueryParams CollisionParams(SCENE_QUERY_STAT(SplineSafetyCheck), false, GetOwner());
-	
+
 	FCollisionObjectQueryParams ObjectQueryParams;
 	ObjectQueryParams.AddObjectTypesToQuery(ECollisionChannel::ECC_WorldStatic);
 	ObjectQueryParams.AddObjectTypesToQuery(ECollisionChannel::ECC_WorldDynamic);
@@ -645,7 +689,7 @@ bool UPathfindingComponent::IsSplinePathSafe() const
 	const float CurrentDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex - 1);
 	const float NextDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex);
 
-	
+
 	for (float Distance = CurrentDistance; Distance < NextDistance; Distance += SafetyCheckStepSize)
 	{
 		FVector StartPoint = PathSplinePtr->GetLocationAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World);
@@ -658,7 +702,7 @@ bool UPathfindingComponent::IsSplinePathSafe() const
 			continue;
 		}
 
-		
+
 		if (GetWorld()->SweepTestByObjectType(StartPoint, EndPoint, FQuat::Identity, ObjectQueryParams,
 		                                      FCollisionShape::MakeSphere(AgentRadius), CollisionParams))
 		{
@@ -673,12 +717,10 @@ bool UPathfindingComponent::IsSplinePathSafe() const
 bool UPathfindingComponent::IsPathAheadValid() const
 {
 	AOctreeVoxelVolume* OctreeVoxelVolume = Cast<AOctreeVoxelVolume>(TargetVolume);
-	if (!OctreeVoxelVolume || FoundPathIndices.Num() < 2 || CurrentPathDestinationIndex < 0 || CurrentPathDestinationIndex
-		>= FoundPathIndices.
-		Num() - 1)
+	if (!OctreeVoxelVolume || CurrentPathDestinationIndex < 0 || CurrentPathDestinationIndex)
 	{
 		return true;
 	}
-	
+
 	return true;
 }

@@ -257,7 +257,6 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding|State", meta = (AllowPrivateAccess = "true"))
 	TArray<FVector> FoundPath;
 
-	TArray<FIntVector> FoundPathIndices;
 	int32 CurrentPathDestinationIndex = -1;
 	float DistanceAlongSpline = 0.f;
 	FVector CurrentVelocity;

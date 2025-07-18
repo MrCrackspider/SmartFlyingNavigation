@@ -43,14 +43,9 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 		GoalNodeIndex = NewGoalNodeIndex;
 		UE_LOG(LogTemp, Log, TEXT("A* (Octree): Found alternative valid goal at node index %d."), GoalNodeIndex);
 	}
-
-
-	if (OctreeData.IsRegionDynamicallyBlocked(OctreeData.GetNodeBounds(StartNodeIndex)))
-	{
-		UE_LOG(LogTemp, Warning, TEXT("A* (Octree) Failed: Start location is dynamically blocked."));
-		return false;
-	}
-	if (OctreeData.IsRegionDynamicallyBlocked(OctreeData.GetNodeBounds(GoalNodeIndex)))
+	
+	FBox GoalQueryBox = AStarStrategyUtils::MakeAgentQueryBox(InRequest.EndLocation, InRequest.AgentRadius);
+	if (OctreeData.IsRegionDynamicallyBlocked(GoalQueryBox))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("A* (Octree) Failed: Goal location is dynamically blocked."));
 		return false;
@@ -263,7 +258,7 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 		{
 			const int32 Mid = LookAheadLow + (LookAheadHigh - LookAheadLow) / 2;
 
-			if (HasFastLineOfSight(OutPath.Last(), RawPath[Mid]))
+			if (HasGuaranteedLineOfSight(OutPath.Last(), RawPath[Mid]))
 			{
 				BestLookAheadIndex = Mid;
 				LookAheadLow = Mid + 1;
@@ -287,7 +282,7 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 
 bool FAstarPathfinder::HasGuaranteedLineOfSight(const FVector& Start, const FVector& End) const
 {
-	return !OctreeData.CheckForSolidNodesInCapsule(Start, End, AgentRadius);
+	return OctreeData.IsPathClearHierarchically(Start, End, AgentRadius);
 }
 
 void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPathNode*>& OutSuccessors)
@@ -311,12 +306,15 @@ void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPat
 			continue;
 		}
 
-		// 3) Finally, also make sure it’s not dynamically blocked
-		if (!OctreeData.IsRegionDynamicallyBlocked(NeighborBounds))
+		FVector NeighborCenter = NeighborBounds.GetCenter();
+
+		FBox NeighborQueryBox = AStarStrategyUtils::MakeAgentQueryBox(NeighborCenter,AgentRadius);
+
+		if (!OctreeData.IsRegionDynamicallyBlocked(NeighborQueryBox))
 		{
 			FAstarPathNode* Succ = MemoryPool.NewNode();
-			Succ->NodeIndex = NeighborIndex;
-			Succ->WorldPosition = Center;
+			Succ->NodeIndex      = NeighborIndex;
+			Succ->WorldPosition  = NeighborCenter;
 			OutSuccessors.Add(Succ);
 		}
 	}
