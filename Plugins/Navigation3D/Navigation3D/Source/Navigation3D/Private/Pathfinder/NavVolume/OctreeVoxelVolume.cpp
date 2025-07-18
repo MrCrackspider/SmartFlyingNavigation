@@ -15,9 +15,8 @@
 #include "smmintrin.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Components/BoxComponent.h"
-#include "Components/InstancedStaticMeshComponent.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Kismet/KismetSystemLibrary.h"
-#include "Pathfinder/PathfindingComponent.h"
 #include "Pathfinder/NavData/VoxelObstacleFilter.h"
 
 AOctreeVoxelVolume::AOctreeVoxelVolume()
@@ -279,12 +278,12 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 void AOctreeVoxelVolume::GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex,
                                                    const FBox& NodeBounds, int32 CurrentDepth) const
 {
-	if (!StaticNodePool.IsValidIndex(NodeIndex) || CurrentDepth > DebugOctreeMaxDepth) return;
+	if (!StaticNodePool.IsValidIndex(NodeIndex) || CurrentDepth > MaxOctreeDepth) return;
 
 	const FOctreeNode& Node = StaticNodePool[NodeIndex];
 
 	// Add node info if it's a leaf node or at debug max depth
-	if (Node.State != EOctreeNodeState::Mixed || CurrentDepth == DebugOctreeMaxDepth)
+	if (Node.State != EOctreeNodeState::Mixed || CurrentDepth == MaxOctreeDepth)
 	{
 		OutNodes.Add({NodeIndex, NodeBounds, Node.State});
 	}
@@ -318,11 +317,12 @@ void AOctreeVoxelVolume::BakeStaticData()
 	}
 
 	// --- 2. Set up UI progress bar ---
-	FScopedSlowTask BakeTask(AllStaticObstacles.Num() + 3, FText::FromString(TEXT("Baking Octree Data...")));
+	const double TotalWorkAmount = static_cast<double>(AllStaticObstacles.Num()) + 3.0; 
+	FScopedSlowTask BakeTask(TotalWorkAmount, FText::FromString(TEXT("Baking Octree Data...")));
 	BakeTask.MakeDialog(); // UI 대화상자 표시
 
 	// --- 3. Build Octree ---
-	BakeTask.EnterProgressFrame(0, FText::FromString(TEXT("Building Octree... (1/3)")));
+	BakeTask.EnterProgressFrame(0.f, FText::FromString(TEXT("Building Octree... (1/3)")));
 
 	StaticNodePool.Empty();
 	RootNodeIndex = StaticNodePool.Emplace(FOctreeNode()); // 루트 노드 생성
@@ -331,24 +331,24 @@ void AOctreeVoxelVolume::BakeStaticData()
 	
 	for (const FIntVector& ObstacleVoxel : AllStaticObstacles)
 	{
-		BakeTask.EnterProgressFrame(1);
+		BakeTask.EnterProgressFrame(1.f);
 		if (BakeTask.ShouldCancel()) return;
 
 		InsertObstacleRecursive(RootNodeIndex, ObstacleVoxel, 0); // <-- 이렇게 수정합니다.
 	}
 
 	// --- 4. Optimize Octree ---
-	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Optimizing Octree...(2/3)")));
+	BakeTask.EnterProgressFrame(1.f, FText::FromString(TEXT("Optimizing Octree...(2/3)")));
 	if (BakeTask.ShouldCancel()) return;
 
 	OptimizeAndCollapse(RootNodeIndex, VolumeBounds);
 
-	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Precomputing Neighbors...(2.5/3)")));
+	BakeTask.EnterProgressFrame(1.f, FText::FromString(TEXT("Precomputing Neighbors...(2.5/3)")));
 	if (BakeTask.ShouldCancel()) return;
 	PrecomputeNeighbors();
 	
 	// --- 5. Save to asset file ---
-	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Saving data asset...(3/3)")));
+	BakeTask.EnterProgressFrame(1.f, FText::FromString(TEXT("Saving data asset...(3/3)")));
 	if (BakeTask.ShouldCancel()) return;
 
 	SaveOctreeToAsset(); // 헬퍼 함수 호출로 깔끔하게 처리

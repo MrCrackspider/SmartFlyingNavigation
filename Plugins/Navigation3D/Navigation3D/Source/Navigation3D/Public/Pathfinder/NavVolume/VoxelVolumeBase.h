@@ -10,6 +10,7 @@
 #include "Pathfinder/DynamicObstacle.h"
 #include "VoxelVolumeBase.generated.h"
 
+class UHierarchicalInstancedStaticMeshComponent;
 class UBoxComponent;
 
 UENUM(BlueprintType)
@@ -111,21 +112,31 @@ public:
 	TSoftObjectPtr<UStaticMesh> DebugMeshAsset;
 
 	UPROPERTY()
-	TObjectPtr<UInstancedStaticMeshComponent> DebugSolidNodesComponent;
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DebugSolidNodesComponent;
 	UPROPERTY()
-	TObjectPtr<UInstancedStaticMeshComponent> DebugEmptyNodesComponent;
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DebugEmptyNodesComponent;
 	UPROPERTY()
-	TObjectPtr<UInstancedStaticMeshComponent> DebugMixedNodesComponent;
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DebugMixedNodesComponent;
 
 	// 디버그용 머티리얼 (에디터에서 설정 가능)
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug")
-	TObjectPtr<UMaterialInterface> SolidNodeMaterial;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug", meta=(AllowedClasses="MaterialInterface"))
+	FSoftObjectPath DebugSolidNodeMaterialPath;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug", meta=(AllowedClasses="MaterialInterface"))
+	FSoftObjectPath DebugEmptyNodeMaterialPath;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug", meta=(AllowedClasses="MaterialInterface"))
+	FSoftObjectPath DebugMixedNodeMaterialPath;
+
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> SolidNodeMaterial;
+	
+	UPROPERTY()
 	TObjectPtr<UMaterialInterface> EmptyNodeMaterial;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug")
+	UPROPERTY()
 	TObjectPtr<UMaterialInterface> MixedNodeMaterial;
 
 #endif

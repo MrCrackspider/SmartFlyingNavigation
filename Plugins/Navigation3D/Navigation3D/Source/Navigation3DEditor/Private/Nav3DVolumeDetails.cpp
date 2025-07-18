@@ -21,11 +21,10 @@ void FNav3DVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
 
     // "Volume Setup" 카테고리에 핸들을 이용해 프로퍼티들을 추가(재배치)합니다.
 	// Begin Test
-    VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AOctreeVoxelVolume, VoxelExtent));
-    VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AOctreeVoxelVolume, MapSize));
-    VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AOctreeVoxelVolume, DebugOctreeMaxDepth));
-    //VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AFenwickVoxelVolume, VoxelExtent));
-    //VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AFenwickVoxelVolume, MapSize));
+    VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AVoxelVolumeBase, VoxelExtent));
+    VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AVoxelVolumeBase, MapSize));
+    VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AOctreeVoxelVolume, MaxOctreeDepth));
+    VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AOctreeVoxelVolume, BakedDataSaveDirectory));
     // VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AFenwickVoxelVolume, VolumeBoundsVisualizer));
     // VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AFenwickVoxelVolume, VisualVolumeMeshAsset));
     // VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AFenwickVoxelVolume, BakedDataSaveDirectory));

@@ -4,7 +4,7 @@
 #include "Pathfinder/NavVolume/VoxelVolumeBase.h"
 
 #include "Components/BoxComponent.h"
-#include "Components/InstancedStaticMeshComponent.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
 
 
 AVoxelVolumeBase::AVoxelVolumeBase()
@@ -22,15 +22,18 @@ AVoxelVolumeBase::AVoxelVolumeBase()
 	VolumeBox->SetCollisionResponseToAllChannels(ECR_Ignore);
 	VolumeBox->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	
-	DebugSolidNodesComponent = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("DebugSolidNodesComponent"));
+	DebugSolidNodesComponent = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("DebugSolidNodesComponent"));
 	DebugSolidNodesComponent->SetupAttachment(PivotComponent);
 	
-	DebugEmptyNodesComponent = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("DebugEmptyNodesComponent"));
+	DebugEmptyNodesComponent = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("DebugEmptyNodesComponent"));
 	DebugEmptyNodesComponent->SetupAttachment(PivotComponent);
 
-	DebugMixedNodesComponent = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("DebugMixedNodesComponent"));
+	DebugMixedNodesComponent = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("DebugMixedNodesComponent"));
 	DebugMixedNodesComponent->SetupAttachment(PivotComponent);
-	
+
+	DebugSolidNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/Navigation3D/PathfinderPlugin/Debug/Material/MI_DebugMesh2.MI_DebugMesh2'");
+	DebugEmptyNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/Navigation3D/PathfinderPlugin/Debug/Material/MI_DebugMesh.MI_DebugMesh'");
+	DebugMixedNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/Navigation3D/PathfinderPlugin/Debug/Material/MI_DebugMesh1.MI_DebugMesh1'");
 	
 	MapSize = FIntVector(128, 128, 128);
 	VoxelExtent = 100.f;
@@ -43,7 +46,7 @@ void AVoxelVolumeBase::BeginPlay()
 	if (bDrawDebugBox)
 	{
 		GetWorldTimerManager().SetTimer(DebugUpdateTimer, this, &AVoxelVolumeBase::UpdateDebugObstacleVisualization,
-		                                0.8f, true, 0.5f);
+		                                0.8f, false, 0.5f);
 	}
 }
 
@@ -53,9 +56,27 @@ void AVoxelVolumeBase::OnConstruction(const FTransform& Transform)
 
 	static const FSoftObjectPath DebugMeshPath(
 		TEXT("/Script/Engine.StaticMesh'/Navigation3D/PathfinderPlugin/Debug/SM_DebugObstacle.SM_DebugObstacle'"));
+		
 	DebugMeshAsset = DebugMeshPath;
 #if WITH_EDITORONLY_DATA
+	
+	UObject* LoadedObject = DebugSolidNodeMaterialPath.TryLoad();
+	if (LoadedObject)
+	{
+		SolidNodeMaterial = Cast<UMaterialInstance>(LoadedObject);
+	}
+	LoadedObject = DebugEmptyNodeMaterialPath.TryLoad();
+	if (LoadedObject)
+	{
+		EmptyNodeMaterial = Cast<UMaterialInstance>(LoadedObject);
+	}
 
+	LoadedObject = DebugMixedNodeMaterialPath.TryLoad();
+	if (LoadedObject)
+	{
+		MixedNodeMaterial = Cast<UMaterialInstance>(LoadedObject);
+	}
+	
 	if (UStaticMesh* LoadedMesh = DebugMeshAsset.LoadSynchronous())
 	{
 		// 3개의 컴포넌트에 모두 동일한 메시 할당

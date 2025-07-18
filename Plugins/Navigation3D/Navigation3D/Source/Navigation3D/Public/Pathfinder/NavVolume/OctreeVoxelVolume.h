@@ -49,6 +49,10 @@ public:
 
 	TObjectPtr<UOctreeDataAsset> GetBakedOctreeData() {return BakedOctreeData;};
 	void SetBakedOctreeData(TObjectPtr<UOctreeDataAsset> NewData) {BakedOctreeData = NewData;}
+
+	UPROPERTY(EditAnywhere, Category = "Voxel|Octree")
+	int32 MaxOctreeDepth = 7; // 예: 128x128x128 복셀 -> 2^7=128
+
 	
 #if WITH_EDITOR
 	// 옥트리 베이킹 함수
@@ -70,7 +74,7 @@ public:
 		FBox Bounds;
 		EOctreeNodeState State;
 	};
-
+ 
 	virtual void UpdateDebugObstacleVisualization() override;
 	void GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex, const FBox& NodeBounds,
 	                               int32 CurrentDepth) const;
@@ -84,8 +88,8 @@ public:
 	UPROPERTY()
 	TMap<int32, int32> DisplayedMixedNodeInstanceMap;
 
-	UPROPERTY(EditAnywhere, Category = "Voxel|Debug", meta = (EditCondition = "bDrawDebugVolumes"))
-	int32 DebugOctreeMaxDepth = 4;
+	// UPROPERTY(EditAnywhere, Category = "Voxel|Debug", meta = (EditCondition = "bDrawDebugVolumes"))
+	// int32 DebugOctreeMaxDepth = 4;
 
 
 #endif
@@ -143,10 +147,7 @@ private:
 	/** 런타임에 로드된 정적 옥트리 노드 풀 (읽기 전용) */
 	TArray<FOctreeNode> StaticNodePool;
 	int32 RootNodeIndex = -1;
-
-	UPROPERTY(EditAnywhere, Category = "Voxel|Octree")
-	int32 MaxOctreeDepth = 7; // 예: 128x128x128 복셀 -> 2^7=128
-
+	
 	// --- 2. 동적(Dynamic) 장애물 레이어 ---
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Filter", meta=(AllowPrivateAccess="true"))
 	TObjectPtr<UVoxelObstacleFilter> ObstacleFilterProfile;

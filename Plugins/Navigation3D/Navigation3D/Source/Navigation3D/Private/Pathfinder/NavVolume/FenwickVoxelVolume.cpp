@@ -1039,81 +1039,81 @@ void AFenwickVoxelVolume::CreateOrUpdateChunkAssets(const TMap<FIntVector, TArra
 
 void AFenwickVoxelVolume::UpdateDebugObstacleVisualization()
 {
-	Super::UpdateDebugObstacleVisualization();
-	// 1) 컴포넌트 월드 트랜스폼 스냅샷
-	const FTransform CompXform = DebugSolidNodesComponent->GetComponentTransform();
-	TWeakObjectPtr<AFenwickVoxelVolume> WeakThis(this);
-
-	// 2) 백그라운드에서 인덱스 수집 + 월드→로컬 변환
-	Async(EAsyncExecution::ThreadPool, [WeakThis, CompXform]()
-	{
-		if (!WeakThis.IsValid()) return;
-
-		TSet<FIntVector> RequiredIndices;
-		TArray<FIntVector> ObstacleIndices;
-		WeakThis->GetDebugObstacleVoxelIndices(ObstacleIndices);
-
-		for (const FIntVector& Index : ObstacleIndices)
-		{
-			RequiredIndices.Add(Index);
-		}
-
-		// 3) 게임 스레드에서 실제 Clear/Add 호출
-		AsyncTask(ENamedThreads::GameThread, [WeakThis, RequiredIndices = MoveTemp(RequiredIndices)]() mutable
-		{
-			if (!WeakThis.IsValid() || !WeakThis->DebugSolidNodesComponent)
-			{
-				if (WeakThis.IsValid()) WeakThis->bIsUpdatingVisualization = false;
-				return;
-			}
-
-			auto Comp = WeakThis->DebugSolidNodesComponent;
-			const float Scale = WeakThis->VoxelExtent / 100.0f;
-
-			// 2. 제거할 인스턴스 계산 (이전에는 있었지만 지금은 없는 것)
-			TSet<FIntVector> IndicesToRemove = WeakThis->DisplayedVoxelIndices.Difference(RequiredIndices);
-
-			// 3. 추가할 인스턴스 계산 (이전에는 없었지만 지금은 있는 것)
-			TSet<FIntVector> IndicesToAdd = RequiredIndices.Difference(WeakThis->DisplayedVoxelIndices);
-
-			if (IndicesToRemove.Num() > 0)
-			{
-				TArray<int32> InstanceIndicesToRemove;
-				// TMap을 사용해 복셀 인덱스로 인스턴스 인덱스를 빠르게 찾을 수 있다면 더 효율적입니다.
-				// 여기서는 간단하게 전체를 순회합니다.
-				for (int32 i = Comp->GetInstanceCount() - 1; i >= 0; --i)
-				{
-					FTransform InstanceTransform;
-					Comp->GetInstanceTransform(i, InstanceTransform, /*bWorldSpace=*/ false);
-
-					// 월드 위치로 변환 후 인덱스 계산 (정확성을 위해)
-					FVector WorldPos = Comp->GetComponentTransform().TransformPosition(InstanceTransform.GetLocation());
-					FIntVector VoxelIndex = WeakThis->WorldToVoxelIndex(WorldPos);
-
-					if (IndicesToRemove.Contains(VoxelIndex))
-					{
-						Comp->RemoveInstance(i);
-					}
-				}
-			}
-
-			if (IndicesToAdd.Num() > 0)
-			{
-				TArray<FTransform> NewTransforms;
-				NewTransforms.Reserve(IndicesToAdd.Num());
-				for (const FIntVector& Idx : IndicesToAdd)
-				{
-					FVector WorldPos = WeakThis->VoxelIndexToWorld(Idx);
-					FVector LocalPos = Comp->GetComponentTransform().InverseTransformPosition(WorldPos);
-					NewTransforms.Emplace(FRotator::ZeroRotator, LocalPos, FVector(Scale));
-				}
-				Comp->AddInstances(NewTransforms, /*bWorldSpace=*/ false);
-			}
-			WeakThis->DisplayedVoxelIndices = MoveTemp(RequiredIndices);
-			WeakThis->bIsUpdatingVisualization = false;
-		});
-	});
-	bIsUpdatingVisualization = true;
+	// Super::UpdateDebugObstacleVisualization();
+	// // 1) 컴포넌트 월드 트랜스폼 스냅샷
+	// const FTransform CompXform = DebugSolidNodesComponent->GetComponentTransform();
+	// TWeakObjectPtr<AFenwickVoxelVolume> WeakThis(this);
+	//
+	// // 2) 백그라운드에서 인덱스 수집 + 월드→로컬 변환
+	// Async(EAsyncExecution::ThreadPool, [WeakThis, CompXform]()
+	// {
+	// 	if (!WeakThis.IsValid()) return;
+	//
+	// 	TSet<FIntVector> RequiredIndices;
+	// 	TArray<FIntVector> ObstacleIndices;
+	// 	WeakThis->GetDebugObstacleVoxelIndices(ObstacleIndices);
+	//
+	// 	for (const FIntVector& Index : ObstacleIndices)
+	// 	{
+	// 		RequiredIndices.Add(Index);
+	// 	}
+	//
+	// 	// 3) 게임 스레드에서 실제 Clear/Add 호출
+	// 	AsyncTask(ENamedThreads::GameThread, [WeakThis, RequiredIndices = MoveTemp(RequiredIndices)]() mutable
+	// 	{
+	// 		if (!WeakThis.IsValid() || !WeakThis->DebugSolidNodesComponent)
+	// 		{
+	// 			if (WeakThis.IsValid()) WeakThis->bIsUpdatingVisualization = false;
+	// 			return;
+	// 		}
+	//
+	// 		auto Comp = WeakThis->DebugSolidNodesComponent;
+	// 		const float Scale = WeakThis->VoxelExtent / 100.0f;
+	//
+	// 		// 2. 제거할 인스턴스 계산 (이전에는 있었지만 지금은 없는 것)
+	// 		TSet<FIntVector> IndicesToRemove = WeakThis->DisplayedVoxelIndices.Difference(RequiredIndices);
+	//
+	// 		// 3. 추가할 인스턴스 계산 (이전에는 없었지만 지금은 있는 것)
+	// 		TSet<FIntVector> IndicesToAdd = RequiredIndices.Difference(WeakThis->DisplayedVoxelIndices);
+	//
+	// 		if (IndicesToRemove.Num() > 0)
+	// 		{
+	// 			TArray<int32> InstanceIndicesToRemove;
+	// 			// TMap을 사용해 복셀 인덱스로 인스턴스 인덱스를 빠르게 찾을 수 있다면 더 효율적입니다.
+	// 			// 여기서는 간단하게 전체를 순회합니다.
+	// 			for (int32 i = Comp->GetInstanceCount() - 1; i >= 0; --i)
+	// 			{
+	// 				FTransform InstanceTransform;
+	// 				Comp->GetInstanceTransform(i, InstanceTransform, /*bWorldSpace=*/ false);
+	//
+	// 				// 월드 위치로 변환 후 인덱스 계산 (정확성을 위해)
+	// 				FVector WorldPos = Comp->GetComponentTransform().TransformPosition(InstanceTransform.GetLocation());
+	// 				FIntVector VoxelIndex = WeakThis->WorldToVoxelIndex(WorldPos);
+	//
+	// 				if (IndicesToRemove.Contains(VoxelIndex))
+	// 				{
+	// 					Comp->RemoveInstance(i);
+	// 				}
+	// 			}
+	// 		}
+	//
+	// 		if (IndicesToAdd.Num() > 0)
+	// 		{
+	// 			TArray<FTransform> NewTransforms;
+	// 			NewTransforms.Reserve(IndicesToAdd.Num());
+	// 			for (const FIntVector& Idx : IndicesToAdd)
+	// 			{
+	// 				FVector WorldPos = WeakThis->VoxelIndexToWorld(Idx);
+	// 				FVector LocalPos = Comp->GetComponentTransform().InverseTransformPosition(WorldPos);
+	// 				NewTransforms.Emplace(FRotator::ZeroRotator, LocalPos, FVector(Scale));
+	// 			}
+	// 			Comp->AddInstances(NewTransforms, /*bWorldSpace=*/ false);
+	// 		}
+	// 		WeakThis->DisplayedVoxelIndices = MoveTemp(RequiredIndices);
+	// 		WeakThis->bIsUpdatingVisualization = false;
+	// 	});
+	// });
+	// bIsUpdatingVisualization = true;
 
 
 }
