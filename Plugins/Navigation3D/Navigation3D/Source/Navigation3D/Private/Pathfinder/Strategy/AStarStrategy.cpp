@@ -173,11 +173,6 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 			}
 
 			FAstarPathNode* ParentNode = CurrentNode;
-			if (CurrentNode->Parent && HasLineOfSightWithRadius(CurrentNode->Parent->WorldPosition,
-			                                                    Successor->WorldPosition))
-			{
-				ParentNode = CurrentNode->Parent;
-			}
 
 			const float NodeRadius = Pool[SuccIdx].MaxAllowedRadius;
 			if (NodeRadius < AgentRadius)
@@ -228,27 +223,23 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 	return EPathfindingResult::Failed_Unreachable;
 }
 
-bool FAstarPathfinder::HasLineOfSightWithRadius(const FVector& Start, const FVector& End) const
+bool FAstarPathfinder::HasFastLineOfSight(const FVector& Start, const FVector& End) const
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(ThetaStar_HasLineOfSightWithRadius_Hierarchical);
 
-	// --- 1단계: 초고속 센터라인 검사 ---
 	TArray<int32> CenterlineNodes;
-	if (!OctreeData.VoxelRayMarch(Start, End, CenterlineNodes))
-	{
-		return false;
-	}
+	return OctreeData.VoxelRayMarch(Start, End, CenterlineNodes);
 
-	// --- 2단계: 안전 여유 공간(Clearance) 검사 ---
-	for (const int32 NodeIndex : CenterlineNodes)
-	{
-		const float NodeMinHalfExtent = OctreeData.StaticNodePool[NodeIndex].Bounds.GetExtent().GetMin();
-		if (NodeMinHalfExtent < AgentRadius)
-		{
-			return !OctreeData.CheckForSolidNodesInCapsule(Start, End, AgentRadius);
-		}
-	}
-	return true;
+	// // --- 2단계: 안전 여유 공간(Clearance) 검사 ---
+	// for (const int32 NodeIndex : CenterlineNodes)
+	// {
+	// 	const float NodeMinHalfExtent = OctreeData.StaticNodePool[NodeIndex].Bounds.GetExtent().GetMin();
+	// 	if (NodeMinHalfExtent < AgentRadius)
+	// 	{
+	// 		return  false; //!OctreeData.CheckForSolidNodesInCapsule(Start, End, AgentRadius);
+	// 	}
+	// }
+	// return true;
 }
 
 void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<FVector>& OutPath)
@@ -272,7 +263,7 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 	}
 
 	RawPath[0] = ActualStartLocation;
-	if (HasLineOfSightWithRadius(RawPath.Last(), ActualGoalLocation))
+	if (HasFastLineOfSight(RawPath.Last(), ActualGoalLocation))
 	{
 		RawPath.Last() = ActualGoalLocation;
 	}
@@ -293,7 +284,7 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 			const int32 Mid = LookAheadLow + (LookAheadHigh - LookAheadLow) / 2;
 
 			// 현재 지점(OutPath.Last())에서 중간 지점(Mid)까지 시야가 확보되는지 확인
-			if (HasLineOfSightWithRadius(OutPath.Last(), RawPath[Mid]))
+			if (HasFastLineOfSight(OutPath.Last(), RawPath[Mid]))
 			{
 				BestLookAheadIndex = Mid;
 				LookAheadLow = Mid + 1;
@@ -315,6 +306,11 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 		// 현재 위치를 방금 추가한 웨이포인트로 점프
 		CurrentPointIndex = BestLookAheadIndex;
 	}
+}
+
+bool FAstarPathfinder::HasGuaranteedLineOfSight(const FVector& Start, const FVector& End) const
+{
+	return !OctreeData.CheckForSolidNodesInCapsule(Start, End, AgentRadius);
 }
 
 void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPathNode*>& OutSuccessors)
