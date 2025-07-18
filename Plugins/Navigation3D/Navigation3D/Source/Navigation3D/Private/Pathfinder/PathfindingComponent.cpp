@@ -307,28 +307,7 @@ void UPathfindingComponent::CheckForPathOptimization()
 {
 	if (CurrentState != EPathfindingState::FollowPath || !PathfindingStrategy)
 		return;
-
-	// 1) Volume, AgentVoxel, GoalVoxel 계산
-	AUniformGridVolume* Volume = Cast<AUniformGridVolume>(TargetVolume);
-	if (!Volume) return;
-	const FIntVector CurrentAgentVoxel =
-		Volume->WorldToVoxelIndex(GetOwner()->GetActorLocation());
-	const FIntVector GoalVoxel =
-		Volume->WorldToVoxelIndex(CurrentTargetLocation);
-
-	// 2) FoundPathIndices 는 이미 voxel 인덱스 배열이니 그대로 사용
-	const TArray<FIntVector>& VoxPath = FoundPathIndices;
 	
-	if (PathfindingStrategy->ShouldRepathForOptimization(
-			CurrentAgentVoxel,
-			VoxPath,
-			CurrentPathDestinationIndex,
-			GoalVoxel,
-			AgentRadius))
-	{
-		UE_LOG(LogTemp, Log, TEXT("Strategy suggests a shorter path → Requesting repath"));
-		RequestPathToLocation(CurrentTargetLocation);
-	}
 }
 //======================================================================================
 // Engine Overrides
@@ -578,102 +557,7 @@ void UPathfindingComponent::HandlePathfindingResult()
 
 void UPathfindingComponent::ProcessNewPath(const TArray<FIntVector>& PathIndices)
 {
-	if (PathIndices.Num() < 2)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("ProcessNewPath: Path not found or too short. Returning to Idle."));
-		// CurrentState = EPathfindingState::Idle;
-		GetWorld()->GetTimerManager().PauseTimer(PathOptimizationTimer);
-		return;
-	}
-
-	FoundPathIndices = PathIndices;
-	FoundPath.Empty();
-
-	AUniformGridVolume* GridVolume = Cast<AUniformGridVolume>(TargetVolume);
-	if (!ensure(GridVolume))
-	{
-		// CurrentState = EPathfindingState::Idle;
-		return;
-	}
-
-	for (const FIntVector& Index : FoundPathIndices)
-	{
-		FoundPath.Add(GridVolume->VoxelIndexToWorld(Index));
-	}
-
-	FoundPath[0] = GetOwner()->GetActorLocation();
-
-	CurrentState = EPathfindingState::FollowPath;
-	MovementMode = EPathMovementMode::Spline;
-	GetWorld()->GetTimerManager().UnPauseTimer(PathOptimizationTimer);
-
-	if (PathSplinePtr.IsValid())
-	{
-		CurrentPathDestinationIndex = 0;
-		DistanceAlongSpline = 0.f; //Update가 완료되면 Spline 0.f로 하기
-		bIsReachDestination = false;
-
-		PathSplinePtr->ClearSplinePoints();
-
-		int32 NumPoints = FoundPath.Num();
-
-		// UE_LOG(LogTemp, Warning, TEXT("Create Spline index"));
-		for (int i = 0; i < NumPoints; i++)
-		{
-			// UE_LOG(LogTemp, Warning, TEXT("index: %d, Location: %.2f %.2f %.2f"), i, FoundPath[i].X, FoundPath[i].Y, FoundPath[i].Z);
-
-			PathSplinePtr->AddSplinePoint(FoundPath[i], ESplineCoordinateSpace::World, false);
-		}
-
-		//아래는 spline곡선이 튀지 않게 방지하는 코드
-		// const float Tension = 0.2f; // 곡선의 팽팽함. 0.5가 보통 가장 자연스러움. -> UProperty로 빼서 사용자가 지정할 수 있게 변경
-		//
-		// for (int32 i = 0; i < NumPoints; ++i)
-		// {
-		// 	FVector Tangent;
-		//
-		// 	if (i == 0)
-		// 	{
-		// 		// --- 시작점 (First Point) ---
-		// 		// 다음 포인트(1)와 현재 포인트(0)의 차이를 탄젠트로 사용합니다.
-		// 		// 이렇게 하면 곡선이 경로의 시작 방향으로 부드럽게 뻗어나갑니다.
-		// 		const FVector P0 = PathSplinePtr->GetLocationAtSplinePoint(0, ESplineCoordinateSpace::Local);
-		// 		const FVector P1 = PathSplinePtr->GetLocationAtSplinePoint(1, ESplineCoordinateSpace::Local);
-		// 		Tangent = (P1 - P0) * Tension;
-		// 	}
-		// 	else if (i == NumPoints - 1)
-		// 	{
-		// 		// --- 끝점 (Last Point) ---
-		// 		// 현재 포인트(Last)와 이전 포인트(Last-1)의 차이를 탄젠트로 사용합니다.
-		// 		// 곡선이 경로의 끝 방향으로 자연스럽게 수렴합니다.
-		// 		const FVector PN_1 = PathSplinePtr->GetLocationAtSplinePoint(i - 1, ESplineCoordinateSpace::Local);
-		// 		const FVector PN = PathSplinePtr->GetLocationAtSplinePoint(i, ESplineCoordinateSpace::Local);
-		// 		Tangent = (PN - PN_1) * Tension;
-		// 	}
-		// 	else
-		// 	{
-		// 		// --- 중간점 (Intermediate Points) ---
-		// 		// 이것이 Catmull-Rom의 핵심입니다.
-		// 		// 이전 포인트(i-1)에서 다음 포인트(i+1)를 향하는 벡터를 계산합니다.
-		// 		const FVector P_Prev = PathSplinePtr->GetLocationAtSplinePoint(i - 1, ESplineCoordinateSpace::Local);
-		// 		const FVector P_Next = PathSplinePtr->GetLocationAtSplinePoint(i + 1, ESplineCoordinateSpace::Local);
-		// 		Tangent = (P_Next - P_Prev) * Tension;
-		// 	}
-		//
-		// 	// 계산된 탄젠트를 스플라인 포인트에 설정합니다.
-		// 	PathSplinePtr->SetTangentAtSplinePoint(i, Tangent, ESplineCoordinateSpace::Local, true);
-		// }
-		
-		PathSplinePtr->UpdateSpline();
-	}
-
-	if (bDrawDebugPath)
-	{
-		for (int32 i = 0; i < FoundPath.Num() - 1; ++i)
-		{
-			DrawDebugLine(GetWorld(), FoundPath[i], FoundPath[i + 1], FColor::Red, false, 10.f, 0, 2.f);
-		}
-	}
+	
 }
 
 void UPathfindingComponent::InvalidatePathAndRequestRepath()
@@ -800,23 +684,6 @@ bool UPathfindingComponent::IsPathAheadValid() const
 	{
 		return true;
 	}
-
-	AUniformGridVolume* GridVolume = Cast<AUniformGridVolume>(TargetVolume);
-	if (!GridVolume || GridVolume->VoxelExtent == 0) return false;
-
-	const int32 AgentRadiusInVoxels = FMath::CeilToInt((AgentRadius / GridVolume->VoxelExtent) - 0.5f);
-
-	const int32 LastCheckIndex = FMath::Min(CurrentPathDestinationIndex + PathValidationLookAhead,
-	                                        FoundPathIndices.Num() - 2);
-	for (int32 i = CurrentPathDestinationIndex; i <= LastCheckIndex; ++i)
-	{
-		if (!OctreeVoxelVolume->IsRegionWalkable(FoundPathIndices[i], AgentRadiusInVoxels))
-		{
-			UE_LOG(LogTemp, Warning,
-			       TEXT("Path Invalidated: A future path segment (from waypoint %d to %d) is blocked!"), i, i + 1);
-			return false;
-		}
-	}
-
+	
 	return true;
 }
