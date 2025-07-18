@@ -17,7 +17,6 @@ UPathfindingComponent::UPathfindingComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 
 #if WITH_EDITOR
-	// 에디터 뷰포트에서도 TickComponent()가 호출되도록
 	bTickInEditor = true;
 #endif
 	
