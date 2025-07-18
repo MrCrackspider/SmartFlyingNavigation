@@ -1,4 +1,5 @@
-﻿
+﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
+
 #include "Pathfinder/NavVolume/OctreeVoxelVolume.h"
 
 // Engine Headers
@@ -743,12 +744,7 @@ bool AOctreeVoxelVolume::GetBakedAssetPath(FString& OutPackagePath, FString& Out
 		UE_LOG(LogTemp, Error, TEXT("Cannot get asset path: 'Baked Data Save Directory' is not set in the volume's properties."));
 		return false;
 	}
-
-	// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-	// *** 핵심 수정 부분 시작 ***
-	// ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-
-	// 1. 현재 월드(레벨)를 가져옵니다.
+	
 	UWorld* World = GetWorld();
 	if (!World)
 	{
@@ -756,23 +752,14 @@ bool AOctreeVoxelVolume::GetBakedAssetPath(FString& OutPackagePath, FString& Out
 		return false;
 	}
 
-	// 2. 월드에서 맵 이름을 가져옵니다.
 	const FString RawLevelName = World->GetMapName();
 
-	// 3. PIE (Play-In-Editor) 접두사("UEDPIE_0_")를 제거하여 순수한 레벨 이름을 얻습니다.
 	const FString CleanLevelName = UWorld::RemovePIEPrefix(RawLevelName);
 
-	// 4. 최종 에셋 이름을 "DA_레벨이름_액터이름" 형식으로 구성합니다.
 	OutAssetName = FString::Printf(TEXT("DA_%s_%s"), *CleanLevelName, *GetActorLabel());
 
-	// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
-	// *** 핵심 수정 부분 끝 ***
-	// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
-
-	// UPROPERTY에 저장된 상대 경로 앞에 "/Game/"을 붙여 유효한 패키지 디렉토리 경로를 생성합니다.
 	const FString PackageDirectory = FPaths::Combine(TEXT("/Game"), BakedDataSaveDirectory.Path);
 
-	// 패키지 디렉토리와 에셋 이름을 결합하여 최종 패키지 경로를 만듭니다.
 	OutPackagePath = FPaths::Combine(PackageDirectory, OutAssetName);
 
 	return true;

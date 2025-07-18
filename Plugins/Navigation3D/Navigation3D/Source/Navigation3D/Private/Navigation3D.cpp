@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright © 2025 TeamHamDev. All Rights Reserved.
 
 #include "Navigation3D.h"
 #include "LevelEditor.h"
@@ -7,7 +7,7 @@
 
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
-// 창을 식별하기 위한 고유한 이름입니다.
+
 static const FName PathfindingTunerTabName("PathfindingTuner");
 
 
@@ -16,40 +16,38 @@ static const FName PathfindingTunerTabName("PathfindingTuner");
 void FNavigation3DModule::StartupModule()
 {
 	// This code will execute after your module is loaded into memory; the exact timing is specified in the .uplugin file per-module
-	
-	 // 에디터 환경에서만 실행되도록 합니다.
-        if (!IsRunningCommandlet() && !IsRunningGame())
-        {
-            FLevelEditorModule& LevelEditorModule = FModuleManager::LoadModuleChecked<FLevelEditorModule>("LevelEditor");
-            
-            TSharedPtr<FExtender> MenuExtender = MakeShareable(new FExtender());
-            MenuExtender->AddMenuExtension(
-                "WindowLayout",
-                EExtensionHook::After,
-                nullptr,
-                FMenuExtensionDelegate::CreateLambda([](FMenuBuilder& Builder)
-                {
-                    Builder.AddMenuEntry(
-                        FText::FromString("Pathfinding Tuner"),
-                        FText::FromString("Open the Pathfinding Tuner window."),
-                        FSlateIcon(),
-                        FUIAction(
-                            FExecuteAction::CreateLambda([]()
-                            {
-                                FGlobalTabmanager::Get()->TryInvokeTab(PathfindingTunerTabName);
-                            })
-                        )
-                    );
-                })
-            );
-            
-            LevelEditorModule.GetMenuExtensibilityManager()->AddExtender(MenuExtender);
-    
-            FGlobalTabmanager::Get()->RegisterTabSpawner(PathfindingTunerTabName, 
-                FOnSpawnTab::CreateRaw(this, &FNavigation3DModule::SpawnPathfindingTunerTab))
-                .SetDisplayName(FText::FromString("Pathfinding Tuner"))
-            .SetGroup(WorkspaceMenu::GetMenuStructure().GetDeveloperToolsMiscCategory());
-        }
+    if (!IsRunningCommandlet() && !IsRunningGame())
+    {
+        FLevelEditorModule& LevelEditorModule = FModuleManager::LoadModuleChecked<FLevelEditorModule>("LevelEditor");
+        
+        TSharedPtr<FExtender> MenuExtender = MakeShareable(new FExtender());
+        MenuExtender->AddMenuExtension(
+            "WindowLayout",
+            EExtensionHook::After,
+            nullptr,
+            FMenuExtensionDelegate::CreateLambda([](FMenuBuilder& Builder)
+            {
+                Builder.AddMenuEntry(
+                    FText::FromString("Pathfinding Tuner"),
+                    FText::FromString("Open the Pathfinding Tuner window."),
+                    FSlateIcon(),
+                    FUIAction(
+                        FExecuteAction::CreateLambda([]()
+                        {
+                            FGlobalTabmanager::Get()->TryInvokeTab(PathfindingTunerTabName);
+                        })
+                    )
+                );
+            })
+        );
+        
+        LevelEditorModule.GetMenuExtensibilityManager()->AddExtender(MenuExtender);
+
+        FGlobalTabmanager::Get()->RegisterTabSpawner(PathfindingTunerTabName, 
+            FOnSpawnTab::CreateRaw(this, &FNavigation3DModule::SpawnPathfindingTunerTab))
+            .SetDisplayName(FText::FromString("Pathfinding Tuner"))
+        .SetGroup(WorkspaceMenu::GetMenuStructure().GetDeveloperToolsMiscCategory());
+    }
 }
 
 void FNavigation3DModule::ShutdownModule()

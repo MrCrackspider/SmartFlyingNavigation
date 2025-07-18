@@ -1,5 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
-
+﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
 
 #include "Pathfinder/Strategy/AStarStrategy.h"
 #include "Pathfinder/Utility/AStarStrategyUtils.h"
@@ -65,7 +64,6 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	}
 	auto& NodePool = *static_cast<TNodeMemoryPool<FAstarPathNode>*>(BasePool);
 
-	// 3. '일꾼' 객체를 생성하고 작업을 위임합니다.
 	FAstarPathfinder Pathfinder(OctreeData, StartNodeIndex, GoalNodeIndex,
 	                            InRequest.StartLocation, InRequest.EndLocation,
 	                            InRequest.AgentRadius, NodePool);

@@ -1,4 +1,6 @@
-﻿#include "Pathfinder/Subsystem/AvoidanceSubsystem.h"
+﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
+
+#include "Pathfinder/Subsystem/AvoidanceSubsystem.h"
 #include "Pathfinder/PathfindingComponent.h"
 #include "GameFramework/Actor.h"
 #include "Stats/Stats.h"

@@ -1,5 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
-
+﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
 
 #include "Pathfinder/NavData/StaticVoxelChunkData.h"
 #include "Serialization/Archive.h"
@@ -8,6 +7,7 @@ const FName UStaticVoxelChunkData::VoxelChunkAssetType = TEXT("VoxelChunk");
 FPrimaryAssetId UStaticVoxelChunkData::GetPrimaryAssetId() const
 {
 	FString AssetName = FString::Printf(TEXT("Chunk_%d_%d_%d"), ChunkCoords.X, ChunkCoords.Y, ChunkCoords.Z);
+    
 	return FPrimaryAssetId(UStaticVoxelChunkData::VoxelChunkAssetType, FName(*AssetName));
 }
 

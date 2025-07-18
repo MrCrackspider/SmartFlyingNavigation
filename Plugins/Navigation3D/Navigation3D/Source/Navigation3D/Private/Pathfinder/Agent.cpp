@@ -1,9 +1,6 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+// Copyright © 2025 TeamHamDev. All Rights Reserved.
 
 #include "Pathfinder/Agent.h"
-
-#include "Components/SplineComponent.h"
 #include "Pathfinder/PathfindingComponent.h"
 
 AAgent::AAgent()

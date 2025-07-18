@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright © 2025 TeamHamDev. All Rights Reserved.
 
 #include "Pathfinder/NavVolume/VoxelVolumeBase.h"
 #include "Components/BoxComponent.h"

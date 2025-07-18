@@ -1,4 +1,6 @@
-﻿#include "Pathfinder/NavData/OctreeDataAsset.h"
+﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
+
+#include "Pathfinder/NavData/OctreeDataAsset.h"
 
 const FName UOctreeDataAsset::OctreeAssetType = TEXT("OctreeData");
 

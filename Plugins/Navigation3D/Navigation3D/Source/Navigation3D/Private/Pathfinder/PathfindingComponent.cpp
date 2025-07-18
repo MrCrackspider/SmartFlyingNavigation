@@ -1,4 +1,6 @@
-﻿#include "Pathfinder/PathfindingComponent.h"
+﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
+
+#include "Pathfinder/PathfindingComponent.h"
 #include "Components/SplineComponent.h"
 #include "Pathfinder/Subsystem/PathfindingSubsystem.h"
 #include "Pathfinder/Subsystem/AvoidanceSubsystem.h" 

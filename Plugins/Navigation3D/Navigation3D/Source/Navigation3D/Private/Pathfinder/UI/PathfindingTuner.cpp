@@ -1,4 +1,6 @@
-﻿#include "Pathfinder/UI/PathfindingTuner.h"
+﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
+
+#include "Pathfinder/UI/PathfindingTuner.h"
 
 // Engine
 #include "Editor.h"
@@ -474,27 +476,21 @@ bool SPathfindingTuner::TickActorSelection(float DeltaTime)
         }
     }
 
-    // --- 수정된 부분 시작 ---
-
     bool bSelectionChanged = false;
     const TSet<TWeakObjectPtr<AActor>> LastSelectedActorsSet(LastSelectedActors);
 
-    // 1. 두 Set의 크기가 다르면 무조건 변경된 것
     if (CurrentSelectedActorsSet.Num() != LastSelectedActorsSet.Num())
     {
         bSelectionChanged = true;
     }
     else
     {
-        // 2. 크기가 같다면, 내용물이 다른지 확인
-        //    CurrentSet의 모든 원소가 LastSet에 포함되어 있는지 확인한다.
-        //    하나라도 포함되어 있지 않으면, 두 Set은 다른 것이다.
         for (const TWeakObjectPtr<AActor>& CurrentActor : CurrentSelectedActorsSet)
         {
             if (!LastSelectedActorsSet.Contains(CurrentActor))
             {
                 bSelectionChanged = true;
-                break; // 하나라도 다르면 더 이상 비교할 필요 없음
+                break;
             }
         }
     }
@@ -505,8 +501,6 @@ bool SPathfindingTuner::TickActorSelection(float DeltaTime)
         OnActorSelectionChanged();
     }
     
-    // --- 수정된 부분 끝 ---
-
     return true; // Continue ticking
 }
 
@@ -751,10 +745,8 @@ bool SPathfindingTuner::AreOnlyAgentsSelected() const
 
 FText SPathfindingTuner::GetSelectedAgentName() const
 {
-    // 1. GetSelectedComponentsOfType 템플릿을 사용하여 PathfindingComponent 목록을 직접 가져옵니다.
     const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
 
-    // 2. 컴포넌트의 수를 기준으로 텍스트를 결정합니다.
     const int32 NumSelected = SelectedComponents.Num();
 
     if (NumSelected == 0)
@@ -763,11 +755,9 @@ FText SPathfindingTuner::GetSelectedAgentName() const
     }
     if (NumSelected == 1)
     {
-        // 컴포넌트의 오너(Owner) 액터의 레이블을 가져옵니다.
         return FText::FromString(SelectedComponents[0]->GetOwner()->GetActorLabel());
     }
     
-    // NumSelected > 1
     return FText::Format(LOCTEXT("MultipleAgentsSelected", "{0} Agents Selected"), FText::AsNumber(NumSelected));
 }
 FString SPathfindingTuner::GetTargetActorPath() const
