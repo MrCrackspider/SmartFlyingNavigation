@@ -35,19 +35,17 @@ class NAVIGATION3D_API UStaticVoxelChunkData : public UPrimaryDataAsset
 public:
 	static const FName VoxelChunkAssetType;
 	
-	// 청크당 128³ 비트 = 2,097,152비트 = 262,144바이트
 	FByteBulkData ObstacleBitsBulk;
 
-	UPROPERTY() // UPROPERTY를 붙여서 직렬화되도록 해야 합니다.
-	FIntVector ChunkCoords; // int32 대신 FIntVector를 사용하는 것이 좋습니다.
+	UPROPERTY()
+	FIntVector ChunkCoords;
 
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
 
-	
-	// 에디터 전용 함수임을 명시하는 것이 좋습니다.
+
 	virtual void Serialize(FStructuredArchive::FRecord Record) override;
 #if WITH_EDITOR
-	// 에디터 베이킹 단계에서:
+
 	void FillBulkData(const TArray<F128BitChunk>& ChunkArray)
 	{
 		// 1. Clear any pre-existing data.

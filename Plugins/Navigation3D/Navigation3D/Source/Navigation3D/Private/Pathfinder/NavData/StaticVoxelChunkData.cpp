@@ -8,8 +8,6 @@ const FName UStaticVoxelChunkData::VoxelChunkAssetType = TEXT("VoxelChunk");
 FPrimaryAssetId UStaticVoxelChunkData::GetPrimaryAssetId() const
 {
 	FString AssetName = FString::Printf(TEXT("Chunk_%d_%d_%d"), ChunkCoords.X, ChunkCoords.Y, ChunkCoords.Z);
-    
-	// 미리 정의된 타입과 생성된 이름을 사용하여 PrimaryAssetId를 반환합니다.
 	return FPrimaryAssetId(UStaticVoxelChunkData::VoxelChunkAssetType, FName(*AssetName));
 }
 
