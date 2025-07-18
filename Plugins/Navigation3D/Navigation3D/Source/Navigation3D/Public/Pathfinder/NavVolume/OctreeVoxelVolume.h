@@ -9,7 +9,7 @@
 #include "OctreeVoxelVolume.generated.h"
 
 class UDynamicObstacleComponent;
-class UVoxelObstacleFilter;
+class UVoxelObstacleProfile;
 
 struct FDebugNodeInfo
 {
@@ -31,7 +31,7 @@ UCLASS()
 class NAVIGATION3D_API AOctreeVoxelVolume : public AVoxelVolumeBase
 {
 	GENERATED_BODY()
-
+ 
 public:
 	/** Default constructor. */
 	AOctreeVoxelVolume();
@@ -83,7 +83,7 @@ public:
 	FORCEINLINE TArray<F128BitChunk> GetDynamicObstacleBitmask() const { return DynamicObstacleBitmask; }
 
 	/** Returns the filter used to identify static objects during the baking process. */
-	TObjectPtr<UVoxelObstacleFilter> GetStaticObstacleFilter() const { return StaticObjectFilter; }
+	TObjectPtr<UVoxelObstacleProfile> GetStaticObstacleProfile() const { return StaticObjectProfile; }
 
 	/** Returns the data asset where the baked octree data is stored. */
 	TObjectPtr<UOctreeDataAsset> GetBakedOctreeData() const { return BakedOctreeData; }
@@ -104,7 +104,7 @@ public:
 	 * Sets the filter used to identify static objects during the baking process.
 	 * @param Filter The new filter to use.
 	 */
-	void SetStaticObstacleFilter(TObjectPtr<UVoxelObstacleFilter> Filter) { StaticObjectFilter = Filter; }
+	void SetStaticObstacleProfile(TObjectPtr<UVoxelObstacleProfile> Profile) { StaticObjectProfile = Profile; }
 
 	//~======================================================================
 	// Debugging
@@ -263,22 +263,22 @@ public:
 	 * The maximum depth of the octree. Determines the smallest possible node size.
 	 * For a 128x128x128 volume, a depth of 7 (2^7=128) is appropriate for voxel-level precision.
 	 */
-	UPROPERTY(EditAnywhere, Category = "Octree")
+	UPROPERTY()
 	int32 MaxOctreeDepth;
 
 	/**
 	 * The data asset containing the pre-baked octree for static geometry.
 	 * This asset is loaded at runtime to initialize the static collision data.
 	 */
-	UPROPERTY(EditAnywhere, Category = "Octree|Baking", meta = (DisplayName = "Baked Octree Data"))
+	UPROPERTY()
 	TObjectPtr<UOctreeDataAsset> BakedOctreeData;
 
 	/**
 	 * A filter that defines which actors and components should be considered static obstacles
 	 * during the baking process.
 	 */
-	UPROPERTY(EditAnywhere, Category = "Octree|Baking", meta = (DisplayName = "Static Object Filter"))
-	TObjectPtr<UVoxelObstacleFilter> StaticObjectFilter;
+	UPROPERTY()
+	TObjectPtr<UVoxelObstacleProfile> StaticObjectProfile;
 
 #if WITH_EDITORONLY_DATA
 

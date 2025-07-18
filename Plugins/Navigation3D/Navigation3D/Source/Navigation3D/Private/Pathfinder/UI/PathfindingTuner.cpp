@@ -28,11 +28,14 @@
 #include "Widgets/Text/STextBlock.h"
 
 // Project
-#include "Pathfinder/NavData/VoxelObstacleFilter.h"
+#include "EngineUtils.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "Pathfinder/NavData/VoxelObstacleProfile.h"
 #include "Pathfinder/NavVolume/OctreeVoxelVolume.h"
 #include "Pathfinder/Subsystem/PathfindingSubsystem.h"
 #include "Pathfinder/PathfindingComponent.h"
 #include "Pathfinder/UI/PathfindingTunerSettings.h"
+#include "Widgets/Notifications/SNotificationList.h"
 
 #define LOCTEXT_NAMESPACE "PathfindingTuner"
 
@@ -64,52 +67,52 @@ void SPathfindingTuner::Construct(const FArguments& InArgs)
 
     ChildSlot
     [
-        SNew(SVerticalBox)
-
-        // Performance Settings Section
-        + SVerticalBox::Slot()
-        .AutoHeight()
-        .Padding(2)
+        // To make the content scrollable, we wrap everything in an SScrollBox.
+        SNew(SScrollBox)
+        + SScrollBox::Slot()
         [
-            BuildPerformanceSettingsSection()
-        ]
+            // The SVerticalBox now becomes a child of the SScrollBox.
+            SNew(SVerticalBox)
 
-        // Octree Volume Settings Section
-        + SVerticalBox::Slot()
-        .AutoHeight()
-        .Padding(2)
-        [
-            BuildOctreeVolumeSettingsSection()
-        ]
+            // Performance Settings Section
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(2)
+            [
+                BuildPerformanceSettingsSection()
+            ]
 
-        // Baked Data Settings Section
-        + SVerticalBox::Slot()
-        .AutoHeight()
-        .Padding(2)
-        [
-            BuildBakedDataSettingsSection()
-        ]
+            // Octree Volume Settings Section
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(2)
+            [
+                BuildOctreeVolumeSettingsSection()
+            ]
 
-        // Agent Settings Section
-        + SVerticalBox::Slot()
-        .AutoHeight()
-        .Padding(2)
-        [
-            BuildAgentSettingsSection()
-        ]
+            // Baked Data Settings Section
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(2)
+            [
+                BuildBakedDataSettingsSection()
+            ]
 
-        // Bake Button
-        + SVerticalBox::Slot()
-        .AutoHeight()
-        .Padding(8.0f, 15.0f)
-        [
-            SNew(SButton)
-            .HAlign(HAlign_Center)
-            .Text(LOCTEXT("BakeButtonText", "Bake Octree Data"))
-            .ToolTipText(LOCTEXT("BakeButtonTooltip", "Bakes the static geometry within the selected Octree Volumes into a data asset. This can be a lengthy process."))
-            .IsEnabled(this, &SPathfindingTuner::AreOnlyOctreeVolumesSelected)
+            // Debug Section
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(2)
+            [
+                BuildVoxelDebugSettingsSection() 
+            ]
 
-            .OnClicked(this, &SPathfindingTuner::OnBakeButtonClicked)
+            // Agent Settings Section
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(2)
+            [
+                BuildAgentSettingsSection()
+            ]
         ]
     ];
 }
@@ -197,10 +200,14 @@ TSharedRef<SWidget> SPathfindingTuner::BuildOctreeVolumeSettingsSection()
                 + SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
                 [
                     SNew(STextBlock).Text(LOCTEXT("SelectedVolumeLabel", "Selected Volume(s):")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                    .ColorAndOpacity(FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>("TextBlock.Warning").ColorAndOpacity)
                 ]
-                + SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
+                + SHorizontalBox::Slot().FillWidth(0.6f)
+                .VAlign(VAlign_Center)
+                .Padding(FMargin(5.0f, 0.0f, 0.0f, 0.0f)) // Left, Top, Right, Bottom
                 [
                     SNew(STextBlock).Text(this, &SPathfindingTuner::GetSelectedVolumeDisplayText).Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont"))
+                    .ColorAndOpacity(FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>("TextBlock.Warning").ColorAndOpacity)
                 ]
             ]
 
@@ -249,19 +256,19 @@ TSharedRef<SWidget> SPathfindingTuner::BuildOctreeVolumeSettingsSection()
                 ]
             ]
 
-            // Voxel Size
+            // Voxel Extent
             + SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
             [
                 SNew(SHorizontalBox)
                 + SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
                 [
-                    SNew(STextBlock).Text(LOCTEXT("VoxelSizeLabel", "Voxel Size:")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                    SNew(STextBlock).Text(LOCTEXT("VoxelExtentLabel", "Voxel Extent:")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
                 ]
                 + SHorizontalBox::Slot().FillWidth(0.6f)
                 [
                     SNew(SNumericEntryBox<float>)
-                    .Value(this, &SPathfindingTuner::GetVoxelSize)
-                    .OnValueCommitted(this, &SPathfindingTuner::OnVoxelSizeCommitted)
+                    .Value(this, &SPathfindingTuner::GetVoxelExtent)
+                    .OnValueCommitted(this, &SPathfindingTuner::OnVoxelExtentCommitted)
                     .MinValue(1.0f).MaxValue(1000.0f).MinSliderValue(10.0f).MaxSliderValue(500.0f)
                 ]
             ]
@@ -307,36 +314,159 @@ TSharedRef<SWidget> SPathfindingTuner::BuildBakedDataSettingsSection()
         ]
         .BodyContent()
         [
+            // Top-level vertical box for all content in this section
             SNew(SVerticalBox)
-            + SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+
+            // --- Item 1: Baked Octree Data Asset ---
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(8.0f, 5.0f)
             [
                 SNew(SHorizontalBox)
-                + SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
+                // Label
+                + SHorizontalBox::Slot()
+                .FillWidth(0.4f)
+                .VAlign(VAlign_Center)
                 [
-                    SNew(STextBlock).Text(LOCTEXT("BakedOctreeDataLabel", "Baked Octree Data Asset:")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                    SNew(STextBlock)
+                    .Text(LOCTEXT("BakedOctreeDataLabel", "Baked Octree Data Asset:"))
+                    .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
                 ]
-                + SHorizontalBox::Slot().FillWidth(0.6f)
+                // Input widget + path display
+                + SHorizontalBox::Slot()
+                .FillWidth(0.6f)
                 [
                     SNew(SVerticalBox)
-                    + SVerticalBox::Slot().AutoHeight()
+                    // Object Property Entry Box
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
                     [
                         SNew(SObjectPropertyEntryBox)
                         .AllowedClass(UOctreeDataAsset::StaticClass())
                         .ObjectPath(this, &SPathfindingTuner::GetBakedOctreeDataPath)
                         .OnObjectChanged(this, &SPathfindingTuner::OnBakedOctreeDataChanged)
                     ]
-                    + SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
+                    // Path text
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0, 4, 0, 0)
                     [
                         SNew(SHorizontalBox)
-                        + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 5, 0)
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .VAlign(VAlign_Center)
+                        .Padding(0, 0, 5, 0)
                         [
-                            SNew(STextBlock).Text(LOCTEXT("PathLabel", "Path:")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont")).ColorAndOpacity(FSlateColor(FLinearColor(0.7f, 0.7f, 0.7f)))
+                            SNew(STextBlock)
+                            .Text(LOCTEXT("PathLabel", "Path:"))
+                            .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                            .ColorAndOpacity(FSlateColor(FLinearColor(0.7f, 0.7f, 0.7f)))
                         ]
-                        + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+                        + SHorizontalBox::Slot()
+                        .FillWidth(1.0f)
+                        .VAlign(VAlign_Center)
                         [
-                            SNew(STextBlock).Text(this, &SPathfindingTuner::GetBakedDataFullPathAsText).Font(FAppStyle::GetFontStyle("PropertyWindow.ItalicFont")).ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)))
+                            SNew(STextBlock)
+                            .Text(this, &SPathfindingTuner::GetBakedDataFullPathAsText)
+                            .Font(FAppStyle::GetFontStyle("PropertyWindow.ItalicFont"))
+                            .ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)))
                         ]
                     ]
+                ]
+            ]
+
+            // --- Item 2: Voxel Obstacle Profile (Defines WHAT to bake) ---
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(8.0f, 5.0f)
+            [
+                SNew(SHorizontalBox)
+                // Label
+                + SHorizontalBox::Slot()
+                .FillWidth(0.4f)
+                .VAlign(VAlign_Center)
+                [
+                    SNew(STextBlock)
+                    .Text(LOCTEXT("ObstacleProfileLabel", "Voxel Obstacle Profile:"))
+                    .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                ]
+                // Input widget + path display
+                + SHorizontalBox::Slot()
+                .FillWidth(0.6f)
+                [
+                    SNew(SVerticalBox)
+                    // Object Property Entry Box
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SNew(SObjectPropertyEntryBox)
+                        .AllowedClass(UVoxelObstacleProfile::StaticClass()) // Changed to the new Profile class
+                        .ObjectPath(this, &SPathfindingTuner::GetObstacleProfilePath) // Changed delegate
+                        .OnObjectChanged(this, &SPathfindingTuner::OnObstacleProfileChanged) // Changed delegate
+                        .ToolTipText(LOCTEXT("ObstacleProfileTooltip", "Specifies the Profile that defines which actors or geometry types are considered obstacles for baking."))
+                    ]
+                    // Path text
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0, 4, 0, 0)
+                    [
+                        SNew(SHorizontalBox)
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .VAlign(VAlign_Center)
+                        .Padding(0, 0, 5, 0)
+                        [
+                            SNew(STextBlock)
+                            .Text(LOCTEXT("PathLabel", "Path:"))
+                            .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                            .ColorAndOpacity(FSlateColor(FLinearColor(0.7f, 0.7f, 0.7f)))
+                        ]
+                        + SHorizontalBox::Slot()
+                        .FillWidth(1.0f)
+                        .VAlign(VAlign_Center)
+                        [
+                            SNew(STextBlock)
+                            .Text(this, &SPathfindingTuner::GetObstacleProfileFullPathAsText) // Changed delegate
+                            .Font(FAppStyle::GetFontStyle("PropertyWindow.ItalicFont"))
+                            .ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)))
+                        ]
+                    ]
+                ]
+            ]
+
+            // --- Item 3: Bake Action (Description on Left, Button on Right) ---
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(8.0f, 15.0f, 8.0f, 8.0f) // Add vertical padding for separation
+            [
+                SNew(SHorizontalBox)
+
+                // Left Slot: Description Text
+                + SHorizontalBox::Slot()
+                .FillWidth(0.4f)
+                .VAlign(VAlign_Center)
+                .Padding(0, 0, 8.0f, 0) // Padding between text and button
+                [
+                    SNew(STextBlock)
+                    .Text(LOCTEXT("BakeDescription", "Generate data asset from selected volumes."))
+                    .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                    .ColorAndOpacity(FSlateColor(FLinearColor(0.8f, 0.8f, 0.8f)))
+                    .AutoWrapText(true)
+                ]
+
+                // Right Slot: Bake Button (Now fills the slot)
+                + SHorizontalBox::Slot()
+                .FillWidth(0.6f)
+                .VAlign(VAlign_Center)
+                .Padding(0.0f, 0.0f, 15.0f, 0.0f)
+                [
+                    SNew(SButton)
+                    .ButtonStyle(FAppStyle::Get(), "PrimaryButton")
+                    .TextStyle(FAppStyle::Get(), "PrimaryButtonText")
+                    .Text(LOCTEXT("BakeButtonText", "Bake Octree Data"))
+                    .ToolTipText(LOCTEXT("BakeButtonTooltip", "Bakes the static geometry within the selected Octree Volumes into a data asset. This can be a lengthy process."))
+                    .IsEnabled(this, &SPathfindingTuner::AreOnlyOctreeVolumesSelected)
+                    .OnClicked(this, &SPathfindingTuner::OnBakeButtonClicked)
                 ]
             ]
         ]
@@ -366,10 +496,14 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
                 + SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
                 [
                     SNew(STextBlock).Text(LOCTEXT("SelectedActorLabel", "Selected Agent(s):")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                    .ColorAndOpacity(FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>("TextBlock.Warning").ColorAndOpacity)
                 ]
-                + SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
+                + SHorizontalBox::Slot()
+                .FillWidth(0.6f).VAlign(VAlign_Center)
+                .Padding(FMargin(5.0f, 0.0f, 0.0f, 0.0f)) // Left, Top, Right, Bottom
                 [
                     SNew(STextBlock).Text(this, &SPathfindingTuner::GetSelectedAgentName).Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont"))
+                    .ColorAndOpacity(FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>("TextBlock.Warning").ColorAndOpacity)
                 ]
             ]
 
@@ -442,17 +576,117 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
                     .MinValue(1.0f).MaxValue(1000.0f).MinSliderValue(100.0f).MaxSliderValue(500.0f)
                 ]
             ]
+
+            // Avoidance Radius
+          + SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+          [
+              SNew(SHorizontalBox)
+              + SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
+              [
+                  SNew(STextBlock).Text(LOCTEXT("Avoidance Radius Label", "Avoidance Radius:")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+              ]
+              + SHorizontalBox::Slot().FillWidth(0.6f)
+              [
+                  SNew(SNumericEntryBox<float>)
+                  .Value(this, &SPathfindingTuner::GetAvoidanceRadius)
+                  .OnValueCommitted(this, &SPathfindingTuner::OnAvoidanceRadiusCommitted)
+                  .MinValue(1.0f).MaxValue(1000.0f).MinSliderValue(100.0f).MaxSliderValue(500.0f)
+              ]
+          ]
         ]
+        
         .InitiallyCollapsed(!TunerSettings->bIsAgentSettingsCategoryExpanded)
         .OnAreaExpansionChanged(this, &SPathfindingTuner::OnAgentSettingsCategoryExpansionChanged);
+}
+
+
+TSharedRef<SWidget> SPathfindingTuner::BuildVoxelDebugSettingsSection()
+{
+    // Use SExpandableArea as the root widget to match the design
+    return SNew(SExpandableArea)
+         .IsEnabled(this, &SPathfindingTuner::AreOnlyOctreeVolumesSelected) // Example: enable only if VoxelVolumes are selected
+        .HeaderContent()
+        [
+            SNew(STextBlock)
+            .Text(LOCTEXT("DebugSettingsCategory", "Debug Settings")) // Category title
+            .Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle")) // Matching font style
+            .ShadowOffset(FVector2D(1.0f, 1.0f)) // Matching shadow offset
+        ]
+        .BodyContent()
+        [
+            // Wrap the existing debug controls in a SVerticalBox for the body content
+            SNew(SVerticalBox)
+
+            // bDrawDebugBox property
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(8.0f, 5.0f) // Matching padding for individual properties
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .FillWidth(0.4f)
+                .VAlign(VAlign_Center)
+                [
+                    SNew(STextBlock)
+                    .Text(LOCTEXT("DrawDebugBox", "Draw Debug Box"))
+                    .ToolTipText(LOCTEXT("DrawDebugBoxTooltip", "Whether to draw the main volume debug box."))
+                    .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont")) // Matching font style for property labels
+                ]
+                + SHorizontalBox::Slot()
+                .FillWidth(0.6f)
+                [
+                    SNew(SCheckBox)
+                    .OnCheckStateChanged(this, &SPathfindingTuner::OnDrawDebugBoxChanged)
+                    .IsChecked_Lambda([this]() -> ECheckBoxState {
+                        TOptional<ECheckBoxState> State = this->GetDrawDebugBoxState();
+                        if (State.IsSet())
+                        {
+                            return State.GetValue();
+                        }
+                        return ECheckBoxState::Undetermined;
+                    })
+                    .ToolTipText(LOCTEXT("DrawDebugBoxTooltip", "Whether to draw the main volume debug box."))
+                ]
+            ]
+
+            // DebugLineWidth property - Now matches Voxel Extent's UI exactly (including slider)
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(8.0f, 5.0f) // Matching padding for individual properties
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .FillWidth(0.4f)
+                .VAlign(VAlign_Center)
+                [
+                    SNew(STextBlock)
+                    .Text(LOCTEXT("DebugLineWidth", "Debug Line Width"))
+                    .ToolTipText(LOCTEXT("DebugLineWidthTooltip", "The thickness of the debug lines."))
+                    .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont")) // Matching font style for property labels
+                ]
+                + SHorizontalBox::Slot()
+                .FillWidth(0.6f)
+                [
+                    SNew(SNumericEntryBox<float>)
+                    .Value(this, &SPathfindingTuner::GetDebugLineWidth)
+                    .OnValueCommitted(this, &SPathfindingTuner::OnDebugLineWidthCommitted)
+                    .MinValue(1.0f).MaxValue(1000.0f) // Matches Voxel Extent's min/max range for input
+                    .MinSliderValue(10.0f).MaxSliderValue(500.0f) // Re-added to match Voxel Extent's slider behavior
+                    // .AllowSpin(true) and .Delta(1.0f) are often defaults or can be explicitly added if desired for VoxelExtent too.
+                    // For exact match, if VoxelExtent doesn't have them explicitly, we omit them too.
+                    .UndeterminedString(LOCTEXT("Unselected", "Unselected"))
+                ]
+            ]
+        ]
+        // Control initial collapse state based on settings
+        .InitiallyCollapsed(!TunerSettings->bIsDebugSettingsCategoryExpanded)
+        // Bind expansion change to save state
+        .OnAreaExpansionChanged(this, &SPathfindingTuner::OnDebugSettingsCategoryExpansionChanged);
 }
 
 //=================================================================================================
 // Actor Selection Handling
 //=================================================================================================
-
-// In SPathfindingTuner.cpp
-
 bool SPathfindingTuner::TickActorSelection(float DeltaTime)
 {
     if (!GEditor) return false; // Stop ticking if the editor is gone
@@ -573,7 +807,7 @@ FText SPathfindingTuner::GetBakedDataSaveDirectoryAsText() const
 
     return CommonPath.IsSet() ? FText::FromString(CommonPath.GetValue()) : FText();
 }
-
+  
 void SPathfindingTuner::OnBakedDataSaveDirectoryTextCommitted(const FText& InText, ETextCommit::Type CommitInfo)
 {
     if (CommitInfo == ETextCommit::OnEnter || CommitInfo == ETextCommit::OnUserMovedFocus)
@@ -585,6 +819,67 @@ void SPathfindingTuner::OnBakedDataSaveDirectoryTextCommitted(const FText& InTex
                 V->MarkPackageDirty();
             });
     }
+}
+
+/**
+ * Gets the object path for the Voxel Obstacle Profile.
+ * Used by SObjectPropertyEntryBox. Returns an empty string for multiple or null values.
+ */
+FString SPathfindingTuner::GetObstacleProfilePath() const
+{
+    const auto SelectedVolumes = GetSelectedActorsOfType<AOctreeVoxelVolume>();
+    
+    // Get the common ObstacleProfile from all selected volumes.
+    TOptional<UVoxelObstacleProfile*> CommonProfile = GetCommonPropertyValue<AOctreeVoxelVolume, UVoxelObstacleProfile*>(SelectedVolumes,
+        [](const AOctreeVoxelVolume* V) { return V->GetStaticObstacleProfile(); });
+
+    // If a common, valid profile exists, return its path. Otherwise, return an empty string.
+    return (CommonProfile.IsSet() && CommonProfile.GetValue()) ? CommonProfile.GetValue()->GetPathName() : FString();
+}
+
+/**
+ * Called when the user changes the Voxel Obstacle Profile in the UI.
+ * This sets the new profile on all selected volumes.
+ */
+void SPathfindingTuner::OnObstacleProfileChanged(const FAssetData& AssetData)
+{
+    UVoxelObstacleProfile* NewProfile = Cast<UVoxelObstacleProfile>(AssetData.GetAsset());
+    const auto SelectedVolumes = GetSelectedActorsOfType<AOctreeVoxelVolume>();
+
+    // Use the helper to set the property on all selected volumes within a single transaction.
+    SetCommonPropertyValue<AOctreeVoxelVolume, UVoxelObstacleProfile*>(SelectedVolumes, NewProfile, LOCTEXT("SetObstacleProfileTransaction", "Set Voxel Obstacle Profile"),
+        [](AOctreeVoxelVolume* V, UVoxelObstacleProfile* Profile) {
+            V->SetStaticObstacleProfile(Profile);
+            V->MarkPackageDirty();
+        });
+}
+
+/**
+ * Gets the display text for the directory path of the Voxel Obstacle Profile.
+ * Correctly handles "Multiple Values" and "None" cases.
+ */
+FText SPathfindingTuner::GetObstacleProfileFullPathAsText() const
+{
+    const auto SelectedVolumes = GetSelectedActorsOfType<AOctreeVoxelVolume>();
+    
+    // Get the common ObstacleProfile from all selected volumes.
+    TOptional<UVoxelObstacleProfile*> CommonProfile = GetCommonPropertyValue<AOctreeVoxelVolume, UVoxelObstacleProfile*>(SelectedVolumes,
+        [](const AOctreeVoxelVolume* V) { return V->GetStaticObstacleProfile(); });
+
+    // Case 1: The selected volumes have different profile values.
+    if (!CommonProfile.IsSet())
+    {
+        return LOCTEXT("MultipleValues", "Multiple Values");
+    }
+    
+    // Case 2: The common profile is null (all are set to None).
+    if (!CommonProfile.GetValue())
+    {
+        return LOCTEXT("NonePath", "None");
+    }
+
+    // Case 3: A common, valid profile exists. Display its directory path.
+    return FText::FromString(FPaths::GetPath(CommonProfile.GetValue()->GetPathName()));
 }
 
 FReply SPathfindingTuner::OnBrowseButtonClicked()
@@ -633,14 +928,14 @@ void SPathfindingTuner::OnMaxOctreeDepthCommitted(int32 NewValue, ETextCommit::T
     }
 }
 
-TOptional<float> SPathfindingTuner::GetVoxelSize() const
+TOptional<float> SPathfindingTuner::GetVoxelExtent() const
 {
     const auto SelectedVolumes = GetSelectedActorsOfType<AOctreeVoxelVolume>();
     return GetCommonPropertyValue<AOctreeVoxelVolume, float>(SelectedVolumes,
         [](const AOctreeVoxelVolume* V) { return V->VoxelExtent; });
 }
 
-void SPathfindingTuner::OnVoxelSizeCommitted(float NewValue, ETextCommit::Type CommitType)
+void SPathfindingTuner::OnVoxelExtentCommitted(float NewValue, ETextCommit::Type CommitType)
 {
     if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
     {
@@ -715,8 +1010,8 @@ void SPathfindingTuner::OnBakedOctreeDataChanged(const FAssetData& AssetData)
 FText SPathfindingTuner::GetBakedDataFullPathAsText() const
 {
     const auto SelectedVolumes = GetSelectedActorsOfType<AOctreeVoxelVolume>();
-    TOptional<UOctreeDataAsset*> CommonAsset = GetCommonPropertyValue<AOctreeVoxelVolume, UOctreeDataAsset*>(SelectedVolumes,
-        [](const AOctreeVoxelVolume* V) { return V->GetBakedOctreeData(); });
+    TOptional<UOctreeDataAsset*> CommonAsset = GetCommonPropertyValue<AOctreeVoxelVolume, UOctreeDataAsset*>
+    (SelectedVolumes,[](const AOctreeVoxelVolume* V) { return V->GetBakedOctreeData(); });
 
     if (!CommonAsset.IsSet()) return LOCTEXT("MultipleValues", "Multiple Values");
     if (!CommonAsset.GetValue()) return LOCTEXT("NonePath", "None");
@@ -724,6 +1019,62 @@ FText SPathfindingTuner::GetBakedDataFullPathAsText() const
     return FText::FromString(FPaths::GetPath(CommonAsset.GetValue()->GetPathName()));
 }
 
+//=================================================================================================
+// Debug Setting
+//=================================================================================================
+
+TOptional<ECheckBoxState> SPathfindingTuner::GetDrawDebugBoxState() const
+{
+    const auto SelectedVolumes = GetSelectedActorsOfType<AVoxelVolumeBase>();
+    TOptional<bool> CommonValue = GetCommonPropertyValue<AVoxelVolumeBase, bool>(SelectedVolumes,
+        [](const AVoxelVolumeBase* V) { return V->GetbDrawDebugBox(); });
+
+    if (CommonValue.IsSet())
+    {
+        return CommonValue.GetValue() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+    }
+    return ECheckBoxState::Undetermined; // Values differ or no actors selected
+}
+
+void SPathfindingTuner::OnDrawDebugBoxChanged(ECheckBoxState NewState)
+{
+    bool bNewValue = (NewState == ECheckBoxState::Checked);
+    
+    // Only commit if it's a definite checked/unchecked state
+    if (NewState != ECheckBoxState::Undetermined)
+    {
+        const auto SelectedVolumes = GetSelectedActorsOfType<AVoxelVolumeBase>();
+        SetCommonPropertyValue<AVoxelVolumeBase, bool>(SelectedVolumes, bNewValue, LOCTEXT("SetDrawDebugBoxTransaction", "Set Draw Debug Box"),
+            [](AVoxelVolumeBase* V, bool Value) {
+                V->SetbDrawDebugBox(Value);
+                // Important: Call OnConstruction to re-trigger debug drawing update
+                V->OnConstruction(V->GetActorTransform());
+                V->MarkPackageDirty();
+            });
+    }
+}
+
+TOptional<float> SPathfindingTuner::GetDebugLineWidth() const
+{
+    const auto SelectedVolumes = GetSelectedActorsOfType<AVoxelVolumeBase>();
+    return GetCommonPropertyValue<AVoxelVolumeBase, float>(SelectedVolumes,
+        [](const AVoxelVolumeBase* V) { return V->GetDebugLineWidth(); });
+}
+
+void SPathfindingTuner::OnDebugLineWidthCommitted(float NewValue, ETextCommit::Type CommitType)
+{
+    if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
+    {
+        const auto SelectedVolumes = GetSelectedActorsOfType<AVoxelVolumeBase>();
+        SetCommonPropertyValue<AVoxelVolumeBase, float>(SelectedVolumes, NewValue, LOCTEXT("SetDebugLineWidthTransaction", "Set Debug Line Width"),
+            [](AVoxelVolumeBase* V, float Value) {
+                V->SetDebugLineWidth(Value);
+                // Important: Call OnConstruction to re-trigger debug drawing update
+                V->OnConstruction(V->GetActorTransform()); 
+                V->MarkPackageDirty();
+            });
+    }
+}
 
 //=================================================================================================
 // Agent Settings
@@ -804,7 +1155,7 @@ TOptional<float> SPathfindingTuner::GetAgentRadius() const
 {
     const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
     return GetCommonPropertyValue<UPathfindingComponent, float>(SelectedComponents,
-        [](const UPathfindingComponent* C) { return C->AgentRadius; });
+        [](const UPathfindingComponent* C) { return C->BaseAgentRadius; });
 }
 
 void SPathfindingTuner::OnAgentRadiusCommitted(float NewValue, ETextCommit::Type CommitType)
@@ -812,7 +1163,7 @@ void SPathfindingTuner::OnAgentRadiusCommitted(float NewValue, ETextCommit::Type
     const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
     SetCommonPropertyValue<UPathfindingComponent, float>(SelectedComponents, NewValue, LOCTEXT("SetAgentRadius", "Set Agent Radius"),
         [](UPathfindingComponent* C, float Radius) {
-            C->AgentRadius = Radius;
+            C->BaseAgentRadius = Radius;
         });
 }
 
@@ -829,6 +1180,23 @@ void SPathfindingTuner::OnMovementSpeedCommitted(float NewValue, ETextCommit::Ty
     SetCommonPropertyValue<UPathfindingComponent, float>(SelectedComponents, NewValue, LOCTEXT("SetMovementSpeed", "Set Movement Speed"),
         [](UPathfindingComponent* C, float Speed) {
             C->MovementSpeed = Speed;
+        });
+}
+
+TOptional<float> SPathfindingTuner::GetAvoidanceRadius() const
+{
+    const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
+    return GetCommonPropertyValue<UPathfindingComponent, float>(SelectedComponents,
+        [](const UPathfindingComponent* C) { return C->GetAvoidanceRadius(); });
+}
+
+void SPathfindingTuner::OnAvoidanceRadiusCommitted(float NewValue,
+    ETextCommit::Type CommitType)
+{
+    const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
+    SetCommonPropertyValue<UPathfindingComponent, float>(SelectedComponents, NewValue, LOCTEXT("SetMovementSpeed", "Set Movement Speed"),
+        [](UPathfindingComponent* C, float NewRadius) {
+            C->SetAvoidanceRadius(NewRadius);
         });
 }
 
@@ -924,6 +1292,15 @@ void SPathfindingTuner::OnAgentSettingsCategoryExpansionChanged(bool bIsExpanded
     {
         TunerSettings->bIsAgentSettingsCategoryExpanded = bIsExpanded;
         TunerSettings->SaveConfig();
+    }
+}
+
+void SPathfindingTuner::OnDebugSettingsCategoryExpansionChanged(bool bIsExpanded)
+{
+    if (TunerSettings)
+    {
+        TunerSettings->bIsDebugSettingsCategoryExpanded = bIsExpanded;
+        TunerSettings->SaveConfig(); // Save the new state to config
     }
 }
 

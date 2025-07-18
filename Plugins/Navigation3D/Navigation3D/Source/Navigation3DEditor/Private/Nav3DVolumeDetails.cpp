@@ -41,19 +41,7 @@ void FNav3DVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
 		return FReply::Handled();
 	};
 	
-	DebuggingCategory.AddCustomRow(FText::FromString(TEXT("Baking"))).NameContent()
-	[
-		SNew(STextBlock)
-		.Text(FText::FromString(TEXT("Bake Action")))
-		.Font(IDetailLayoutBuilder::GetDetailFont())
-	].ValueContent()
-	[
-		SNew(SButton)
-		.Text(FText::FromString(TEXT("Bake Static Data to Chunks")))
-		.OnClicked_Lambda(OnRequestPathClicked) 
-	];
-
 	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AOctreeVoxelVolume, bDrawDebugBox));
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AOctreeVoxelVolume, BakeExcludeActors));
+	
 	
 }

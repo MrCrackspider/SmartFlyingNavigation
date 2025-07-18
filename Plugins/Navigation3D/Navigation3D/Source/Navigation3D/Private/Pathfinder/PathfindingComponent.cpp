@@ -14,8 +14,8 @@
 #include "Engine/Engine.h"
 #include "Pathfinder/Strategy/AStarStrategy.h"
 
-UPathfindingComponent::UPathfindingComponent()
-{
+UPathfindingComponent::UPathfindingComponent() 
+{ 
 	PrimaryComponentTick.bCanEverTick = true;
 
 #if WITH_EDITOR
@@ -32,6 +32,11 @@ UPathfindingComponent::UPathfindingComponent()
 	DebugSphereComponent->SetCanEverAffectNavigation(false);
 	DebugSphereComponent->bHiddenInGame = true;
 	DebugSphereComponent->SetSphereRadius(BaseAgentRadius);
+
+	if (TargetVolume.Get() != nullptr &&IsValid(TargetVolume.Get()))
+	{
+		GoalUpdateThreshold = TargetVolume->VoxelExtent;
+	}
 }
 
 void UPathfindingComponent::BeginPlay()
@@ -270,7 +275,7 @@ FVector UPathfindingComponent::GetPreferredVelocity() const
 void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float DeltaTime)
 {
 	AActor* Owner = GetOwner();
-	if (!Owner || !IsValid(PathSplinePtr.Get()) || FoundPath.IsEmpty()) return;
+	if (!Owner || !IsValid(PathSplinePtr) || FoundPath.IsEmpty()) return;
 
 	// 1. Actual movement (same as before)
 	const FVector CurrentLocation = Owner->GetActorLocation();
@@ -457,8 +462,6 @@ void UPathfindingComponent::HandleVoxelPathResult(const TArray<FIntVector>& Path
 
 void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 {
-	PathSplinePtr->ClearSplinePoints(); // FIX-ME
-
 	PathSplinePtr->RemoveSplinePoint(0);
 
 	int32 AddIndex = StartIndex + PartialPointSplineNum;
@@ -470,8 +473,6 @@ void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 	}
 
 	PathSplinePtr->AddSplinePoint(FoundPath[AddIndex], ESplineCoordinateSpace::World, false);
-
-	UE_LOG(LogTemp, Warning, TEXT("SplinePointCount: %d"), PathSplinePtr->GetNumberOfSplinePoints());
 
 	PathSplinePtr->UpdateSpline();
 }
@@ -490,32 +491,30 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 		CurrentState = EPathfindingState::FollowPath;
 
 		UWorld* World = GetWorld();
-		if (World && bDrawDebugPath) // bDrawDebugPath 같은 bool 변수를 헤더에 추가하여 켜고 끌 수 있게 만들면 좋습니다.
+		if (World && bDrawDebugPath) 
 		{
-			// 경로의 각 지점(Point)을 연결하는 선을 그립니다.
 			for (int32 i = 0; i < FoundPath.Num() - 1; ++i)
 			{
 				DrawDebugLine(
 					World,
-					FoundPath[i],      // 현재 지점 (시작)
-					FoundPath[i + 1],  // 다음 지점 (끝)
-					FColor::Green,     // 선 색상 (성공적인 경로는 녹색)
-					true,             // 선이 계속 유지되지 않음
-					5.0f,              // 표시될 시간 (초)
-					0,                 // 뎁스 우선순위 (기본값)
-					5.0f               // 선 두께
+					FoundPath[i],    
+					FoundPath[i + 1],
+					FColor::Green,   
+					true,            
+					5.0f,            
+					0,               
+					5.0f             
 				);
 			}
-
-			// 경로의 각 노드를 작은 구체로 표시하여 명확하게 볼 수 있습니다.
+			
 			for (const FVector& Point : FoundPath)
 			{
 				DrawDebugSphere(
 					World,
 					Point,
-					15.0f,             // 구체 반지름
-					12,                // 구체 정밀도
-					FColor::Cyan,      // 구체 색상
+					15.0f,             
+					12,                
+					FColor::Cyan,      
 					true,
 					5.0f
 				);
@@ -526,7 +525,7 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 		{
 			PathSplinePtr->ClearSplinePoints();
 
-			for (int i = 0; i < 3; i++)
+			for (int i = 0; i < PartialPointSplineNum; i++)
 			{
 				if (i >= FoundPath.Num())
 				{

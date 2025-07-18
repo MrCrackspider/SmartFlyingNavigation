@@ -32,7 +32,8 @@ private:
     TSharedRef<SWidget> BuildOctreeVolumeSettingsSection();
     TSharedRef<SWidget> BuildBakedDataSettingsSection();
     TSharedRef<SWidget> BuildAgentSettingsSection();
-
+    TSharedRef<SWidget> BuildVoxelDebugSettingsSection();
+    
     //=================================================================================================
     // Actor Selection Handling
     //=================================================================================================
@@ -67,6 +68,7 @@ private:
     void OnOctreeSettingsCategoryExpansionChanged(bool bIsExpanded);
     void OnBakedDataCategoryExpansionChanged(bool bIsExpanded);
     void OnAgentSettingsCategoryExpansionChanged(bool bIsExpanded);
+    void OnDebugSettingsCategoryExpansionChanged(bool bIsExpanded);
 
     //=================================================================================================
     // UI Callbacks & Value Accessors
@@ -81,11 +83,18 @@ private:
     FText GetSelectedVolumeDisplayText() const;
     FText GetBakedDataSaveDirectoryAsText() const;
     void OnBakedDataSaveDirectoryTextCommitted(const FText& InText, ETextCommit::Type CommitInfo);
+
+    FString GetObstacleProfilePath() const;
+    void OnObstacleProfileChanged(const FAssetData& AssetData);
+    FText GetObstacleProfileFullPathAsText() const;
+
     FReply OnBrowseButtonClicked();
     TOptional<int32> GetMaxOctreeDepth() const;
     void OnMaxOctreeDepthCommitted(int32 NewValue, ETextCommit::Type CommitType);
-    TOptional<float> GetVoxelSize() const;
-    void OnVoxelSizeCommitted(float NewValue, ETextCommit::Type CommitType);
+    
+    TOptional<float> GetVoxelExtent() const;
+    void OnVoxelExtentCommitted(float NewValue, ETextCommit::Type CommitType);
+    
     FText GetSelectedMapSizeText() const;
     void OnMapSizeSelectionChanged(TSharedPtr<int32> NewSelection, ESelectInfo::Type SelectType);
 
@@ -94,22 +103,36 @@ private:
     void OnBakedOctreeDataChanged(const FAssetData& AssetData);
     FText GetBakedDataFullPathAsText() const;
 
+    // --- Debug Settings ---
+    TOptional<ECheckBoxState> GetDrawDebugBoxState() const;
+    void OnDrawDebugBoxChanged(ECheckBoxState NewState);
+    TOptional<float> GetDebugLineWidth() const;
+    void OnDebugLineWidthCommitted(float NewValue,
+                                   ETextCommit::Type CommitType);
+
+
     // --- Agent Settings ---
     bool AreOnlyAgentsSelected() const;
     FText GetSelectedAgentName() const;
+    
     FString GetTargetActorPath() const;
     void OnTargetActorChanged(const FAssetData& AssetData);
+    
     FString GetTargetVolumePath() const;
     void OnTargetVolumeChanged(const FAssetData& AssetData);
+    
     TOptional<float> GetAgentRadius() const;
     void OnAgentRadiusCommitted(float NewValue, ETextCommit::Type CommitType);
+    
     TOptional<float> GetMovementSpeed() const;
     void OnMovementSpeedCommitted(float NewValue, ETextCommit::Type CommitType);
 
+    TOptional<float> GetAvoidanceRadius() const;
+    void OnAvoidanceRadiusCommitted(float NewValue, ETextCommit::Type CommitType);
+    
     // --- Actions ---
     FReply OnBakeButtonClicked();
     void ShowWarningMessage(const FText& Message) const;
-
 private:
     //=================================================================================================
     // Member Variables

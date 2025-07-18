@@ -39,6 +39,11 @@ public:
 	 */
 	AVoxelVolumeBase();
 
+	/**
+ * @brief Called when an instance of this class is placed or updated in the editor.
+ * @param Transform The transform of the actor.
+ */
+	virtual void OnConstruction(const FTransform& Transform) override;
 protected:
 	//~======================================================================
 	// AActor overrides
@@ -49,11 +54,7 @@ protected:
 	 */
 	virtual void BeginPlay() override;
 
-	/**
-	 * @brief Called when an instance of this class is placed or updated in the editor.
-	 * @param Transform The transform of the actor.
-	 */
-	virtual void OnConstruction(const FTransform& Transform) override;
+
 
 public:
 	/**
@@ -75,13 +76,13 @@ public:
 	/**
 	 * @brief The extent (size) of a single voxel.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|VolumeSettings")
+	UPROPERTY(BlueprintReadOnly, Category = "Voxel|VolumeSettings")
 	float VoxelExtent;
 
 	/**
 	 * @brief The size of the volume in voxels.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|VolumeSettings")
+	UPROPERTY(BlueprintReadOnly, Category = "Voxel|VolumeSettings")
 	FIntVector MapSize;
 
 	/**
@@ -165,12 +166,18 @@ public:
 	// Debug Visualization
 	//~======================================================================
 
+	bool GetbDrawDebugBox() const { return bDrawDebugBox; }
+	void SetbDrawDebugBox(bool Value) { bDrawDebugBox = Value; }
+	
 	/**
 	 * @brief If true, draws debug boxes for the volume.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug")
 	bool bDrawDebugBox;
 
+
+	float GetDebugLineWidth() const { return DebugLineWidth; }
+	void SetDebugLineWidth(float Value) { DebugLineWidth = Value; }
 	/**
 	 * @brief The thickness of the debug lines.
 	 */
@@ -251,7 +258,7 @@ public:
 	 * @brief Updates the visualization of obstacles for debugging purposes.
 	 */
 	virtual void UpdateDebugObstacleVisualization();
-
+	void DrawMainVolumeDebugBox() const;
 protected:
 	/**
 	 * @brief Timer handle for scheduling debug visualization updates.
