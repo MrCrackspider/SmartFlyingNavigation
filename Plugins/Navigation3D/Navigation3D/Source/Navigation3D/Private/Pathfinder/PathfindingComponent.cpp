@@ -532,7 +532,7 @@ void UPathfindingComponent::UpdateAgentRadiusFromScale(bool bForceUpdate)
 
 	LastKnownScale = CurrentScale;
 	LastKnownBaseRadius = BaseAgentRadius;
-
+	
 	const float MaxScale = CurrentScale.GetMax();
 	AgentRadius = BaseAgentRadius * MaxScale;
 

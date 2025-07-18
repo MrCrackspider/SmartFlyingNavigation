@@ -176,7 +176,7 @@ public:
 	
 	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
-	float AvoidanceRadius = 150.f;
+	float AvoidanceRadius = 50.f;
 
 	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
