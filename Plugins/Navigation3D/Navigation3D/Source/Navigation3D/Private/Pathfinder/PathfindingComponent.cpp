@@ -445,8 +445,6 @@ void UPathfindingComponent::HandleVoxelPathResult(const TArray<FIntVector>& Path
 
 void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 {
-	PathSplinePtr->ClearSplinePoints();
-
 	PathSplinePtr->RemoveSplinePoint(0);
 	
 	int32 AddIndex = StartIndex + PartialPointSplineNum;
@@ -459,6 +457,8 @@ void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 	
 	PathSplinePtr->AddSplinePoint(FoundPath[AddIndex], ESplineCoordinateSpace::World, false);
 
+	UE_LOG(LogTemp, Warning, TEXT("SplinePointCount: %d"), PathSplinePtr->GetNumberOfSplinePoints());
+	
 	PathSplinePtr->UpdateSpline();
 }
 
