@@ -59,7 +59,7 @@ public:
 
 public:
 	UPROPERTY(EditDefaultsOnly, Category = "A* | Fallback Search", meta=(ClampMin="50.0"))
-	float NearbyGoalSearchRadius = 300.f;
+	float NearbyGoalSearchRadius = 50.f;
 
 	/** 주변 탐색을 몇 번까지 확장하며 시도할지 결정합니다. (SearchRadius * Iteration) */
 	UPROPERTY(EditDefaultsOnly, Category = "A* | Fallback Search", meta=(ClampMin="1"))
@@ -67,6 +67,5 @@ public:
 
 private:
 	FThreadSafeBitmaskGrid Grid;
-	TArray<FIntVector> AllDirections;
-	TMap<FIntVector, int32> DirectionToIndexMap;
+	
 };

@@ -13,6 +13,19 @@ enum class EOctreeNodeState : uint8
 	Mixed     // 자식 노드를 가짐
 };
 
+UENUM()
+enum class ENeighborDirection : uint8
+{
+	Right,  // +X
+	Left,   // -X
+	Front,  // +Y
+	Back,   // -Y
+	Up,     // +Z
+	Down,   // -Z
+	MAX     // 배열 크기 지정을 위한 카운트
+};
+
+
 // 옥트리 노드 구조체
 // UPROPERTY()를 붙여야 파일로 저장(직렬화)되고 다시 불러올 수 있습니다.
 USTRUCT(BlueprintType)
@@ -28,8 +41,14 @@ struct FOctreeNode
 	UPROPERTY()
 	EOctreeNodeState State;
 
-	UPROPERTY() // UPROPERTY를 붙여야 리플렉션 시스템에서 인식합니다.
-	FBox Bounds; // FBox는 기본적으로 언리얼 엔진에 포함되어 있습니다.
+	UPROPERTY()
+	FBox Bounds;
+	
+	UPROPERTY()
+	int32 Neighbors[static_cast<int32>(ENeighborDirection::MAX)];
+
+	UPROPERTY()
+	float MaxAllowedRadius = 0.f;
 	
 	// 생성자: 기본값으로 초기화
 	FOctreeNode() : State(EOctreeNodeState::Empty)
@@ -37,6 +56,11 @@ struct FOctreeNode
 		for (int i = 0; i < 8; ++i)
 		{
 			ChildrenIndices[i] = -1;
+		}
+
+		for (int i = 0; i < static_cast<int32>(ENeighborDirection::MAX); ++i)
+		{
+			Neighbors[i] = -1;
 		}
 	}
 };

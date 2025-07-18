@@ -11,6 +11,7 @@
 
 // SIMD 헤더 (동적 그리드용)
 #include "emmintrin.h"
+#include "ObjectTools.h"
 #include "smmintrin.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Components/BoxComponent.h"
@@ -317,7 +318,7 @@ void AOctreeVoxelVolume::BakeStaticData()
 	}
 
 	// --- 2. Set up UI progress bar ---
-	FScopedSlowTask BakeTask(AllStaticObstacles.Num() + 2, FText::FromString(TEXT("Baking Octree Data...")));
+	FScopedSlowTask BakeTask(AllStaticObstacles.Num() + 3, FText::FromString(TEXT("Baking Octree Data...")));
 	BakeTask.MakeDialog(); // UI 대화상자 표시
 
 	// --- 3. Build Octree ---
@@ -342,6 +343,10 @@ void AOctreeVoxelVolume::BakeStaticData()
 
 	OptimizeAndCollapse(RootNodeIndex, VolumeBounds);
 
+	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Precomputing Neighbors...(2.5/3)")));
+	if (BakeTask.ShouldCancel()) return;
+	PrecomputeNeighbors();
+	
 	// --- 5. Save to asset file ---
 	BakeTask.EnterProgressFrame(1, FText::FromString(TEXT("Saving data asset...(3/3)")));
 	if (BakeTask.ShouldCancel()) return;
@@ -512,6 +517,82 @@ void AOctreeVoxelVolume::InsertObstacleRecursive(int32 NodeIndex, // <-- const F
     }
 }
 
+int32 AOctreeVoxelVolume::FindLeafNodeAt_BakeTime(const FVector& WorldPos) const
+{
+	if (!VolumeBox->Bounds.GetBox().IsInside(WorldPos) || RootNodeIndex == -1)
+	{
+		return -1;
+	}
+
+	int32 CurrentNodeIndex = RootNodeIndex;
+	int32 CurrentDepth = 0;
+
+	while (StaticNodePool.IsValidIndex(CurrentNodeIndex))
+	{
+		const FOctreeNode& Node = StaticNodePool[CurrentNodeIndex];
+		if (Node.State != EOctreeNodeState::Mixed || CurrentDepth >= MaxOctreeDepth)
+		{
+			return CurrentNodeIndex;
+		}
+
+		const FVector VoxelWorldPos = WorldPos; // Already in world coordinates
+		const int32 ChildOctant = GetOctantContainingVoxel(Node.Bounds, VoxelWorldPos);
+		CurrentNodeIndex = Node.ChildrenIndices[ChildOctant];
+		CurrentDepth++;
+	}
+	return -1;
+}
+
+void AOctreeVoxelVolume::PrecomputeNeighbors()
+{
+	FScopedSlowTask NeighborTask(StaticNodePool.Num(), FText::FromString(TEXT("Precomputing Neighbors...")));
+	NeighborTask.MakeDialog();
+
+	const FBox TotalVolumeBounds = VolumeBox->Bounds.GetBox();
+	const float Epsilon = 1.0f;
+
+	for (int32 i = 0; i < StaticNodePool.Num(); ++i)
+	{
+		NeighborTask.EnterProgressFrame(1);
+		if (NeighborTask.ShouldCancel()) return;
+
+		// 리프 노드가 아닌 경우(Mixed)는 이웃을 계산할 필요가 없습니다.
+		if (StaticNodePool[i].State == EOctreeNodeState::Mixed)
+		{
+			continue;
+		}
+		StaticNodePool[i].MaxAllowedRadius = StaticNodePool[i].Bounds.GetExtent().GetMin();
+		
+		const FBox NodeBounds = StaticNodePool[i].Bounds;
+
+		for (int32 DirIndex = 0; DirIndex < static_cast<int32>(ENeighborDirection::MAX); ++DirIndex)
+		{
+			FVector TestPoint = NodeBounds.GetCenter();
+			const ENeighborDirection Dir = static_cast<ENeighborDirection>(DirIndex);
+
+			switch (Dir)
+			{
+			case ENeighborDirection::Right: TestPoint.X = NodeBounds.Max.X + Epsilon; break;
+			case ENeighborDirection::Left:  TestPoint.X = NodeBounds.Min.X - Epsilon; break;
+			case ENeighborDirection::Front: TestPoint.Y = NodeBounds.Max.Y + Epsilon; break;
+			case ENeighborDirection::Back:  TestPoint.Y = NodeBounds.Min.Y - Epsilon; break;
+			case ENeighborDirection::Up:    TestPoint.Z = NodeBounds.Max.Z + Epsilon; break;
+			case ENeighborDirection::Down:  TestPoint.Z = NodeBounds.Min.Z - Epsilon; break;
+			}
+
+			if (TotalVolumeBounds.IsInside(TestPoint))
+			{
+				const int32 NeighborNodeIndex = FindLeafNodeAt_BakeTime(TestPoint);
+				StaticNodePool[i].Neighbors[DirIndex] = NeighborNodeIndex;
+			}
+			else
+			{
+				StaticNodePool[i].Neighbors[DirIndex] = -1; // 볼륨 밖은 이웃이 없음
+			}
+		}
+	}
+}
+
 void AOctreeVoxelVolume::OptimizeAndCollapse(int32 NodeIndex, const FBox& NodeBounds)
 {
 	if (!StaticNodePool.IsValidIndex(NodeIndex))
@@ -630,6 +711,27 @@ void AOctreeVoxelVolume::SaveOctreeToAsset()
 	 FString DirectoryPath = FPaths::GetPath(OutPackageName);
      UEditorAssetLibrary::MakeDirectory(DirectoryPath);
 
+	{
+		FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		FAssetData ExistingAssetData = AssetRegistryModule.Get().GetAssetByObjectPath(FName(*OutPackageName));
+
+		if (ExistingAssetData.IsValid())
+		{
+			UE_LOG(LogTemp, Log, TEXT("Found existing asset at: %s. Attempting to delete."), *OutPackageName);
+            
+			// 2. 존재하는 에셋 데이터를 실제 UObject로 로드합니다.
+			UObject* ExistingObject = ExistingAssetData.GetAsset();
+			if (ExistingObject)
+			{
+				// 3. ObjectTools를 사용하여 에셋을 삭제합니다. 두 번째 인자 false는 '삭제 확인' 팝업을 띄우지 않겠다는 의미입니다.
+				TArray<UObject*> ObjectsToDelete;
+				ObjectsToDelete.Add(ExistingObject);
+				ObjectTools::DeleteObjects(ObjectsToDelete, false);
+				UE_LOG(LogTemp, Log, TEXT("Successfully deleted old asset."));
+			}
+		}
+	}
+	
 	UPackage* Package = CreatePackage(*OutPackageName);
 	Package->FullyLoad();
 

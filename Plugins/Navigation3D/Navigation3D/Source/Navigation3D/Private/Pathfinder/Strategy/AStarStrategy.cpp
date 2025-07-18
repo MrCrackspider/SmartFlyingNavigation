@@ -8,20 +8,6 @@
 
 void UAStarStrategy::Initialize()
 {
-	if (AllDirections.Num() == 0)
-	{
-		for (int32 x = -1; x <= 1; ++x)
-			for (int32 y = -1; y <= 1; ++y)
-				for (int32 z = -1; z <= 1; ++z)
-					if (x != 0 || y != 0 || z != 0)
-						AllDirections.Emplace(x, y, z);
-	}
-
-	DirectionToIndexMap.Empty();
-	for (int32 i = 0; i < AllDirections.Num(); ++i)
-	{
-		DirectionToIndexMap.Add(AllDirections[i], i);
-	}
 }
 
 bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FVector>& OutPath)
@@ -35,24 +21,36 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	const int32 StartNodeIndex = OctreeData.FindLeafNodeAt(InRequest.StartLocation);
 	int32 GoalNodeIndex = OctreeData.FindLeafNodeAt(InRequest.EndLocation);
 
+	bool bIsGoalNodeInvalid = (GoalNodeIndex == -1) ||
+		(OctreeData.StaticNodePool[GoalNodeIndex].State != EOctreeNodeState::Empty) ||
+		(OctreeData.StaticNodePool[GoalNodeIndex].MaxAllowedRadius < InRequest.AgentRadius);
+
 	if (StartNodeIndex == -1 || OctreeData.StaticNodePool[StartNodeIndex].State != EOctreeNodeState::Empty)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("A* (Octree) Failed: Start location is invalid or inside a solid node."));
 		return false;
 	}
-	if (GoalNodeIndex == -1 || OctreeData.StaticNodePool[GoalNodeIndex].State != EOctreeNodeState::Empty)
+
+	if (bIsGoalNodeInvalid)
 	{
-		const int32 NewGoalNodeIndex = OctreeData.FindNearestEmptyLeaf(InRequest.EndLocation, NearbyGoalSearchRadius, NearbyGoalSearchIterations);
+		// 목표 지점이 유효하지 않으면, 에이전트 크기를 고려하여 "진짜 유효한" 주변 노드를 찾습니다.
+		const int32 NewGoalNodeIndex = OctreeData.FindNearestValidLeafForAgent(
+			InRequest.EndLocation,
+			InRequest.AgentRadius,
+			NearbyGoalSearchRadius,
+			NearbyGoalSearchIterations);
 
 		if (NewGoalNodeIndex == -1)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("A* (Octree) Failed: Could not find any valid nearby goal location."));
-			return false; // 주변 탐색으로도 실패 시, 최종 실패 처리
+			UE_LOG(LogTemp, Warning,
+			       TEXT("A* (Octree) Failed: Could not find any valid (and wide enough) nearby goal location."));
+			return false;
 		}
 
-		GoalNodeIndex = NewGoalNodeIndex; // 찾은 새 노드를 목표로 설정
-		UE_LOG(LogTemp, Log, TEXT("A* (Octree): Found alternative goal at node index %d."), GoalNodeIndex);
+		GoalNodeIndex = NewGoalNodeIndex;
+		UE_LOG(LogTemp, Log, TEXT("A* (Octree): Found alternative valid goal at node index %d."), GoalNodeIndex);
 	}
+
 
 	if (OctreeData.IsRegionDynamicallyBlocked(OctreeData.GetNodeBounds(StartNodeIndex)))
 	{
@@ -77,7 +75,7 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	FAstarPathfinder Pathfinder(OctreeData, StartNodeIndex, GoalNodeIndex,
 	                            InRequest.StartLocation, InRequest.EndLocation,
 	                            InRequest.AgentRadius, NodePool);
-	
+
 	const EPathfindingResult Result = Pathfinder.FindPath(OutPath);
 
 	return (Result == EPathfindingResult::Success || Result == EPathfindingResult::Success_Partial);
@@ -89,31 +87,6 @@ bool UAStarStrategy::ShouldRepathForOptimization(const FIntVector& CurrentAgentV
                                                  const FIntVector& GoalVoxel,
                                                  uint32 AgentRadiusVoxels) const
 {
-	// Basic safety check: ensure the path has at least two points and the index is valid.
-	if (CurrentPathIndex + 1 >= CurrentPathVoxels.Num())
-	{
-		// No upcoming voxel to check, so no repath is needed for this reason.
-		return false;
-	}
-
-	// Check if we have a direct line of sight to the final destination of the current path segment.
-	if (CurrentPathIndex < CurrentPathVoxels.Num() - 1)
-	{
-		const FIntVector& NextVoxel = CurrentPathVoxels.Last();
-		if (FStrategyUtils::HasLineOfSightLight(Grid, CurrentAgentVoxel, NextVoxel, AgentRadiusVoxels))
-		{
-			return false;
-		}
-	}
-
-	// Now it's safe to access the upcoming voxel.
-	const FIntVector& UpcomingVoxel = CurrentPathVoxels[CurrentPathIndex + 1];
-	if (!Grid.IsRegionWalkable(UpcomingVoxel, AgentRadiusVoxels))
-	{
-		// The next step on our path is blocked, so we need to repath.
-		return true;
-	}
-
 	return false;
 }
 
@@ -149,15 +122,19 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 	OpenSetLookup.Empty();
 	ClosedSet.Empty();
 
-	// 비교 함수 객체 생성 (매번 호출 시 넘겨주어야 함)
+	const auto& Pool = OctreeData.StaticNodePool;
+	const FVector GoalCenter = Pool[GoalNodeIndex].Bounds.GetCenter();
 	const TPathNodePtrCompare<FAstarPathNode> Predicate;
+
+	TArray<FAstarPathNode*> Successors;
+	Successors.Reserve(8);
+
 	FAstarPathNode* StartNode = MemoryPool.NewNode();
 	if (!StartNode) return EPathfindingResult::Failed_OutOfMemory;
 
 	StartNode->NodeIndex = StartNodeIndex;
-	StartNode->WorldPosition = OctreeData.GetNodeBounds(StartNodeIndex).GetCenter();
-	StartNode->HCost = CalculateHeuristic(StartNode->WorldPosition,
-	                                      OctreeData.GetNodeBounds(GoalNodeIndex).GetCenter());
+	StartNode->WorldPosition = OctreeData.StaticNodePool[StartNodeIndex].Bounds.GetCenter();
+	StartNode->HCost = CalculateHeuristic(StartNode->WorldPosition, GoalCenter);
 	StartNode->CalculateAndSetFCost();
 
 	OpenSet.HeapPush(StartNode, Predicate);
@@ -165,10 +142,9 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 
 	FAstarPathNode* BestPartialNode = StartNode;
 
-	while (OpenSet.Num() > 0)
+	while (!OpenSet.IsEmpty())
 	{
 		FAstarPathNode* CurrentNode;
-
 		OpenSet.HeapPop(CurrentNode, Predicate);
 
 		OpenSetLookup.Remove(CurrentNode->NodeIndex);
@@ -185,47 +161,58 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 			return EPathfindingResult::Success;
 		}
 
-		TArray<FAstarPathNode*> Successors;
+		Successors.Reset();
 		IdentifySuccessors(CurrentNode, Successors);
 
 		for (FAstarPathNode* Successor : Successors)
 		{
-			if (ClosedSet.Contains(Successor->NodeIndex))
+			const int32 SuccIdx = Successor->NodeIndex;
+			if (ClosedSet.Contains(SuccIdx))
 			{
 				continue;
 			}
 
-			// === THETA* 로직 시작 ===
-			FAstarPathNode* ParentNode = CurrentNode; // 기본 부모는 현재 노드 (A*와 동일)
-
-			// 현재 노드에 부모가 있고(시작 노드가 아님), "부모의 부모"와 "Successor" 사이에 가시선이 확보된다면
+			FAstarPathNode* ParentNode = CurrentNode;
 			if (CurrentNode->Parent && HasLineOfSightWithRadius(CurrentNode->Parent->WorldPosition,
 			                                                    Successor->WorldPosition))
 			{
-				// 부모를 "부모의 부모"로 설정하여 경로를 단축합니다.
 				ParentNode = CurrentNode->Parent;
 			}
-			// === THETA* 로직 끝 ===
 
-			const int64 NewGCost = ParentNode->GCost + GetMoveCost(ParentNode->WorldPosition, Successor->WorldPosition);
-
-			FAstarPathNode** ExistingNodePtr = OpenSetLookup.Find(Successor->NodeIndex);
-			if (ExistingNodePtr) // OpenSet에 이미 있는 경우
+			const float NodeRadius = Pool[SuccIdx].MaxAllowedRadius;
+			if (NodeRadius < AgentRadius)
 			{
-				if (NewGCost < (*ExistingNodePtr)->GCost)
+				continue; // 좁아서 통과 불가 -> 후보에서 완전 제거
+			}
+
+
+			const int64 MoveCost = GetMoveCost(ParentNode->WorldPosition, Successor->WorldPosition);
+			const int64 NewGCost = ParentNode->GCost + MoveCost;
+
+			if (FAstarPathNode** Existing = OpenSetLookup.Find(SuccIdx))
+			{
+				FAstarPathNode* ExistNode = *Existing;
+				if (NewGCost < ExistNode->GCost)
 				{
-					// 더 짧은 경로를 찾았으므로 부모와 비용을 업데이트합니다.
-					(*ExistingNodePtr)->SetParent(ParentNode, NewGCost, (*ExistingNodePtr)->HCost);
-					// 참고: TArray를 힙으로 사용할 때, 요소의 우선순위가 변경되면 힙을 재정렬해야 합니다.
-					// OpenSet.Heapify(Predicate); // 혹은 해당 요소만 재정렬하는 함수를 사용
+					ExistNode->SetParent(ParentNode, NewGCost, ExistNode->HCost);
+					int32 HeapIndex = OpenSet.Find(ExistNode);
+					if (ensure(HeapIndex != INDEX_NONE))
+					{
+						AlgoImpl::HeapSiftUp(
+							OpenSet.GetData(),
+							0,
+							HeapIndex,
+							FIdentityFunctor(),
+							Predicate
+						);
+					}
+
+					OpenSet.Heapify(Predicate);
 				}
 			}
-			else // OpenSet에 없는 새로운 노드인 경우
+			else
 			{
-				Successor->SetParent(ParentNode, NewGCost,
-				                     CalculateHeuristic(Successor->WorldPosition,
-				                                        OctreeData.GetNodeBounds(GoalNodeIndex).GetCenter()));
-
+				Successor->SetParent(ParentNode, NewGCost, CalculateHeuristic(Successor->WorldPosition, GoalCenter));
 				OpenSet.HeapPush(Successor, Predicate);
 				OpenSetLookup.Add(Successor->NodeIndex, Successor);
 			}
@@ -243,19 +230,31 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 
 bool FAstarPathfinder::HasLineOfSightWithRadius(const FVector& Start, const FVector& End) const
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE(ThetaStar_HasLineOfSightWithRadius);
+	TRACE_CPUPROFILER_EVENT_SCOPE(ThetaStar_HasLineOfSightWithRadius_Hierarchical);
 
-	return !OctreeData.CheckForSolidNodesInCapsule(Start, End, AgentRadius);
+	// --- 1단계: 초고속 센터라인 검사 ---
+	TArray<int32> CenterlineNodes;
+	if (!OctreeData.VoxelRayMarch(Start, End, CenterlineNodes))
+	{
+		return false;
+	}
+
+	// --- 2단계: 안전 여유 공간(Clearance) 검사 ---
+	for (const int32 NodeIndex : CenterlineNodes)
+	{
+		const float NodeMinHalfExtent = OctreeData.StaticNodePool[NodeIndex].Bounds.GetExtent().GetMin();
+		if (NodeMinHalfExtent < AgentRadius)
+		{
+			return !OctreeData.CheckForSolidNodesInCapsule(Start, End, AgentRadius);
+		}
+	}
+	return true;
 }
 
-/**
- * 경로를 재구성하고, 더 부드럽게 만들기 위해 스무딩(String Pulling)을 적용합니다.
- */
 void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<FVector>& OutPath)
 {
 	TArray<FVector> RawPath;
 	FAstarPathNode* CurrentNode = EndNode;
-
 
 	while (CurrentNode != nullptr)
 	{
@@ -267,87 +266,85 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 	if (RawPath.Num() <= 1)
 	{
 		OutPath.Empty();
-		OutPath.Add(ActualStartLocation);
+		if (RawPath.Num() > 0) OutPath.Add(ActualStartLocation);
 		OutPath.Add(ActualGoalLocation);
 		return;
 	}
-	
-	RawPath[0] = ActualStartLocation;
 
+	RawPath[0] = ActualStartLocation;
 	if (HasLineOfSightWithRadius(RawPath.Last(), ActualGoalLocation))
 	{
 		RawPath.Last() = ActualGoalLocation;
 	}
 
-	if (RawPath.Num() < 2)
-	{
-		OutPath = RawPath;
-		return;
-	}
-
 	OutPath.Empty();
 	OutPath.Add(RawPath[0]);
-	
+
 	int32 CurrentPointIndex = 0;
 	while (CurrentPointIndex < RawPath.Num() - 1)
 	{
-		int32 LookAheadIndex = RawPath.Num() - 1;
-		// 경로의 끝에서부터 현재 지점까지 가시선이 통하는 가장 먼 지점을 찾습니다.
-		while (LookAheadIndex > CurrentPointIndex + 1)
+		// --- 이진 탐색 로직 시작 ---
+		int32 LookAheadLow = CurrentPointIndex + 1;
+		int32 LookAheadHigh = RawPath.Num() - 1;
+		int32 BestLookAheadIndex = LookAheadLow;
+
+		while (LookAheadLow <= LookAheadHigh)
 		{
-			if (HasLineOfSightWithRadius(OutPath.Last(), RawPath[LookAheadIndex]))
+			const int32 Mid = LookAheadLow + (LookAheadHigh - LookAheadLow) / 2;
+
+			// 현재 지점(OutPath.Last())에서 중간 지점(Mid)까지 시야가 확보되는지 확인
+			if (HasLineOfSightWithRadius(OutPath.Last(), RawPath[Mid]))
 			{
-				break;
+				BestLookAheadIndex = Mid;
+				LookAheadLow = Mid + 1;
 			}
-			LookAheadIndex--;
+			else
+			{
+				LookAheadHigh = Mid - 1;
+			}
 		}
-		
-		OutPath.Add(RawPath[LookAheadIndex]);
-		
-		if (LookAheadIndex == RawPath.Num() - 1)
+
+		OutPath.Add(RawPath[BestLookAheadIndex]);
+
+		// 만약 찾은 점이 최종 목적지였다면 루프를 완전히 종료
+		if (BestLookAheadIndex == RawPath.Num() - 1)
 		{
 			break;
 		}
-		
-		CurrentPointIndex = LookAheadIndex; 
+
+		// 현재 위치를 방금 추가한 웨이포인트로 점프
+		CurrentPointIndex = BestLookAheadIndex;
 	}
 }
 
 void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPathNode*>& OutSuccessors)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_IdentifySuccessors_Internal);
-
 	OutSuccessors.Empty();
 
 	TArray<int32> AdjacentNodeIndices;
+	OctreeData.FindAdjacentEmptyLeaves(Node->NodeIndex, AdjacentNodeIndices);
 
-	{
-		TRACE_CPUPROFILER_EVENT_SCOPE(AStar_FindAdjacentEmptyLeaves);
-		OctreeData.FindAdjacentEmptyLeaves(Node->NodeIndex, AdjacentNodeIndices);
-	}
 	for (const int32 NeighborIndex : AdjacentNodeIndices)
 	{
+		const auto& NeighborNode = OctreeData.StaticNodePool[NeighborIndex];
+		const FBox NeighborBounds = NeighborNode.Bounds;
+		const FVector Center = NeighborBounds.GetCenter();
+
+
+		// 1) If the cell itself is already big enough, we have instant clearance.
+		if (NeighborNode.MaxAllowedRadius < AgentRadius)
 		{
-			TRACE_CPUPROFILER_EVENT_SCOPE(AStar_CheckAndCreateSuccessor);
-			const FBox NeighborBounds = OctreeData.GetNodeBounds(NeighborIndex);
+			continue;
+		}
 
-			const FVector NeighborCenter = NeighborBounds.GetCenter();
-
-			if (OctreeData.CheckForSolidNodesInCapsule(NeighborCenter, NeighborCenter, AgentRadius))
-			{
-				continue;
-			}
-
-			if (!OctreeData.IsRegionDynamicallyBlocked(NeighborBounds))
-			{
-				FAstarPathNode* SuccessorNode = MemoryPool.NewNode();
-				if (SuccessorNode)
-				{
-					SuccessorNode->NodeIndex = NeighborIndex;
-					SuccessorNode->WorldPosition = NeighborBounds.GetCenter();
-					OutSuccessors.Add(SuccessorNode);
-				}
-			}
+		// 3) Finally, also make sure it’s not dynamically blocked
+		if (!OctreeData.IsRegionDynamicallyBlocked(NeighborBounds))
+		{
+			FAstarPathNode* Succ = MemoryPool.NewNode();
+			Succ->NodeIndex = NeighborIndex;
+			Succ->WorldPosition = Center;
+			OutSuccessors.Add(Succ);
 		}
 	}
 }

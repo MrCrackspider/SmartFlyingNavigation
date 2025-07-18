@@ -118,7 +118,8 @@ private:
 	//~======================================================================
 #if WITH_EDITOR
 	void InsertObstacleRecursive(int32 NodeIndex, const FIntVector& ObstacleVoxel, int32 CurrentDepth);
-
+	int32 FindLeafNodeAt_BakeTime(const FVector& WorldPos) const;
+	void PrecomputeNeighbors();
 	void OptimizeAndCollapse(int32 NodeIndex, const FBox& NodeBounds);
 	FBox CalculateChildBounds(const FBox& ParentBounds, int32 ChildIndex) const;
 	int32 GetOctantContainingVoxel(const FBox& NodeBounds, const FVector& VoxelWorldPos) const;
