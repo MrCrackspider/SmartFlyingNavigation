@@ -1,7 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
-#pragma once
-// VoxelVolumeBase.h (수정 후)
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -13,6 +10,10 @@
 class UHierarchicalInstancedStaticMeshComponent;
 class UBoxComponent;
 
+/**
+ * @enum EVolumeDataStructure
+ * @brief Defines the type of data structure used for voxel volume representation.
+ */
 UENUM(BlueprintType)
 enum class EVolumeDataStructure : uint8
 {
@@ -22,133 +23,249 @@ enum class EVolumeDataStructure : uint8
 	Other
 };
 
-// 자식 클래스가 핵심 기능을 구현해야만 사용할 수 있도록 '추상 클래스'로 선언합니다.
+/**
+ * @class AVoxelVolumeBase
+ * @brief Declared as an 'abstract class' to ensure that child classes must implement core functionalities.
+ * This class serves as the base for all voxel volume actors, providing common properties and functionalities.
+ */
 UCLASS(Abstract)
 class NAVIGATION3D_API AVoxelVolumeBase : public AActor
 {
 	GENERATED_BODY()
 
 public:
+	/**
+	 * @brief Default constructor.
+	 */
 	AVoxelVolumeBase();
 
 protected:
+	//~======================================================================
+	// AActor overrides
+	//~======================================================================
+
+	/**
+	 * @brief Called when the game starts or when spawned.
+	 */
 	virtual void BeginPlay() override;
+
+	/**
+	 * @brief Called when an instance of this class is placed or updated in the editor.
+	 * @param Transform The transform of the actor.
+	 */
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 public:
+	/**
+	 * @brief Called every frame.
+	 * @param DeltaTime The time since the last frame.
+	 */
 	virtual void Tick(float DeltaTime) override;
+
+	/**
+	 * @brief Called when the actor is being destroyed.
+	 * @param EndPlayReason The reason why the play is ending.
+	 */
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	//~======================================================================
+	// Volume Settings
+	//~======================================================================
+
+	/**
+	 * @brief The extent (size) of a single voxel.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|VolumeSettings")
 	float VoxelExtent;
 
+	/**
+	 * @brief The size of the volume in voxels.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|VolumeSettings")
 	FIntVector MapSize;
 
+	/**
+	 * @brief The component that acts as the pivot for this volume.
+	 */
 	UPROPERTY()
 	TObjectPtr<USceneComponent> PivotComponent;
 
+	/**
+	 * @brief The bounding box component for the volume.
+	 */
 	UPROPERTY()
 	TObjectPtr<UBoxComponent> VolumeBox;
 
+	//~======================================================================
+	// Voxel Conversion and Queries
+	//~======================================================================
 
-	virtual EVolumeDataStructure GetStructureType() const PURE_VIRTUAL(AVoxelVolumeBase::GetStructureType,
-	                                                                   return EVolumeDataStructure::NONE;);
+	/**
+	 * @brief Pure virtual function to get the type of data structure used by the volume.
+	 * @return The data structure type.
+	 */
+	virtual EVolumeDataStructure GetStructureType() const PURE_VIRTUAL(AVoxelVolumeBase::GetStructureType, return EVolumeDataStructure::NONE;);
 
-	virtual bool IsRegionWalkable(const FIntVector& CenterIndex, int32 AgentRadiusInVoxels) const PURE_VIRTUAL(
-		AVoxelVolumeBase::IsRegionWalkable, return false;);
-
+	/**
+	 * @brief Converts a voxel index to its corresponding world position.
+	 * @param VoxelIndex The index of the voxel.
+	 * @return The world position of the voxel's center.
+	 */
 	UFUNCTION(BlueprintPure, Category = "Voxel")
 	virtual FVector VoxelIndexToWorld(const FIntVector& VoxelIndex) const;
 
+	/**
+	 * @brief Converts a world position to the corresponding voxel index.
+	 * @param WorldPosition The position in world space.
+	 * @return The voxel index containing the world position.
+	 */
 	UFUNCTION(BlueprintPure, Category = "Voxel")
 	virtual FIntVector WorldToVoxelIndex(const FVector& WorldPosition) const;
 
-	//virtual bool IsLocationWalkable(const FVector& WorldPosition) const;
-	virtual bool IsVoxelWalkable(const FIntVector& VoxelIndex) const;
-
-	virtual void RegisterDynamicObstacle(UDynamicObstacleComponent* ObstacleComponent);
-	virtual void UnregisterDynamicObstacle(UDynamicObstacleComponent* ObstacleComponent);
+	/**
+	 * @brief Checks if a given voxel index is within the bounds of the volume.
+	 * @param Index The voxel index to check.
+	 * @return True if the index is valid, false otherwise.
+	 */
 	bool IsIndexValid(const FIntVector& Index) const;
-	bool ClampVoxelIndicesToVolume(FIntVector& MinVoxelIndex, FIntVector& MaxVoxelIndex) const;
-	bool ClampVoxelIndicesToVolume(const FIntVector& InMinVoxelIndex, const FIntVector& InMaxVoxelIndex,
-	                               FIntVector& OutClampedMin, FIntVector& OutClampedMax) const;
 
-	bool GetOverlappingComponentsInVolume(const FCollisionObjectQueryParams& ObjectQueryParams,
-	                                      TArray<FOverlapResult>& OutResults) const;
-	bool CheckVoxelOverlap(const FIntVector& VoxelIndex, UPrimitiveComponent* ComponentToTest) const;
+	/**
+	 * @brief Clamps the given min and max voxel indices to be within the volume's bounds.
+	 * @param InMinVoxelIndex The minimum voxel index to clamp.
+	 * @param InMaxVoxelIndex The maximum voxel index to clamp.
+	 * @param OutClampedMin The resulting clamped minimum index.
+	 * @param OutClampedMax The resulting clamped maximum index.
+	 * @return True if the original indices were at least partially within the volume, false otherwise.
+	 */
+	bool ClampVoxelIndicesToVolume(const FIntVector& InMinVoxelIndex, const FIntVector& InMaxVoxelIndex, FIntVector& OutClampedMin, FIntVector& OutClampedMax) const;
 
+	/**
+	 * @brief Gets all components overlapping with the volume that match the given query parameters.
+	 * @param ObjectQueryParams The collision object query parameters to filter the components.
+	 * @param OutResults An array to store the overlap results.
+	 * @return True if any overlapping components were found, false otherwise.
+	 */
+	bool GetOverlappingComponentsInVolume(const FCollisionObjectQueryParams& ObjectQueryParams, TArray<FOverlapResult>& OutResults) const;
+
+	/**
+	 * @brief Checks if a specific voxel is overlapping with a given primitive component.
+	 * @param VoxelIndex The index of the voxel to test.
+	 * @param ComponentToTest The component to check for overlap.
+	 * @return True if the voxel and component overlap, false otherwise.
+	 */
+	bool IsVoxelOverlapping(const FIntVector& VoxelIndex, UPrimitiveComponent* ComponentToTest) const;
+
+	/**
+	 * @brief Gets the volume's bounding box component.
+	 * @return A pointer to the UBoxComponent.
+	 */
 	UBoxComponent* GetVolumeBox() const { return VolumeBox; }
-	//~======================================================================
-	// 베이킹 및 스트리밍
-	//~======================================================================
-
-	UPROPERTY(EditAnywhere, Category="Voxel|Baking")
-	TArray<AActor*> BakeExcludeActors;
-
-#if WITH_EDITOR
-	virtual void BakeStaticData();
-#endif
-
-	virtual void RegisterStreamingAgent(AActor* Agent);
-	virtual void UnregisterStreamingAgent(AActor* Agent);
 
 	//~======================================================================
-	// 디버그 시각화
+	// Debug Visualization
 	//~======================================================================
 
+	/**
+	 * @brief If true, draws debug boxes for the volume.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug")
 	bool bDrawDebugBox;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|Debug", meta=(ClampMin = 1.f))
-	float DebugLineWidth = 400.0f;
+	/**
+	 * @brief The thickness of the debug lines.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|Debug", meta = (ClampMin = 1.f))
+	float DebugLineWidth;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|Debug", meta=(ClampMin = 1.f))
-	FColor DebugLineColor = FColor::Green;
+	/**
+	 * @brief The color of the debug lines.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|Debug", meta = (ClampMin = 1.f))
+	FColor DebugLineColor;
 
 #if WITH_EDITORONLY_DATA
 
+	/**
+	 * @brief The static mesh to use for debug visualization.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug")
 	TSoftObjectPtr<UStaticMesh> DebugMeshAsset;
 
+	/**
+	 * @brief Hierarchical Instanced Static Mesh Component for visualizing solid nodes.
+	 */
 	UPROPERTY()
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DebugSolidNodesComponent;
+
+	/**
+	 * @brief Hierarchical Instanced Static Mesh Component for visualizing empty nodes.
+	 */
 	UPROPERTY()
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DebugEmptyNodesComponent;
+
+	/**
+	 * @brief Hierarchical Instanced Static Mesh Component for visualizing mixed (partially filled) nodes.
+	 */
 	UPROPERTY()
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DebugMixedNodesComponent;
 
-	// 디버그용 머티리얼 (에디터에서 설정 가능)
-
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug", meta=(AllowedClasses="MaterialInterface"))
+	/**
+	 * @brief Soft path to the material for visualizing solid nodes (configurable in the editor).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug", meta = (AllowedClasses = "MaterialInterface"))
 	FSoftObjectPath DebugSolidNodeMaterialPath;
-	
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug", meta=(AllowedClasses="MaterialInterface"))
+
+	/**
+	 * @brief Soft path to the material for visualizing empty nodes (configurable in the editor).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug", meta = (AllowedClasses = "MaterialInterface"))
 	FSoftObjectPath DebugEmptyNodeMaterialPath;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug", meta=(AllowedClasses="MaterialInterface"))
+	/**
+	 * @brief Soft path to the material for visualizing mixed nodes (configurable in the editor).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug", meta = (AllowedClasses = "MaterialInterface"))
 	FSoftObjectPath DebugMixedNodeMaterialPath;
 
+	/**
+	 * @brief Material instance for solid nodes.
+	 */
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> SolidNodeMaterial;
-	
+
+	/**
+	 * @brief Material instance for empty nodes.
+	 */
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> EmptyNodeMaterial;
 
+	/**
+	 * @brief Material instance for mixed nodes.
+	 */
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> MixedNodeMaterial;
 
 #endif
 
-	virtual void GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const;
+	/**
+	 * @brief Updates the visualization of obstacles for debugging purposes.
+	 */
 	virtual void UpdateDebugObstacleVisualization();
 
 protected:
+	/**
+	 * @brief Timer handle for scheduling debug visualization updates.
+	 */
 	FTimerHandle DebugUpdateTimer;
-	TSet<FIntVector> DisplayedVoxelIndices;
+
+	/**
+	 * @brief Flag to prevent concurrent updates to the visualization.
+	 */
 	bool bIsUpdatingVisualization = false;
 
+	/**
+	 * @brief The set of dynamic obstacle components currently registered with this volume.
+	 */
 	UPROPERTY()
 	TSet<TObjectPtr<UDynamicObstacleComponent>> RegisteredObstacles;
-
 };

@@ -69,10 +69,6 @@ void UPathfindingComponent::BeginPlay()
 		UE_LOG(LogTemp, Error, TEXT("PathfindingComponent on Actor '%s': PathfindingStrategyClass is not set!"),
 			   *GetOwner()->GetName());
 	}
-	if (TargetVolume)
-	{
-		TargetVolume->RegisterStreamingAgent(GetOwner());
-	}
 }
 
 void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)

@@ -1,65 +1,78 @@
-﻿#include "Pathfinder/NavVolume/OctreeVoxelVolume.h"
+﻿
+#include "Pathfinder/NavVolume/OctreeVoxelVolume.h"
+
+// Engine Headers
 #include "Engine/World.h"
 #include "TimerManager.h"
-#include "Misc/ScopedSlowTask.h"
-#include "EditorAssetLibrary.h" 
-
-// 베이킹에 필요한 헤더
-#if WITH_EDITOR
-#include "FileHelpers.h"
-#endif
-
-// SIMD 헤더 (동적 그리드용)
-#include "emmintrin.h"
-#include "ObjectTools.h"
-#include "smmintrin.h"
-#include "AssetRegistry/AssetRegistryModule.h"
 #include "Components/BoxComponent.h"
-#include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "Async/Async.h"
+
+// Pathfinder Core Headers
 #include "Pathfinder/NavData/VoxelObstacleFilter.h"
+#include "Pathfinder/DynamicObstacle.h" // FIX-ME
+
+// SIMD Headers for Dynamic Grid Query
+#include "emmintrin.h"
+#include "smmintrin.h"
+
+#if WITH_EDITOR
+// Editor-specific Headers
+#include "FileHelpers.h"
+#include "EditorAssetLibrary.h"
+#include "ObjectTools.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Misc/ScopedSlowTask.h"
+#include "Components/InstancedStaticMeshComponent.h" 
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#endif
 
 AOctreeVoxelVolume::AOctreeVoxelVolume()
 {
 	PrimaryActorTick.bCanEverTick = true;
-	// Set default values
-	MaxOctreeDepth = 7; // e.g., 128x128x128 volume -> 2^7=128
+
+	// Default value for octree depth. For a 128^3 volume, a depth of 7 provides voxel-level precision (2^7 = 128).
+	MaxOctreeDepth = 7;
 }
+
+//~======================================================================
+// AActor Overrides
+//~======================================================================
 
 void AOctreeVoxelVolume::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// 1. Load baked static octree data
+	// 1. Load the pre-baked static octree data from the assigned data asset.
 	if (BakedOctreeData)
 	{
 		StaticNodePool = BakedOctreeData->NodePool;
-		if (StaticNodePool.Num() > 0)
+		if (!StaticNodePool.IsEmpty())
 		{
-			RootNodeIndex = 0; // Assume root node is always at index 0
+			// The root node is always assumed to be at the first index.
+			RootNodeIndex = 0;
 			UE_LOG(LogTemp, Log, TEXT("OctreeVoxelVolume: Loaded static octree with %d nodes."), StaticNodePool.Num());
 		}
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning,
-		       TEXT("OctreeVoxelVolume: No BakedOctreeData asset assigned. Static layer will be empty."));
+		UE_LOG(LogTemp, Warning, TEXT("OctreeVoxelVolume: No BakedOctreeData asset assigned. The static geometry layer will be empty."));
 	}
 
-	// 2. Initialize dynamic obstacle layer and start timer
+	// 2. Initialize the dynamic obstacle layer and start a timer for periodic updates.
 	InitializeDynamicLayer();
-	GetWorldTimerManager().SetTimer(DynamicObstacleTimer, this, &AOctreeVoxelVolume::UpdateDynamicObstacles, 2.f, true,
-	                                0.1f);
+	GetWorldTimerManager().SetTimer(DynamicObstacleTimer, this, &AOctreeVoxelVolume::UpdateDynamicObstacles, 0.1f, true, 0.1f);
 }
 
 void AOctreeVoxelVolume::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	// Main logic is handled by BeginPlay initialization and the DynamicObstacleTimer.
 }
 
-//======================================================================
-// --- Core Interface Implementation ---
-//======================================================================
+//~======================================================================
+// Core Public API
+//~======================================================================
 
 bool AOctreeVoxelVolume::IsRegionWalkable(const FIntVector& VoxelIndex, int32 AgentRadiusInVoxels) const
 {
@@ -67,35 +80,55 @@ bool AOctreeVoxelVolume::IsRegionWalkable(const FIntVector& VoxelIndex, int32 Ag
 	const FIntVector MinCorner = VoxelIndex - AgentRadius;
 	const FIntVector MaxCorner = VoxelIndex + AgentRadius;
 
-	// Calculate query box in world coordinates
+	// The query box in world space must span the full extent of the voxels.
 	const FVector QueryMinWorld = VoxelIndexToWorld(MinCorner);
-	
-	// Max corner should include the end point of the voxel, so use world position of index + 1
 	const FVector QueryMaxWorld = VoxelIndexToWorld(MaxCorner + FIntVector(1, 1, 1));
 	const FBox QueryBox(QueryMinWorld, QueryMaxWorld);
 
-	// 1. Check static octree layer
+	// 1. Check for collisions against the static octree layer.
 	if (!IsRegionEmpty_StaticOctree(QueryBox))
 	{
-		return false; // 정적 지형에 막힘
+		return false; // Blocked by static geometry.
 	}
 
-	// 2. Check dynamic grid layer
+	// 2. Check for collisions against the dynamic obstacle grid.
 	if (!IsRegionEmpty_DynamicGrid(MinCorner, MaxCorner))
 	{
-		return false; // Blocked by dynamic obstacles
+		return false; // Blocked by a dynamic obstacle.
 	}
 
-	// If both layers are clear, it's walkable
+	// The region is clear if both layers are free.
 	return true;
 }
+
+void AOctreeVoxelVolume::RegisterDynamicObstacle(UDynamicObstacleComponent* ObstacleComponent)
+{
+	if (IsValid(ObstacleComponent))
+	{
+		RegisteredObstacles.Add(ObstacleComponent);
+	}
+}
+
+void AOctreeVoxelVolume::UnregisterDynamicObstacle(UDynamicObstacleComponent* ObstacleComponent)
+{
+	if (IsValid(ObstacleComponent))
+	{
+		// Clear the voxels that the obstacle last occupied.
+		UpdateVoxelStateForBounds(ObstacleComponent->GetLastKnownBounds(), false);
+		RegisteredObstacles.Remove(ObstacleComponent);
+	}
+}
+
+//~======================================================================
+// Debugging
+//~======================================================================
 
 void AOctreeVoxelVolume::GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const
 {
 	OutObstacleIndices.Empty();
 
-	// 1. Collect dynamic obstacle voxels
-	if (DynamicObstacleBitmask.Num() > 0)
+	// 1. Collect obstacle voxels from the dynamic grid by iterating through the bitmask.
+	if (!DynamicObstacleBitmask.IsEmpty())
 	{
 		const int32 ChunksPerRow = MapSize.X / 128;
 		for (int32 z = 0; z < MapSize.Z; ++z)
@@ -106,6 +139,8 @@ void AOctreeVoxelVolume::GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObs
 				{
 					const int32 ChunkIndex = (z * MapSize.Y + y) * ChunksPerRow + chunkX;
 					const F128BitChunk& DynamicChunk = DynamicObstacleBitmask[ChunkIndex];
+
+					// Skip empty chunks for performance.
 					if (DynamicChunk.Words[0] == 0 && DynamicChunk.Words[1] == 0) continue;
 
 					for (int i = 0; i < 2; ++i)
@@ -126,189 +161,242 @@ void AOctreeVoxelVolume::GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObs
 		}
 	}
 
-	// 2. Collect static obstacle voxels (octree traversal)
+	// 2. Collect static obstacle voxels by traversing the octree.
+	// NOTE: This requires a full traversal to find all solid leaf nodes and can be very slow.
+	// It is intended for debugging purposes only. Implementation is omitted here for brevity
+	// but would involve a recursive traversal similar to GetDebugNodeInfoRecursive.
 	if (RootNodeIndex != -1)
 	{
-		TSet<FIntVector> StaticObstacles; // 중복 방지
-		// Recursively find Solid leaf nodes
-		// ... (This part can be very slow, use only for debugging)
+		// TSet<FIntVector> StaticObstacles;
+		// ... recursive traversal to find solid leaf nodes and add their voxels to the set ...
+		// OutObstacleIndices.Append(StaticObstacles.Array());
 	}
 }
 
-bool AOctreeVoxelVolume::IsVoxelWalkable(const FIntVector& Index) const
+//~======================================================================
+// Dynamic Obstacle Internals
+//~======================================================================
+
+void AOctreeVoxelVolume::InitializeDynamicLayer()
 {
-	return IsRegionWalkable(Index, 0);
+	// Ensure map dimensions are valid for the bitmask implementation.
+	check(MapSize.X > 0 && MapSize.X % 128 == 0);
+	check(MapSize.Y > 0);
+	check(MapSize.Z > 0);
+
+	const int32 NumChunks = (MapSize.X / 128) * MapSize.Y * MapSize.Z;
+	DynamicObstacleBitmask.Empty(NumChunks);
+	DynamicObstacleBitmask.AddZeroed(NumChunks);
 }
 
-void AOctreeVoxelVolume::RegisterDynamicObstacle(UDynamicObstacleComponent* ObstacleComponent)
+void AOctreeVoxelVolume::UpdateDynamicObstacles()
 {
-	if (ObstacleComponent)
+	TRACE_CPUPROFILER_EVENT_SCOPE(AOctreeVoxelVolume::UpdateDynamicObstacles);
+
+	for (UDynamicObstacleComponent* Comp : RegisteredObstacles)
 	{
-		RegisteredObstacles.Add(ObstacleComponent);
-	}
-}
+		if (!IsValid(Comp)) continue;
 
-void AOctreeVoxelVolume::UnregisterDynamicObstacle(UDynamicObstacleComponent* ObstacleComponent)
-{
-	if (ObstacleComponent)
-	{
-		UpdateVoxelStateForBounds(ObstacleComponent->GetLastKnownBounds(), false);
-		RegisteredObstacles.Remove(ObstacleComponent);
-	}
-}
-
-//======================================================================
-// --- Baking Implementation ---
-//======================================================================
-
-// Helper function implementation
-void AOctreeVoxelVolume::SafeRemoveInstances(UInstancedStaticMeshComponent* Component,
-                                             TArray<int32>& InstanceIndicesToRemove)
-{
-	if (!Component || InstanceIndicesToRemove.Num() == 0)
-	{
-		return;
-	}
-	
-	// Remove instances from largest index to smallest to keep other indices valid.
-	InstanceIndicesToRemove.Sort([](const int32& A, const int32& B)
-	{
-		return A > B;
-	});
-	Component->RemoveInstances(InstanceIndicesToRemove);
-}
-
-void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
-{
-	Super::UpdateDebugObstacleVisualization();
-
-	if (!VolumeBox)
-	{
-		return;
-	}
-
-	if (bIsUpdatingVisualization)
-	{
-		return;
-	}
-
-	bIsUpdatingVisualization = true;
-	TWeakObjectPtr<AOctreeVoxelVolume> WeakThis(this);
-	const FBox InitialBounds = VolumeBox->Bounds.GetBox();
-
-	// 1. Collect node information to draw in a background thread
-	Async(EAsyncExecution::ThreadPool, [WeakThis, InitialBounds]()
-	{
-		if (!WeakThis.IsValid() || WeakThis->RootNodeIndex == -1)
+		// Only update if the component has moved (is "dirty").
+		if (Comp->IsDirty())
 		{
-			if (WeakThis.IsValid()) WeakThis->bIsUpdatingVisualization = false;
-			return;
+			// 1. Clear the voxels at the obstacle's previous location.
+			UpdateVoxelStateForBounds(Comp->GetLastKnownBounds(), false);
+
+			// 2. Voxelize the obstacle at its new location.
+			const FBox CurrentBounds = Comp->GetCurrentBounds();
+			UpdateVoxelStateForBounds(CurrentBounds, true);
+
+			// 3. Update the component's state for the next frame.
+			Comp->UpdateLastKnownBounds();
+			Comp->ClearDirtyFlag();
 		}
-
-		TArray<FDebugNodeInfo> NodesToDraw;
-		WeakThis->GetDebugNodeInfoRecursive(NodesToDraw, WeakThis->RootNodeIndex, InitialBounds, 0);
-
-		// 2. Update instances on the game thread
-		AsyncTask(ENamedThreads::GameThread, [WeakThis, NodesToDraw = MoveTemp(NodesToDraw)]()
-		{
-			AOctreeVoxelVolume* StrongThis = WeakThis.Get();
-			if (!StrongThis) return;
-
-			// --- Clear instances from all components ---
-			if (StrongThis->DebugSolidNodesComponent) StrongThis->DebugSolidNodesComponent->ClearInstances();
-			if (StrongThis->DebugEmptyNodesComponent) StrongThis->DebugEmptyNodesComponent->ClearInstances();
-			if (StrongThis->DebugMixedNodesComponent) StrongThis->DebugMixedNodesComponent->ClearInstances();
-
-			if (NodesToDraw.Num() == 0)
-			{
-				StrongThis->bIsUpdatingVisualization = false;
-				return;
-			}
-
-			// --- Collect "local" Transforms for nodes to draw ---
-			TArray<FTransform> SolidTransforms, EmptyTransforms, MixedTransforms;
-
-			for (const auto& NodeInfo : NodesToDraw)
-			{
-				const FVector Scale = NodeInfo.Bounds.GetSize() / 100.0f;
-				const FVector WorldCenter = NodeInfo.Bounds.GetCenter();
-
-				if (NodeInfo.State == EOctreeNodeState::Solid && StrongThis->DebugSolidNodesComponent)
-				{
-					// Calculate local coordinates relative to the "Solid" component's Transform
-					const FTransform CompXform = StrongThis->DebugSolidNodesComponent->GetComponentTransform();
-					const FVector LocalCenter = CompXform.InverseTransformPosition(WorldCenter);
-					SolidTransforms.Emplace(FRotator::ZeroRotator, LocalCenter, Scale);
-				}
-				else if (NodeInfo.State == EOctreeNodeState::Empty && StrongThis->DebugEmptyNodesComponent)
-				{
-					// Calculate local coordinates relative to the "Empty" component's Transform
-					const FTransform CompXform = StrongThis->DebugEmptyNodesComponent->GetComponentTransform();
-					const FVector LocalCenter = CompXform.InverseTransformPosition(WorldCenter);
-					EmptyTransforms.Emplace(FRotator::ZeroRotator, LocalCenter, Scale);
-				}
-				else if (NodeInfo.State == EOctreeNodeState::Mixed && StrongThis->DebugMixedNodesComponent)
-				{
-					// Calculate local coordinates relative to the "Mixed" component's Transform
-					const FTransform CompXform = StrongThis->DebugMixedNodesComponent->GetComponentTransform();
-					const FVector LocalCenter = CompXform.InverseTransformPosition(WorldCenter);
-					MixedTransforms.Emplace(FRotator::ZeroRotator, LocalCenter, Scale);
-				}
-			}
-
-			// --- Batch add instances by state (bWorldSpace = false) ---
-			if (StrongThis->DebugSolidNodesComponent && SolidTransforms.Num() > 0)
-			{
-				StrongThis->DebugSolidNodesComponent->AddInstances(SolidTransforms, false, false);
-			}
-			if (StrongThis->DebugEmptyNodesComponent && EmptyTransforms.Num() > 0)
-			{
-				StrongThis->DebugEmptyNodesComponent->AddInstances(EmptyTransforms, false, false);
-			}
-			if (StrongThis->DebugMixedNodesComponent && MixedTransforms.Num() > 0)
-			{
-				StrongThis->DebugMixedNodesComponent->AddInstances(MixedTransforms, false, false);
-			}
-
-			StrongThis->bIsUpdatingVisualization = false;
-		});
-	});
+	}
 }
 
-void AOctreeVoxelVolume::GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex,
-                                                   const FBox& NodeBounds, int32 CurrentDepth) const
+void AOctreeVoxelVolume::UpdateVoxelStateForBounds(const FBox& InBounds, bool bAsObstacle)
 {
-	if (!StaticNodePool.IsValidIndex(NodeIndex) || CurrentDepth > MaxOctreeDepth) return;
+	if (!InBounds.IsValid) return;
 
+	// Convert world bounds to voxel indices.
+	const FIntVector MinVoxelIndex = WorldToVoxelIndex(InBounds.Min);
+	const FIntVector MaxVoxelIndex = WorldToVoxelIndex(InBounds.Max);
+
+	// Clamp indices to ensure they are within the volume's grid.
+	FIntVector ClampedMin, ClampedMax;
+	if (!ClampVoxelIndicesToVolume(MinVoxelIndex, MaxVoxelIndex, ClampedMin, ClampedMax)) return;
+
+	// Iterate through the clamped voxel range and update each voxel's state.
+	for (int32 z = ClampedMin.Z; z <= ClampedMax.Z; ++z)
+	{
+		for (int32 y = ClampedMin.Y; y <= ClampedMax.Y; ++y)
+		{
+			for (int32 x = ClampedMin.X; x <= ClampedMax.X; ++x)
+			{
+				UpdateDynamicVoxelState({ x, y, z }, bAsObstacle);
+			}
+		}
+	}
+}
+
+void AOctreeVoxelVolume::UpdateDynamicVoxelState(const FIntVector& Index, bool bIsObstacle)
+{
+	if (!IsIndexValid(Index)) return;
+
+	// Calculate the memory location of the target bit.
+	const int32 ChunksPerRow = MapSize.X / 128;
+	const int32 ChunkIndex = (Index.Z * MapSize.Y + Index.Y) * ChunksPerRow + (Index.X / 128);
+	const int32 BitIndex = Index.X % 128;
+
+	if (!DynamicObstacleBitmask.IsValidIndex(ChunkIndex)) return;
+
+	F128BitChunk& TargetChunk = DynamicObstacleBitmask[ChunkIndex];
+	const int32 WordIndex = BitIndex / 64;      // 0 for bits 0-63, 1 for bits 64-127
+	const uint64 BitMask = 1ULL << (BitIndex % 64); // The specific bit to flip
+
+	// Set or clear the bit.
+	if (bIsObstacle)
+	{
+		TargetChunk.Words[WordIndex] |= BitMask;
+	}
+	else
+	{
+		TargetChunk.Words[WordIndex] &= ~BitMask;
+	}
+}
+
+//~======================================================================
+// Query Helpers
+//~======================================================================
+
+bool AOctreeVoxelVolume::IsRegionEmpty_StaticOctree(const FBox& QueryBox) const
+{
+	// If there's no octree data, the region is considered empty.
+	if (RootNodeIndex == -1) return true;
+
+	const FBox VolumeBounds = GetComponentsBoundingBox(true, true);
+	return IsRegionEmptyRecursive(RootNodeIndex, VolumeBounds, QueryBox);
+}
+
+bool AOctreeVoxelVolume::IsRegionEmptyRecursive(int32 NodeIndex, const FBox& NodeBounds, const FBox& QueryBox) const
+{
+	// If the query box doesn't intersect this node's bounds, there's no collision here.
+	if (!NodeBounds.Intersect(QueryBox))
+	{
+		return true;
+	}
+
+	if (!StaticNodePool.IsValidIndex(NodeIndex)) return true; // Should not happen, but safe check.
 	const FOctreeNode& Node = StaticNodePool[NodeIndex];
 
-	// Add node info if it's a leaf node or at debug max depth
-	if (Node.State != EOctreeNodeState::Mixed || CurrentDepth == MaxOctreeDepth)
+	// Terminal conditions for the recursion.
+	if (Node.State == EOctreeNodeState::Solid)
 	{
-		OutNodes.Add({NodeIndex, NodeBounds, Node.State});
+		return false; // Collision detected.
 	}
-	else // If Mixed state and can go deeper, traverse children
+	if (Node.State == EOctreeNodeState::Empty)
 	{
-		for (int i = 0; i < 8; ++i)
+		return true; // No collision in this branch.
+	}
+
+	// If the node is mixed, we must check its children.
+	for (int i = 0; i < 8; ++i)
+	{
+		if (Node.ChildrenIndices[i] != -1)
 		{
-			if (Node.ChildrenIndices[i] != -1)
+			const FBox ChildBounds = CalculateChildBounds(NodeBounds, i);
+			if (!IsRegionEmptyRecursive(Node.ChildrenIndices[i], ChildBounds, QueryBox))
 			{
-				GetDebugNodeInfoRecursive(OutNodes, Node.ChildrenIndices[i], CalculateChildBounds(NodeBounds, i),
-				                          CurrentDepth + 1);
+				// If any child reports a collision, the query fails.
+				return false;
 			}
 		}
 	}
-} 
+
+	// If all children were checked and none reported a collision, the region is clear.
+	return true;
+}
+
+bool AOctreeVoxelVolume::IsRegionEmpty_DynamicGrid(const FIntVector& MinCorner, const FIntVector& MaxCorner) const
+{
+	// Clamp query to volume bounds.
+	const FIntVector ClampedMin(FMath::Max(MinCorner.X, 0), FMath::Max(MinCorner.Y, 0), FMath::Max(MinCorner.Z, 0));
+	const FIntVector ClampedMax(FMath::Min(MaxCorner.X, MapSize.X - 1), FMath::Min(MaxCorner.Y, MapSize.Y - 1), FMath::Min(MaxCorner.Z, MapSize.Z - 1));
+
+	if (ClampedMin.X > ClampedMax.X || ClampedMin.Y > ClampedMax.Y || ClampedMin.Z > ClampedMax.Z) return true;
+	if (DynamicObstacleBitmask.IsEmpty()) return true;
+
+	// Helper lambda to create a 128-bit mask for a given bit range.
+	auto CreateMask = [](int32 StartBit, int32 EndBit) -> __m128i
+	{
+		uint64 LowMask = (StartBit < 64) ? (~0ULL << StartBit) : 0;
+		if (EndBit < 64) LowMask &= (~0ULL >> (63 - EndBit));
+		uint64 HighMask = (EndBit >= 64) ? (~0ULL >> (127 - EndBit)) : 0;
+		if (StartBit >= 64) HighMask &= (~0ULL << (StartBit - 64));
+		return _mm_set_epi64x(HighMask, LowMask);
+	};
+
+	const int32 ChunksPerRow = MapSize.X / 128;
+	for (int32 z = ClampedMin.Z; z <= ClampedMax.Z; ++z)
+	{
+		for (int32 y = ClampedMin.Y; y <= ClampedMax.Y; ++y)
+		{
+			const int32 RowStartChunkIndex = (z * MapSize.Y + y) * ChunksPerRow;
+			const int32 StartChunkIndex = RowStartChunkIndex + ClampedMin.X / 128;
+			const int32 EndChunkIndex = RowStartChunkIndex + ClampedMax.X / 128;
+			const int32 StartBitInChunk = ClampedMin.X % 128;
+			const int32 EndBitInChunk = ClampedMax.X % 128;
+
+			if (StartChunkIndex == EndChunkIndex)
+			{
+				// Case 1: The entire query range is within a single 128-bit chunk.
+				if (!DynamicObstacleBitmask.IsValidIndex(StartChunkIndex)) continue;
+				const __m128i Mask = CreateMask(StartBitInChunk, EndBitInChunk);
+				const __m128i ChunkData = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&DynamicObstacleBitmask[StartChunkIndex]));
+				if (_mm_testz_si128(ChunkData, Mask) == 0) return false; // Test if any masked bits are set.
+			}
+			else
+			{
+				// Case 2: The query range spans multiple chunks.
+				// Check the first (partial) chunk.
+				if (DynamicObstacleBitmask.IsValidIndex(StartChunkIndex))
+				{
+					const __m128i StartMask = CreateMask(StartBitInChunk, 127);
+					const __m128i ChunkData = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&DynamicObstacleBitmask[StartChunkIndex]));
+					if (_mm_testz_si128(ChunkData, StartMask) == 0) return false;
+				}
+
+				// Check all full chunks in the middle.
+				for (int32 i = StartChunkIndex + 1; i < EndChunkIndex; ++i)
+				{
+					if (!DynamicObstacleBitmask.IsValidIndex(i)) continue;
+					const __m128i MiddleChunkData = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&DynamicObstacleBitmask[i]));
+					// Check if the chunk is non-zero.
+					if (_mm_testz_si128(MiddleChunkData, _mm_set1_epi32(-1)) == 0) return false;
+				}
+
+				// Check the last (partial) chunk.
+				if (DynamicObstacleBitmask.IsValidIndex(EndChunkIndex))
+				{
+					const __m128i EndMask = CreateMask(0, EndBitInChunk);
+					const __m128i ChunkData = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&DynamicObstacleBitmask[EndChunkIndex]));
+					if (_mm_testz_si128(ChunkData, EndMask) == 0) return false;
+				}
+			}
+		}
+	}
+	return true; // No obstacles found in the dynamic grid.
+}
+
 
 #if WITH_EDITOR
+
+//~======================================================================
+// Editor & Baking
+//~======================================================================
+
 void AOctreeVoxelVolume::BakeStaticData()
 {
-	Super::BakeStaticData();
-
-	// --- 1. Prepare and scan for obstacles ---
-	TSet<FIntVector> AllStaticObstacles;
-	ScanForAllStaticObstacles(AllStaticObstacles);
-
 	const FBox VolumeBounds = VolumeBox->Bounds.GetBox();
 	if (!VolumeBounds.IsValid)
 	{
@@ -316,42 +404,42 @@ void AOctreeVoxelVolume::BakeStaticData()
 		return;
 	}
 
-	// --- 2. Set up UI progress bar ---
-	const double TotalWorkAmount = static_cast<double>(AllStaticObstacles.Num()) + 3.0; 
+	// --- 1. Scan for all static obstacles within the volume ---
+	TSet<FIntVector> AllStaticObstacles;
+	ScanForAllStaticObstacles(AllStaticObstacles);
+
+	// --- 2. Set up a progress dialog for the editor UI ---
+	const double TotalWorkAmount = static_cast<double>(AllStaticObstacles.Num()) + 3.0; // Obstacles + final steps
 	FScopedSlowTask BakeTask(TotalWorkAmount, FText::FromString(TEXT("Baking Octree Data...")));
-	BakeTask.MakeDialog(); // UI 대화상자 표시
+	BakeTask.MakeDialog();
 
-	// --- 3. Build Octree ---
-	BakeTask.EnterProgressFrame(0.f, FText::FromString(TEXT("Building Octree... (1/3)")));
-
+	// --- 3. Build the initial octree structure ---
+	BakeTask.EnterProgressFrame(0.f, FText::FromString(TEXT("Building Octree... (1/4)")));
 	StaticNodePool.Empty();
-	RootNodeIndex = StaticNodePool.Emplace(FOctreeNode()); // 루트 노드 생성
-
+	RootNodeIndex = StaticNodePool.Emplace(FOctreeNode()); // Create the root node.
 	StaticNodePool[RootNodeIndex].Bounds = VolumeBounds;
-	
+
 	for (const FIntVector& ObstacleVoxel : AllStaticObstacles)
 	{
 		BakeTask.EnterProgressFrame(1.f);
 		if (BakeTask.ShouldCancel()) return;
-
-		InsertObstacleRecursive(RootNodeIndex, ObstacleVoxel, 0); // <-- 이렇게 수정합니다.
+		InsertObstacleRecursive(RootNodeIndex, ObstacleVoxel, 0);
 	}
 
-	// --- 4. Optimize Octree ---
-	BakeTask.EnterProgressFrame(1.f, FText::FromString(TEXT("Optimizing Octree...(2/3)")));
+	// --- 4. Optimize the tree by collapsing uniform nodes ---
+	BakeTask.EnterProgressFrame(1.f, FText::FromString(TEXT("Optimizing Octree... (2/4)")));
 	if (BakeTask.ShouldCancel()) return;
-
 	OptimizeAndCollapse(RootNodeIndex, VolumeBounds);
 
-	BakeTask.EnterProgressFrame(1.f, FText::FromString(TEXT("Precomputing Neighbors...(2.5/3)")));
+	// --- 5. Precompute neighbors for leaf nodes to accelerate pathfinding ---
+	BakeTask.EnterProgressFrame(1.f, FText::FromString(TEXT("Precomputing Neighbors... (3/4)")));
 	if (BakeTask.ShouldCancel()) return;
 	PrecomputeNeighbors();
-	
-	// --- 5. Save to asset file ---
-	BakeTask.EnterProgressFrame(1.f, FText::FromString(TEXT("Saving data asset...(3/3)")));
-	if (BakeTask.ShouldCancel()) return;
 
-	SaveOctreeToAsset(); // 헬퍼 함수 호출로 깔끔하게 처리
+	// --- 6. Save the generated octree data to a UOctreeDataAsset ---
+	BakeTask.EnterProgressFrame(1.f, FText::FromString(TEXT("Saving Data Asset... (4/4)")));
+	if (BakeTask.ShouldCancel()) return;
+	SaveOctreeToAsset();
 
 	UE_LOG(LogTemp, Log, TEXT("Baking complete! Final Octree has %d nodes."), StaticNodePool.Num());
 }
@@ -360,18 +448,16 @@ void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticOb
 {
 	OutStaticObstacles.Empty();
 
-	// 1. [Scan Target Setup] Determine object types to scan based on StaticObjectFilter.
+	// 1. Determine which object types to scan based on the filter settings.
 	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypesToQuery;
 	if (StaticObjectFilter)
 	{
-		// If filter is set: use channels defined in the filter.
 		UE_LOG(LogTemp, Log, TEXT("Using custom 'Static Object Filter' for baking."));
 		for (const TEnumAsByte<ECollisionChannel>& Channel : StaticObjectFilter->CollisionChannels)
 		{
 			ObjectTypesToQuery.Add(UEngineTypes::ConvertToObjectType(Channel));
 		}
-		
-		if (ObjectTypesToQuery.Num() == 0)
+		if (ObjectTypesToQuery.IsEmpty())
 		{
 			UE_LOG(LogTemp, Warning, TEXT("ScanForAllStaticObstacles: The assigned 'Static Object Filter' has no Collision Channels specified. No objects were scanned."));
 			return;
@@ -379,57 +465,45 @@ void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticOb
 	}
 	else
 	{
-		// If no filter: use default WorldStatic.
 		UE_LOG(LogTemp, Log, TEXT("'Static Object Filter' not set. Falling back to default: scanning 'WorldStatic' objects."));
 		ObjectTypesToQuery.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_WorldStatic));
 	}
-	
-	// 2. [Object Scan] Find all actors of determined types within the volume.
+
+	// 2. Perform a broad-phase overlap check to find all potentially relevant actors.
 	const FBox VolumeWorldBounds = GetComponentsBoundingBox(true, true);
 	TArray<AActor*> OverlappingActors;
 	UKismetSystemLibrary::BoxOverlapActors(GetWorld(), VolumeWorldBounds.GetCenter(), VolumeWorldBounds.GetExtent(),
-	                                       ObjectTypesToQuery, AActor::StaticClass(), BakeExcludeActors, OverlappingActors);
+		ObjectTypesToQuery, AActor::StaticClass(), BakeExcludeActors, OverlappingActors);
 
-	if (OverlappingActors.Num() == 0)
+	if (OverlappingActors.IsEmpty())
 	{
 		UE_LOG(LogTemp, Log, TEXT("ScanForAllStaticObstacles: No overlapping actors found for the specified query."));
 		return;
 	}
+	UE_LOG(LogTemp, Log, TEXT("ScanForAllStaticObstacles: Found %d potential actors. Applying filter and voxelizing..."), OverlappingActors.Num());
 
-	UE_LOG(LogTemp, Log, TEXT("ScanForAllStaticObstacles: Found %d potential actors. Applying filter and checking voxels..."), OverlappingActors.Num());
-
-	// 3. [Filtering and Voxelization] Final check and voxelization for each actor.
+	// 3. Perform a narrow-phase check: iterate through components, apply the filter, and voxelize.
 	for (AActor* Actor : OverlappingActors)
 	{
-		if (!Actor) continue;
-		
+		if (!IsValid(Actor)) continue;
+
 		TArray<UPrimitiveComponent*> PrimitiveComponents;
 		Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
 
 		for (UPrimitiveComponent* Comp : PrimitiveComponents)
 		{
-			if (!Comp || !Comp->IsQueryCollisionEnabled()) continue;
-			
-			bool bShouldBake;
-			if (StaticObjectFilter)
-			{
-				// If filter is present, bake only if it matches the filter.
-				bShouldBake = StaticObjectFilter->DoesActorMatch(Actor, Comp);
-			}
-			else
-			{
-				bShouldBake = true;
-			}
+			if (!IsValid(Comp) || !Comp->IsQueryCollisionEnabled()) continue;
+
+			// Use the filter to decide if this specific component should be baked.
+			const bool bShouldBake = StaticObjectFilter ? StaticObjectFilter->DoesActorMatch(Actor, Comp) : true;
 
 			if (bShouldBake)
 			{
-				// --- Proceed with voxelization for confirmed bake targets ---
 				const FBox ComponentBounds = Comp->Bounds.GetBox();
 				FIntVector MinVoxel, MaxVoxel;
-				FIntVector MinVoxelUnclamped = WorldToVoxelIndex(ComponentBounds.Min);
-				FIntVector MaxVoxelUnclamped = WorldToVoxelIndex(ComponentBounds.Max);
-				if (!ClampVoxelIndicesToVolume(MinVoxelUnclamped, MaxVoxelUnclamped, MinVoxel, MaxVoxel)) continue;
+				if (!ClampVoxelIndicesToVolume(WorldToVoxelIndex(ComponentBounds.Min), WorldToVoxelIndex(ComponentBounds.Max), MinVoxel, MaxVoxel)) continue;
 
+				// Voxelize the component's bounding box.
 				for (int32 z = MinVoxel.Z; z <= MaxVoxel.Z; ++z)
 				{
 					for (int32 y = MinVoxel.Y; y <= MaxVoxel.Y; ++y)
@@ -438,7 +512,9 @@ void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticOb
 						{
 							const FIntVector VoxelIndex(x, y, z);
 							if (OutStaticObstacles.Contains(VoxelIndex)) continue;
-							if (CheckVoxelOverlap(VoxelIndex, Comp))
+
+							// Final check to ensure the voxel actually overlaps the component geometry.
+							if (IsVoxelOverlapping(VoxelIndex, Comp))
 							{
 								OutStaticObstacles.Add(VoxelIndex);
 							}
@@ -451,70 +527,52 @@ void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticOb
 	UE_LOG(LogTemp, Log, TEXT("Scan complete. Baked %d unique static obstacle voxels."), OutStaticObstacles.Num());
 }
 
-void AOctreeVoxelVolume::InsertObstacleRecursive(int32 NodeIndex, // <-- const FBox& NodeBounds 인자를 제거합니다!
-												 const FIntVector& ObstacleVoxel, int32 CurrentDepth)
+void AOctreeVoxelVolume::InsertObstacleRecursive(int32 NodeIndex, const FIntVector& ObstacleVoxel, int32 CurrentDepth)
 {
-	
-	// 1. Validate NodeIndex (should always be valid, but defensive coding)
-    if (!StaticNodePool.IsValidIndex(NodeIndex))
-    {
-        UE_LOG(LogTemp, Error, TEXT("InsertObstacleRecursive: Invalid NodeIndex %d"), NodeIndex);
-        return;
-    }
+	if (!StaticNodePool.IsValidIndex(NodeIndex))
+	{
+		UE_LOG(LogTemp, Error, TEXT("InsertObstacleRecursive: Invalid NodeIndex %d"), NodeIndex);
+		return;
+	}
 
-	// 2. Get a reference to the current node.
-	//    Note: This reference might become invalid if StaticNodePool.Emplace() causes a reallocation.
-	//    We will re-acquire it safely after potential reallocations..
-    FOctreeNode& CurrentNodeRef = StaticNodePool[NodeIndex]; 
-    const FBox CurrentNodeBounds = CurrentNodeRef.Bounds; // <-- 노드에 저장된 Bounds를 사용합니다.
+	// If the node is already solid, this obstacle is already accounted for.
+	if (StaticNodePool[NodeIndex].State == EOctreeNodeState::Solid)
+	{
+		return;
+	}
 
-	// 3. If node state is Solid, no further action needed.
-    if (CurrentNodeRef.State == EOctreeNodeState::Solid)
-    {
-        return;
-    }
+	// If we've reached the maximum depth, this leaf node must become solid.
+	if (CurrentDepth == MaxOctreeDepth)
+	{
+		StaticNodePool[NodeIndex].State = EOctreeNodeState::Solid;
+		return;
+	}
 
-	// 4. If max depth reached, mark current node as Solid.
-    if (CurrentDepth == MaxOctreeDepth)
-    {
-        CurrentNodeRef.State = EOctreeNodeState::Solid;
-        return;
-    }
+	// If this node is currently empty, it must be subdivided to contain the obstacle.
+	// It becomes a 'Mixed' node, and its children are created.
+	if (StaticNodePool[NodeIndex].State == EOctreeNodeState::Empty)
+	{
+		StaticNodePool[NodeIndex].State = EOctreeNodeState::Mixed;
+		const FBox CurrentNodeBounds = StaticNodePool[NodeIndex].Bounds;
 
-	// 5. If the current node is in the Empty state, change it to Mixed and create child nodes.
-	//    This block may trigger reallocation of StaticNodePool,
-	//    which can invalidate the previously obtained CurrentNodeRef reference.
-	//    Therefore, access StaticNodePool[NodeIndex] directly to ensure safety.
-    if (CurrentNodeRef.State == EOctreeNodeState::Empty)
-    {
-        StaticNodePool[NodeIndex].State = EOctreeNodeState::Mixed; 
+		for (int i = 0; i < 8; ++i)
+		{
+			const int32 NewChildIndex = StaticNodePool.Emplace(FOctreeNode());
+			// It's crucial to re-acquire the node reference after Emplace, as the array might have been reallocated.
+			StaticNodePool[NewChildIndex].Bounds = CalculateChildBounds(CurrentNodeBounds, i);
+			StaticNodePool[NodeIndex].ChildrenIndices[i] = NewChildIndex;
+		}
+	}
 
-       
-        for (int i = 0; i < 8; ++i)
-        {
-            const int32 NewChildIndex = StaticNodePool.Emplace(FOctreeNode());
-            StaticNodePool[NewChildIndex].Bounds = CalculateChildBounds(CurrentNodeBounds, i);
-            StaticNodePool[NodeIndex].ChildrenIndices[i] = NewChildIndex;
-        }
-    }
-	
-    FOctreeNode& Node = StaticNodePool[NodeIndex]; 
+	// Recurse into the correct child octant.
+	const FVector VoxelWorldPos = VoxelIndexToWorld(ObstacleVoxel);
+	const int32 ChildOctant = GetOctantContainingVoxel(StaticNodePool[NodeIndex].Bounds, VoxelWorldPos);
+	const int32 ChildNodeIndex = StaticNodePool[NodeIndex].ChildrenIndices[ChildOctant];
 
-    const FVector VoxelWorldPos = VoxelIndexToWorld(ObstacleVoxel);
-    const int32 ChildOctant = GetOctantContainingVoxel(Node.Bounds, VoxelWorldPos); 
-
-    const int32 ChildNodeIndex = Node.ChildrenIndices[ChildOctant];
-    if (ChildNodeIndex != -1)
-    {
-        InsertObstacleRecursive(ChildNodeIndex, ObstacleVoxel, CurrentDepth + 1); 
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error,
-               TEXT(
-                   "InsertObstacleRecursive: Invalid child node index (-1) encountered. This should not happen after the fix."
-               ));
-    }
+	if (ChildNodeIndex != -1)
+	{
+		InsertObstacleRecursive(ChildNodeIndex, ObstacleVoxel, CurrentDepth + 1);
+	}
 }
 
 int32 AOctreeVoxelVolume::FindLeafNodeAt_BakeTime(const FVector& WorldPos) const
@@ -530,17 +588,19 @@ int32 AOctreeVoxelVolume::FindLeafNodeAt_BakeTime(const FVector& WorldPos) const
 	while (StaticNodePool.IsValidIndex(CurrentNodeIndex))
 	{
 		const FOctreeNode& Node = StaticNodePool[CurrentNodeIndex];
+
+		// A leaf node is found if it's not mixed or if max depth is reached.
 		if (Node.State != EOctreeNodeState::Mixed || CurrentDepth >= MaxOctreeDepth)
 		{
 			return CurrentNodeIndex;
 		}
 
-		const FVector VoxelWorldPos = WorldPos; // Already in world coordinates
-		const int32 ChildOctant = GetOctantContainingVoxel(Node.Bounds, VoxelWorldPos);
+		// Descend to the appropriate child.
+		const int32 ChildOctant = GetOctantContainingVoxel(Node.Bounds, WorldPos);
 		CurrentNodeIndex = Node.ChildrenIndices[ChildOctant];
 		CurrentDepth++;
 	}
-	return -1;
+	return -1; // Should not be reached if logic is correct.
 }
 
 void AOctreeVoxelVolume::PrecomputeNeighbors()
@@ -549,27 +609,29 @@ void AOctreeVoxelVolume::PrecomputeNeighbors()
 	NeighborTask.MakeDialog();
 
 	const FBox TotalVolumeBounds = VolumeBox->Bounds.GetBox();
-	const float Epsilon = 1.0f;
+	constexpr float Epsilon = 1.0f; // Small offset to push test point into the neighboring space.
 
 	for (int32 i = 0; i < StaticNodePool.Num(); ++i)
 	{
 		NeighborTask.EnterProgressFrame(1);
 		if (NeighborTask.ShouldCancel()) return;
 
-		// 리프 노드가 아닌 경우(Mixed)는 이웃을 계산할 필요가 없습니다.
+		// Neighbors are only relevant for leaf nodes (Solid or Empty).
 		if (StaticNodePool[i].State == EOctreeNodeState::Mixed)
 		{
 			continue;
 		}
-		StaticNodePool[i].MaxAllowedRadius = StaticNodePool[i].Bounds.GetExtent().GetMin();
-		
-		const FBox NodeBounds = StaticNodePool[i].Bounds;
 
+		// Also pre-calculate the max agent radius this node can accommodate.
+		StaticNodePool[i].MaxAllowedRadius = StaticNodePool[i].Bounds.GetExtent().GetMin();
+
+		const FBox NodeBounds = StaticNodePool[i].Bounds;
 		for (int32 DirIndex = 0; DirIndex < static_cast<int32>(ENeighborDirection::MAX); ++DirIndex)
 		{
 			FVector TestPoint = NodeBounds.GetCenter();
 			const ENeighborDirection Dir = static_cast<ENeighborDirection>(DirIndex);
 
+			// Position the test point just outside the current node's face in the desired direction.
 			switch (Dir)
 			{
 			case ENeighborDirection::Right: TestPoint.X = NodeBounds.Max.X + Epsilon; break;
@@ -580,6 +642,7 @@ void AOctreeVoxelVolume::PrecomputeNeighbors()
 			case ENeighborDirection::Down:  TestPoint.Z = NodeBounds.Min.Z - Epsilon; break;
 			}
 
+			// Find the leaf node at the test point and store it as the neighbor.
 			if (TotalVolumeBounds.IsInside(TestPoint))
 			{
 				const int32 NeighborNodeIndex = FindLeafNodeAt_BakeTime(TestPoint);
@@ -587,7 +650,7 @@ void AOctreeVoxelVolume::PrecomputeNeighbors()
 			}
 			else
 			{
-				StaticNodePool[i].Neighbors[DirIndex] = -1; // 볼륨 밖은 이웃이 없음
+				StaticNodePool[i].Neighbors[DirIndex] = -1; // Neighbor is outside the volume.
 			}
 		}
 	}
@@ -595,51 +658,46 @@ void AOctreeVoxelVolume::PrecomputeNeighbors()
 
 void AOctreeVoxelVolume::OptimizeAndCollapse(int32 NodeIndex, const FBox& NodeBounds)
 {
-	if (!StaticNodePool.IsValidIndex(NodeIndex))
-	{
-		return;
-	}
+	if (!StaticNodePool.IsValidIndex(NodeIndex)) return;
 
 	FOctreeNode& Node = StaticNodePool[NodeIndex];
 	if (Node.State != EOctreeNodeState::Mixed)
 	{
-		return; 
+		return; // This is a leaf node, nothing to collapse below it.
 	}
-	
+
+	// Recursively collapse children first (bottom-up approach).
 	for (int i = 0; i < 8; ++i)
 	{
-		const int32 ChildNodeIndex = Node.ChildrenIndices[i];
-		if (ChildNodeIndex != -1)
+		if (Node.ChildrenIndices[i] != -1)
 		{
-			OptimizeAndCollapse(ChildNodeIndex, CalculateChildBounds(NodeBounds, i));
+			OptimizeAndCollapse(Node.ChildrenIndices[i], CalculateChildBounds(NodeBounds, i));
 		}
 	}
 
+	// Check if all children are now leaf nodes of the same state.
 	const int32 FirstChildIndex = Node.ChildrenIndices[0];
-	if (FirstChildIndex == -1)
-	{
-		return;
-	}
+	if (FirstChildIndex == -1) return; // Should not happen in a mixed node.
 
-	
-	const EOctreeNodeState FirstChildState = StaticNodePool[Node.ChildrenIndices[0]].State;
-	if (FirstChildState == EOctreeNodeState::Mixed) return;
+	const EOctreeNodeState FirstChildState = StaticNodePool[FirstChildIndex].State;
+	if (FirstChildState == EOctreeNodeState::Mixed) return; // Cannot collapse if a child is still mixed.
 
 	bool bAllChildrenAreSame = true;
 	for (int i = 1; i < 8; ++i)
 	{
 		const int32 ChildNodeIndex = Node.ChildrenIndices[i];
-		if (ChildNodeIndex == -1 || StaticNodePool[ChildNodeIndex].State != FirstChildState || StaticNodePool[
-			ChildNodeIndex].State == EOctreeNodeState::Mixed)
+		if (ChildNodeIndex == -1 || StaticNodePool[ChildNodeIndex].State != FirstChildState)
 		{
 			bAllChildrenAreSame = false;
 			break;
 		}
 	}
-	
+
+	// If all children are identical leaves, collapse them by making the parent a leaf of that state.
 	if (bAllChildrenAreSame)
 	{
 		Node.State = FirstChildState;
+		// The children nodes are now orphaned but remain in the pool. A final compaction step could remove them.
 		for (int i = 0; i < 8; ++i)
 		{
 			Node.ChildrenIndices[i] = -1;
@@ -653,6 +711,7 @@ FBox AOctreeVoxelVolume::CalculateChildBounds(const FBox& ParentBounds, int32 Ch
 	const FVector Min = ParentBounds.Min;
 	const FVector Max = ParentBounds.Max;
 
+	// Determine the min/max corners for the child octant based on its index.
 	switch (ChildIndex)
 	{
 	case 0: return FBox(Min, Center); // ---
@@ -663,7 +722,7 @@ FBox AOctreeVoxelVolume::CalculateChildBounds(const FBox& ParentBounds, int32 Ch
 	case 5: return FBox(FVector(Center.X, Min.Y, Center.Z), FVector(Max.X, Center.Y, Max.Z)); // +-+
 	case 6: return FBox(FVector(Min.X, Center.Y, Center.Z), FVector(Center.X, Max.Y, Max.Z)); // -++
 	case 7: return FBox(Center, Max); // +++
-	default: return FBox{};
+	default: return FBox(ForceInit);
 	}
 }
 
@@ -671,21 +730,17 @@ int32 AOctreeVoxelVolume::GetOctantContainingVoxel(const FBox& NodeBounds, const
 {
 	int32 Octant = 0;
 	const FVector Center = NodeBounds.GetCenter();
-	if (VoxelWorldPos.X >= Center.X) Octant |= 1; 
-	if (VoxelWorldPos.Y >= Center.Y) Octant |= 2; 
-	if (VoxelWorldPos.Z >= Center.Z) Octant |= 4; 
+	if (VoxelWorldPos.X >= Center.X) Octant |= 1; // Right half
+	if (VoxelWorldPos.Y >= Center.Y) Octant |= 2; // Front half
+	if (VoxelWorldPos.Z >= Center.Z) Octant |= 4; // Top half
 	return Octant;
 }
-
-// AOctreeVoxelVolume.cpp
-
-#include "Engine/World.h" // GetWorld()와 UWorld를 사용하기 위해 필요합니다.
 
 bool AOctreeVoxelVolume::GetBakedAssetPath(FString& OutPackagePath, FString& OutAssetName) const
 {
 	if (BakedDataSaveDirectory.Path.IsEmpty())
 	{
-		UE_LOG(LogTemp, Error, TEXT("Cannot get asset path: 'Baked Data Save Directory' is not set."));
+		UE_LOG(LogTemp, Error, TEXT("Cannot get asset path: 'Baked Data Save Directory' is not set in the volume's properties."));
 		return false;
 	}
 
@@ -725,293 +780,163 @@ bool AOctreeVoxelVolume::GetBakedAssetPath(FString& OutPackagePath, FString& Out
 
 void AOctreeVoxelVolume::SaveOctreeToAsset()
 {
-	FString OutPackageName, AssetName;
-	if (!GetBakedAssetPath(OutPackageName, AssetName))
+	FString PackageName, AssetName;
+	if (!GetBakedAssetPath(PackageName, AssetName))
 	{
 		return;
 	}
-	
-	 FString DirectoryPath = FPaths::GetPath(OutPackageName);
-     UEditorAssetLibrary::MakeDirectory(DirectoryPath);
 
+	// Ensure the target directory exists.
+	const FString DirectoryPath = FPaths::GetPath(PackageName);
+	UEditorAssetLibrary::MakeDirectory(DirectoryPath);
+
+	// Check for and delete any existing asset at the target path to prevent conflicts.
+	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	const FAssetData ExistingAssetData = AssetRegistryModule.Get().GetAssetByObjectPath(FSoftObjectPath(PackageName));
+	if (ExistingAssetData.IsValid())
 	{
-		FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
-		FAssetData ExistingAssetData = AssetRegistryModule.Get().GetAssetByObjectPath(FName(*OutPackageName));
-
-		if (ExistingAssetData.IsValid())
-		{
-			UE_LOG(LogTemp, Log, TEXT("Found existing asset at: %s. Attempting to delete."), *OutPackageName);
-            
-			// 2. 존재하는 에셋 데이터를 실제 UObject로 로드합니다.
-			UObject* ExistingObject = ExistingAssetData.GetAsset();
-			if (ExistingObject)
-			{
-				// 3. ObjectTools를 사용하여 에셋을 삭제합니다. 두 번째 인자 false는 '삭제 확인' 팝업을 띄우지 않겠다는 의미입니다.
-				TArray<UObject*> ObjectsToDelete;
-				ObjectsToDelete.Add(ExistingObject);
-				ObjectTools::DeleteObjects(ObjectsToDelete, false);
-				UE_LOG(LogTemp, Log, TEXT("Successfully deleted old asset."));
-			}
-		}
+		UE_LOG(LogTemp, Log, TEXT("Found existing asset at: %s. Deleting old version."), *PackageName);
+		TArray<UObject*> ObjectsToDelete;
+		ObjectsToDelete.Add(ExistingAssetData.GetAsset());
+		ObjectTools::DeleteObjects(ObjectsToDelete, false); // false = do not show confirmation dialog
 	}
-	
-	UPackage* Package = CreatePackage(*OutPackageName);
+
+	// Create a new package and data asset object.
+	UPackage* Package = CreatePackage(*PackageName);
 	Package->FullyLoad();
 
-	UOctreeDataAsset* NewOctreeData = NewObject<UOctreeDataAsset>(
-		Package, FName(*AssetName), RF_Public | RF_Standalone
-	);
+	UOctreeDataAsset* NewOctreeData = NewObject<UOctreeDataAsset>(Package, FName(*AssetName), RF_Public | RF_Standalone);
 	if (!NewOctreeData)
 	{
-		UE_LOG(LogTemp, Error, TEXT("Failed to create new UOctreeDataAsset object for package: %s"), *OutPackageName);
+		UE_LOG(LogTemp, Error, TEXT("Failed to create new UOctreeDataAsset object for package: %s"), *PackageName);
 		return;
 	}
-	
-	NewOctreeData->Modify();
 
+	// Mark the asset as modified and populate it with the baked data.
+	NewOctreeData->Modify();
 	NewOctreeData->NodePool = StaticNodePool;
 	NewOctreeData->BakedMapSize = this->MapSize;
 	NewOctreeData->BakedMaxOctreeDepth = this->MaxOctreeDepth;
 
+	// Notify the asset registry and save the package.
 	FAssetRegistryModule::AssetCreated(NewOctreeData);
-
 	TArray<UPackage*> PackagesToSave;
 	PackagesToSave.Add(Package);
 
 	if (UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, true))
 	{
-		UE_LOG(LogTemp, Log, TEXT("Successfully saved Octree data to: %s.uasset"), *OutPackageName);
-		this->BakedOctreeData = NewOctreeData; 
+		UE_LOG(LogTemp, Log, TEXT("Successfully saved Octree data to: %s.uasset"), *PackageName);
+		this->BakedOctreeData = NewOctreeData; // Assign the newly created asset to the volume property.
 	}
 	else
 	{
-		UE_LOG(LogTemp, Error, TEXT("Failed to save Octree data package: %s"), *OutPackageName);
-	}
-}
-#endif
-
-void AOctreeVoxelVolume::InitializeDynamicLayer()
-{
-	check(MapSize.X > 0 && MapSize.X % 128 == 0);
-	check(MapSize.Y > 0);
-	check(MapSize.Z > 0);
-	const int32 NumChunks128 = (MapSize.X / 128) * MapSize.Y * MapSize.Z;
-	DynamicObstacleBitmask.Empty(NumChunks128);
-	DynamicObstacleBitmask.AddZeroed(NumChunks128);
-}
-
-void AOctreeVoxelVolume::UpdateDynamicObstacles()
-{
-	TRACE_CPUPROFILER_EVENT_SCOPE(VoxelVolume_UpdateDynamicObstacles_Optimized);
-
-	for (UDynamicObstacleComponent* Comp : RegisteredObstacles)
-	{
-		if (!Comp) continue;
-		
-		// 컴포넌트가 움직였을 때("Dirty"일 때)만 업데이트합니다.
-		if (Comp->IsDirty())
-		{
-			// 1. 이전 위치의 복셀들을 비웁니다.
-			UpdateVoxelStateForBounds(Comp->GetLastKnownBounds(), false);
-
-			// 2. 현재 위치의 경계 상자를 계산하고, 그 위치에 복셀들을 채웁니다.
-			const FBox CurrentBounds = Comp->GetCurrentBounds();
-			UpdateVoxelStateForBounds(CurrentBounds, true);
-
-			// 3. 마지막 위치 정보를 현재로 업데이트하고, Dirty 플래그를 내립니다.
-			Comp->UpdateLastKnownBounds();
-			Comp->ClearDirtyFlag();
-		}
+		UE_LOG(LogTemp, Error, TEXT("Failed to save Octree data package: %s"), *PackageName);
 	}
 }
 
-void AOctreeVoxelVolume::UpdateVoxelStateForBounds(const FBox& InBounds, bool bAsObstacle)
+void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 {
-	if (!InBounds.IsValid) return;
+	Super::UpdateDebugObstacleVisualization();
 
-	FIntVector MinVoxelIndex = WorldToVoxelIndex(InBounds.Min);
-	FIntVector MaxVoxelIndex = WorldToVoxelIndex(InBounds.Max);
-
-	FIntVector ClampedMin, ClampedMax;
-	if (!ClampVoxelIndicesToVolume(MinVoxelIndex, MaxVoxelIndex, ClampedMin, ClampedMax)) return;
-
-	for (int32 z = ClampedMin.Z; z <= ClampedMax.Z; ++z)
+	if (!VolumeBox || bIsUpdatingVisualization)
 	{
-		for (int32 y = ClampedMin.Y; y <= ClampedMax.Y; ++y)
+		return;
+	}
+
+	bIsUpdatingVisualization = true;
+	TWeakObjectPtr<AOctreeVoxelVolume> WeakThis(this);
+	const FBox InitialBounds = VolumeBox->Bounds.GetBox();
+
+	// 1. Collect node information asynchronously to avoid blocking the game thread.
+	Async(EAsyncExecution::ThreadPool, [WeakThis, InitialBounds]()
 		{
-			for (int32 x = ClampedMin.X; x <= ClampedMax.X; ++x)
+			if (!WeakThis.IsValid() || WeakThis->RootNodeIndex == -1)
 			{
-				UpdateDynamicVoxelState({x, y, z}, bAsObstacle);
+				if (WeakThis.IsValid()) WeakThis->bIsUpdatingVisualization = false;
+				return;
 			}
-		}
-	}
+
+			TArray<FDebugNodeInfo> NodesToDraw;
+			WeakThis->GetDebugNodeInfoRecursive(NodesToDraw, WeakThis->RootNodeIndex, InitialBounds, 0);
+
+			// 2. Schedule the instance update back on the game thread with the collected data.
+			AsyncTask(ENamedThreads::GameThread, [WeakThis, NodesToDraw = MoveTemp(NodesToDraw)]()
+				{
+					AOctreeVoxelVolume* StrongThis = WeakThis.Get();
+					if (!StrongThis) return;
+
+					// Clear all existing debug instances.
+					if (StrongThis->DebugSolidNodesComponent) StrongThis->DebugSolidNodesComponent->ClearInstances();
+					if (StrongThis->DebugEmptyNodesComponent) StrongThis->DebugEmptyNodesComponent->ClearInstances();
+					if (StrongThis->DebugMixedNodesComponent) StrongThis->DebugMixedNodesComponent->ClearInstances();
+
+					if (NodesToDraw.IsEmpty())
+					{
+						StrongThis->bIsUpdatingVisualization = false;
+						return;
+					}
+
+					// Collect transforms for each node type.
+					TArray<FTransform> SolidTransforms, EmptyTransforms, MixedTransforms;
+					for (const FDebugNodeInfo& NodeInfo : NodesToDraw)
+					{
+						const FVector Scale = NodeInfo.Bounds.GetSize() / 100.0f; // Assuming 100-unit debug mesh.
+						const FTransform NodeTransform(FRotator::ZeroRotator, NodeInfo.Bounds.GetCenter(), Scale);
+
+						if (NodeInfo.State == EOctreeNodeState::Solid && StrongThis->DebugSolidNodesComponent)
+						{
+							SolidTransforms.Add(NodeTransform);
+						}
+						else if (NodeInfo.State == EOctreeNodeState::Empty && StrongThis->DebugEmptyNodesComponent)
+						{
+							EmptyTransforms.Add(NodeTransform);
+						}
+						else if (NodeInfo.State == EOctreeNodeState::Mixed && StrongThis->DebugMixedNodesComponent)
+						{
+							MixedTransforms.Add(NodeTransform);
+						}
+					}
+
+					// Batch-add the new instances. Using bWorldSpace=true is simpler here.
+					if (StrongThis->DebugSolidNodesComponent && !SolidTransforms.IsEmpty())
+					{
+						StrongThis->DebugSolidNodesComponent->AddInstances(SolidTransforms, false, true);
+					}
+					if (StrongThis->DebugEmptyNodesComponent && !EmptyTransforms.IsEmpty())
+					{
+						StrongThis->DebugEmptyNodesComponent->AddInstances(EmptyTransforms, false, true);
+					}
+					if (StrongThis->DebugMixedNodesComponent && !MixedTransforms.IsEmpty())
+					{
+						StrongThis->DebugMixedNodesComponent->AddInstances(MixedTransforms, false, true);
+					}
+
+					StrongThis->bIsUpdatingVisualization = false;
+				});
+		});
 }
 
-void AOctreeVoxelVolume::ApplyDynamicObstacleChanges(const TSet<FIntVector>& NewFrameObstacles)
+void AOctreeVoxelVolume::GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex, const FBox& NodeBounds, int32 CurrentDepth) const
 {
-	const TSet<FIntVector> RemovedObstacles = CurrentDynamicObstacles.Difference(NewFrameObstacles);
-	for (const FIntVector& Index : RemovedObstacles)
-	{
-		UpdateDynamicVoxelState(Index, false);
-	}
+	if (!StaticNodePool.IsValidIndex(NodeIndex) || CurrentDepth > MaxOctreeDepth) return;
 
-	const TSet<FIntVector> AddedObstacles = NewFrameObstacles.Difference(CurrentDynamicObstacles);
-	for (const FIntVector& Index : AddedObstacles)
-	{
-		UpdateDynamicVoxelState(Index, true);
-	}
-}
-
-void AOctreeVoxelVolume::UpdateDynamicVoxelState(const FIntVector& Index, bool bIsObstacle)
-{
-	if (!IsIndexValid(Index)) return;
-
-	const int32 ChunksPerRow = MapSize.X / 128;
-	const int32 ChunkIndex = (Index.Z * MapSize.Y + Index.Y) * ChunksPerRow + (Index.X / 128);
-	const int32 BitIndex = Index.X % 128;
-
-	if (!DynamicObstacleBitmask.IsValidIndex(ChunkIndex)) return;
-
-	F128BitChunk& TargetChunk = DynamicObstacleBitmask[ChunkIndex];
-	const int32 WordIndex = BitIndex / 64;
-	const uint64 BitMask = 1ULL << (BitIndex % 64);
-
-	if (bIsObstacle)
-	{
-		TargetChunk.Words[WordIndex] |= BitMask;
-	}
-	else
-	{
-		TargetChunk.Words[WordIndex] &= ~BitMask;
-	}
-}
-
-bool AOctreeVoxelVolume::IsRegionEmpty_StaticOctree(const FBox& QueryBox) const
-{
-	if (RootNodeIndex == -1) return true; 
-
-	const FBox VolumeBounds = GetComponentsBoundingBox(true, true);
-	return IsRegionEmptyRecursive(RootNodeIndex, VolumeBounds, QueryBox);
-}
-
-bool AOctreeVoxelVolume::IsRegionEmptyRecursive(int32 NodeIndex, const FBox& NodeBounds, const FBox& QueryBox) const
-{
-	if (!NodeBounds.Intersect(QueryBox))
-	{
-		return true;
-	}
-
-	if (!StaticNodePool.IsValidIndex(NodeIndex)) return true;
 	const FOctreeNode& Node = StaticNodePool[NodeIndex];
 
-	if (Node.State == EOctreeNodeState::Solid)
+	// Add node info if it's a leaf or if we've reached the desired debug draw depth.
+	if (Node.State != EOctreeNodeState::Mixed || CurrentDepth == MaxOctreeDepth)
 	{
-		return false; 
+		OutNodes.Add({ NodeIndex, NodeBounds, Node.State });
 	}
-	if (Node.State == EOctreeNodeState::Empty)
+	else // If mixed, recurse into children.
 	{
-		return true;
-	}
-
-	// Mixed 상태: 자식 노드 순회
-	for (int i = 0; i < 8; ++i)
-	{
-		if (Node.ChildrenIndices[i] != -1)
+		for (int i = 0; i < 8; ++i)
 		{
-			const FBox ChildBounds = CalculateChildBounds(NodeBounds, i);
-			if (!IsRegionEmptyRecursive(Node.ChildrenIndices[i], ChildBounds, QueryBox))
+			if (Node.ChildrenIndices[i] != -1)
 			{
-				return false;
+				GetDebugNodeInfoRecursive(OutNodes, Node.ChildrenIndices[i], CalculateChildBounds(NodeBounds, i), CurrentDepth + 1);
 			}
 		}
 	}
-
-	return true;
 }
 
-bool AOctreeVoxelVolume::IsRegionEmpty_DynamicGrid(const FIntVector& MinCorner, const FIntVector& MaxCorner) const
-{
-	const FIntVector ClampedMin(FMath::Max(MinCorner.X, 0), FMath::Max(MinCorner.Y, 0), FMath::Max(MinCorner.Z, 0));
-	const FIntVector ClampedMax(FMath::Min(MaxCorner.X, MapSize.X - 1), FMath::Min(MaxCorner.Y, MapSize.Y - 1),
-	                            FMath::Min(MaxCorner.Z, MapSize.Z - 1));
-
-	if (ClampedMin.X > ClampedMax.X || ClampedMin.Y > ClampedMax.Y || ClampedMin.Z > ClampedMax.Z) return true;
-	if (DynamicObstacleBitmask.Num() == 0) return true;
-
-	auto CreateMask = [](int32 StartBit, int32 EndBit) -> __m128i
-	{
-		uint64 LowMask = (StartBit < 64) ? (~0ULL << StartBit) : 0;
-		if (EndBit < 64) LowMask &= (~0ULL >> (63 - EndBit));
-		uint64 HighMask = (EndBit >= 64) ? (~0ULL >> (127 - EndBit)) : 0;
-		if (StartBit >= 64) HighMask &= (~0ULL << (StartBit - 64));
-		return _mm_set_epi64x(HighMask, LowMask);
-	};
-
-	const int32 ChunksPerRow = MapSize.X / 128;
-	for (int32 z = ClampedMin.Z; z <= ClampedMax.Z; ++z)
-	{
-		for (int32 y = ClampedMin.Y; y <= ClampedMax.Y; ++y)
-		{
-			const int32 RowStartChunkIndex = (z * MapSize.Y + y) * ChunksPerRow;
-			const int32 StartChunkIndex = RowStartChunkIndex + ClampedMin.X / 128;
-			const int32 EndChunkIndex = RowStartChunkIndex + ClampedMax.X / 128;
-			const int32 StartBitInChunk = ClampedMin.X % 128;
-			const int32 EndBitInChunk = ClampedMax.X % 128;
-
-			if (StartChunkIndex == EndChunkIndex)
-			{
-				if (!DynamicObstacleBitmask.IsValidIndex(StartChunkIndex)) continue;
-				const __m128i Mask = CreateMask(StartBitInChunk, EndBitInChunk);
-				const __m128i ChunkData = _mm_loadu_si128(
-					reinterpret_cast<const __m128i*>(&DynamicObstacleBitmask[StartChunkIndex]));
-				if (_mm_testz_si128(ChunkData, Mask) == 0) return false;
-			}
-			else
-			{
-				if (DynamicObstacleBitmask.IsValidIndex(StartChunkIndex))
-				{
-					__m128i StartMask = CreateMask(StartBitInChunk, 127);
-					__m128i ChunkData = _mm_loadu_si128(
-						reinterpret_cast<const __m128i*>(&DynamicObstacleBitmask[StartChunkIndex]));
-					if (_mm_testz_si128(ChunkData, StartMask) == 0) return false;
-				}
-
-				for (int32 i = StartChunkIndex + 1; i < EndChunkIndex; ++i)
-				{
-					if (!DynamicObstacleBitmask.IsValidIndex(i)) continue;
-					const __m128i MiddleChunkData = _mm_loadu_si128(
-						reinterpret_cast<const __m128i*>(&DynamicObstacleBitmask[i]));
-					if (_mm_testz_si128(MiddleChunkData, _mm_set1_epi32(-1)) == 0) return false;
-				}
-
-				if (DynamicObstacleBitmask.IsValidIndex(EndChunkIndex))
-				{
-					__m128i EndMask = CreateMask(0, EndBitInChunk);
-					__m128i ChunkData = _mm_loadu_si128(
-						reinterpret_cast<const __m128i*>(&DynamicObstacleBitmask[EndChunkIndex]));
-					if (_mm_testz_si128(ChunkData, EndMask) == 0) return false;
-				}
-			}
-		}
-	}
-	return true;
-}
-
-void AOctreeVoxelVolume::GetCombinedBitmask(TArray<F128BitChunk>& CombinedBitmask) const
-{
-	CombinedBitmask.Empty();
-
-	if (StaticObstacleBitmask.Num() == DynamicObstacleBitmask.Num())
-	{
-		CombinedBitmask = StaticObstacleBitmask;
-		const TArray<F128BitChunk>& DynamicBitmask = DynamicObstacleBitmask;
-
-		for (int32 i = 0; i < CombinedBitmask.Num(); ++i)
-		{
-			// SIMD를 사용하여 OR 연산을 수행합니다.
-			const __m128i StaticData = _mm_load_si128(reinterpret_cast<const __m128i*>(&CombinedBitmask[i]));
-			const __m128i DynamicData = _mm_load_si128(reinterpret_cast<const __m128i*>(&DynamicBitmask[i]));
-			_mm_store_si128(reinterpret_cast<__m128i*>(&CombinedBitmask[i]), _mm_or_si128(StaticData, DynamicData));
-		}
-	}
-}
+#endif // WITH_EDITOR
