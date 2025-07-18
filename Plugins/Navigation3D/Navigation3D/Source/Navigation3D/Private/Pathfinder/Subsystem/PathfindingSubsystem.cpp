@@ -268,8 +268,8 @@ void UPathfindingSubsystem::Tick(float DeltaTime)
 	// 디버그 메시지
 	if (GEngine && PathfindingThreadPool)
 	{
-		const FString DebugMessage = FString::Printf(TEXT("Pathfinding Threads: %d"), CurrentNumWorkerThreads);
-		GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Cyan, DebugMessage);
+		// const FString DebugMessage = FString::Printf(TEXT("Pathfinding Threads: %d"), CurrentNumWorkerThreads);
+		// GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Cyan, DebugMessage);
 	}
 
 	// 처리할 작업들을 담을 임시 배열
