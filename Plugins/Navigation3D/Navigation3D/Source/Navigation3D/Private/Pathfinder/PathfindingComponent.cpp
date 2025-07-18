@@ -215,8 +215,10 @@ void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 
 		if (MovementMode == EPathMovementMode::Spline/* && CurrentPathIndex != 0*/)
 		{
-			const float TargetPointDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(
-				CurrentPathDestinationIndex);
+			// const float TargetPointDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(
+				// CurrentPathDestinationIndex);
+			const float TargetPointDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(1); //무조건 현재 index가 0
+
 			if (DistanceAlongSpline >= TargetPointDistance)
 			{
 				ProgressNextPoint();
@@ -235,17 +237,12 @@ void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 
 void UPathfindingComponent::ProgressNextPoint()
 {
-	DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex);
-
-	int32 PassedPointIndex = CurrentPathDestinationIndex;
-	if (PassedPointIndex >= 0)
-	{
-		UE_LOG(LogTemp, Display, TEXT("%s: passed point %d"), *GetOwner()->GetName(), PassedPointIndex);
-		UE_LOG(LogTemp, Display, TEXT("%s: FoundPath.Num() %d"), *GetOwner()->GetName(), FoundPath.Num());
-	}
-
+	// DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex);
 	++CurrentPathDestinationIndex;
 
+	DistanceAlongSpline = 0;
+	PartialSplinePointUpdate(CurrentPathDestinationIndex);
+	
 	if (CurrentPathDestinationIndex >= FoundPath.Num())
 	{
 		OnDestinationReached.Broadcast();
@@ -452,24 +449,50 @@ void UPathfindingComponent::HandleVoxelPathResult(const TArray<FIntVector>& Path
 	}
 }
 
+void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
+{
+	PathSplinePtr->ClearSplinePoints();
+
+	PathSplinePtr->RemoveSplinePoint(0);
+	
+	int32 AddIndex = StartIndex + PartialPointSplineNum; //경로가 이상하면 + 4까지
+
+	if (AddIndex >= FoundPath.Num())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("No more Spline Point!"));
+		return;
+	}
+	
+	PathSplinePtr->AddSplinePoint(FoundPath[AddIndex], ESplineCoordinateSpace::World, false);
+
+	PathSplinePtr->UpdateSpline();
+}
+
 void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess)
 {
 	if (bSuccess && Path.Num() > 1)
 	{
-		FoundPath.Empty();
+		// FoundPath.Empty(); 
 		FoundPath = Path;
 		FoundPathIndices.Empty();
 
-		bIsReachDestination = false;
+		bIsReachDestination = false; //이거 도착했을때 그만 찾아가게하는거 
 		CurrentState = EPathfindingState::FollowPath;
 
 		if (PathSplinePtr.IsValid())
 		{
 			PathSplinePtr->ClearSplinePoints();
-			for (const FVector& Point : FoundPath)
+
+			for (int i=0;i<3;i++)
 			{
-				PathSplinePtr->AddSplinePoint(Point, ESplineCoordinateSpace::World, false);
+				if (i >= FoundPath.Num())
+				{
+					break;
+				}
+				
+				PathSplinePtr->AddSplinePoint(FoundPath[i], ESplineCoordinateSpace::World, false);
 			}
+				
 			PathSplinePtr->UpdateSpline();
 
 			const FVector CurrentLocation = GetOwner()->GetActorLocation();
@@ -477,7 +500,7 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 			DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplineInputKey(ClosestInputKey);
 
 			int32 ClosestPointIndex = FMath::RoundToInt(ClosestInputKey);
-			CurrentPathDestinationIndex = FMath::Clamp(ClosestPointIndex + 1, 1, FoundPath.Num() - 1);
+			CurrentPathDestinationIndex = FMath::Clamp(ClosestPointIndex + 1, 1, PartialPointSplineNum - 1);
 		}
 		else
 		{
