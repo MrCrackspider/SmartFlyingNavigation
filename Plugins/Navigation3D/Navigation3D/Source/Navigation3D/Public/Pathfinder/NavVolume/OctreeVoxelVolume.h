@@ -84,7 +84,7 @@ public:
 	TObjectPtr<UVoxelObstacleFilter> GetStaticObstacleFilter() const { return StaticObjectFilter; }
 
 	/** Returns the data asset where the baked octree data is stored. */
-	TObjectPtr<UOctreeDataAsset> GetBakedOctreeData() { return BakedOctreeData; }
+	TObjectPtr<UOctreeDataAsset> GetBakedOctreeData() const { return BakedOctreeData; }
 
 	/**
 	 * Sets the data asset to use for the baked octree.
