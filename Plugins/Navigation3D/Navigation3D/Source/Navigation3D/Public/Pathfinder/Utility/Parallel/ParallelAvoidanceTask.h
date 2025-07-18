@@ -1,4 +1,6 @@
-﻿#pragma once
+﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
+
+#pragma once
 
 #include "CoreMinimal.h"
 #include "Async/AsyncWork.h"

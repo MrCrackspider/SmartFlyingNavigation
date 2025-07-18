@@ -1,9 +1,10 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+// Copyright © 2025 TeamHamDev. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
-#include "GameFramework/Actor.h" // For FTickableGameObject
+#include "GameFramework/Actor.h"
 #include "Pathfinder/Utility/Parallel/PathfindingRequest.h"
 #include "PathfindingSubsystem.generated.h"
 

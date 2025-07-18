@@ -1,4 +1,4 @@
-﻿// --- START OF FILE AvoidanceSubsystem.h ---
+﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
 
 #pragma once
 
@@ -7,7 +7,6 @@
 #include "Async/AsyncWork.h"
 #include "AvoidanceSubsystem.generated.h"
 
-// 스레드 간 데이터 전달을 위한 구조체
 struct FAgentThreadData
 {
     uint32 AgentId;
@@ -19,7 +18,6 @@ struct FAgentThreadData
     float MovementSpeed;
 };
 
-// 스레드 계산 결과를 담을 구조체
 struct FThreadAvoidanceResult
 {
     uint32 AgentId;

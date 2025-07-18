@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright © 2025 TeamHamDev. All Rights Reserved.
 
 #pragma once
 
@@ -13,6 +13,5 @@ public:
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
 private:
-	/** 탭(창)을 생성하는 콜백 함수입니다. */
 	TSharedRef<class SDockTab> SpawnPathfindingTunerTab(const class FSpawnTabArgs& SpawnTabArgs);
 };
