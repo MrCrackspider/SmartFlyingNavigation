@@ -16,7 +16,7 @@ public:
     SLATE_BEGIN_ARGS(SPathfindingTuner) {}
     SLATE_END_ARGS()
 
-    
+     
     void Construct(const FArguments& InArgs);
     
     ~SPathfindingTuner();

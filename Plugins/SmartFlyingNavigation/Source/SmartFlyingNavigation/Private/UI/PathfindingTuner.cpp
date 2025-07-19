@@ -866,6 +866,13 @@ FText SPathfindingTuner::GetObstacleProfileFullPathAsText() const
     TOptional<UVoxelObstacleProfile*> CommonProfile = GetCommonPropertyValue<AOctreeVoxelVolume, UVoxelObstacleProfile*>(SelectedVolumes,
         [](const AOctreeVoxelVolume* V) { return V->GetStaticObstacleProfile(); });
 
+
+    // Case 0: Non Selected
+    if (SelectedVolumes.Num() == 0)
+    {
+        return LOCTEXT("NonePath", "None");
+    }
+    
     // Case 1: The selected volumes have different profile values.
     if (!CommonProfile.IsSet())
     {
@@ -1013,9 +1020,22 @@ FText SPathfindingTuner::GetBakedDataFullPathAsText() const
     TOptional<UOctreeDataAsset*> CommonAsset = GetCommonPropertyValue<AOctreeVoxelVolume, UOctreeDataAsset*>
     (SelectedVolumes,[](const AOctreeVoxelVolume* V) { return V->GetBakedOctreeData(); });
 
-    if (!CommonAsset.IsSet()) return LOCTEXT("MultipleValues", "Multiple Values");
-    if (!CommonAsset.GetValue()) return LOCTEXT("NonePath", "None");
-
+    // Case 0: Non Selected
+    if (SelectedVolumes.Num() == 0)
+    {
+        return LOCTEXT("NonePath", "None");
+    }
+    
+    if (!CommonAsset.IsSet())
+    {
+        return LOCTEXT("MultipleValues", "Multiple Values");
+    }
+    
+    if (!CommonAsset.GetValue())
+    {
+        return LOCTEXT("NonePath", "None");
+    }
+    
     return FText::FromString(FPaths::GetPath(CommonAsset.GetValue()->GetPathName()));
 }
 
@@ -1093,7 +1113,7 @@ bool SPathfindingTuner::AreOnlyAgentsSelected() const
     }
     return true;
 }
-
+ 
 FText SPathfindingTuner::GetSelectedAgentName() const
 {
     const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();

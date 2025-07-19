@@ -1,8 +1,7 @@
 #include "Nav3DPathfindingDetails.h"
 #include "DetailLayoutBuilder.h"
 #include "DetailWidgetRow.h"
-#include "DetailCategoryBuilder.h"
-#include "DetailLayoutBuilder.h"
+#include "DetailCategoryBuilder.h" 
 #include "PropertyEditorModule.h"
 #include "PathfindingComponent.h"
 

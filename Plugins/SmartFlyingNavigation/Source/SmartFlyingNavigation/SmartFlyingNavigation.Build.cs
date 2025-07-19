@@ -39,17 +39,16 @@ public class SmartFlyingNavigation : ModuleRules
 				"Slate",
 				"SlateCore",
 				"AssetTools",
-				
 				"LevelEditor",    
 				"EditorStyle",
-				
 				"WorkspaceMenuStructure",
 				"InputCore",
 				"EditorSubsystem",
 				"LevelEditor",
 				"PropertyEditor", 
 				"DesktopWidgets",
-				"DesktopPlatform", "EditorScriptingUtilities"
+				"DesktopPlatform", "EditorScriptingUtilities",
+				"Projects" 
 			}
 		);
       
