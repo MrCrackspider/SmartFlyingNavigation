@@ -11,10 +11,11 @@
 
 #include "Framework/Application/SlateApplication.h" 
 #include "Widgets/Docking/SDockTab.h"
+#include "PathfindingTunerTabName.h"
+
 
 #define LOCTEXT_NAMESPACE "FNav3DPathfindingDetails"
 
-static const FName PathfindingTunerTabName("PathfindingTuner");
 
 TSharedRef<IDetailCustomization> FNav3DPathfindingDetails::MakeInstance()
 {
@@ -23,8 +24,8 @@ TSharedRef<IDetailCustomization> FNav3DPathfindingDetails::MakeInstance()
 
 void FNav3DPathfindingDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuidler)
 {
+	IDetailCategoryBuilder& DebuggingCategory = DetailBuidler.EditCategory("Tunner", FText::GetEmpty(), ECategoryPriority::Important);
 	IDetailCategoryBuilder& PathfindingCategory = DetailBuidler.EditCategory("Navigation Configuration", FText::GetEmpty(), ECategoryPriority::Important);
-	IDetailCategoryBuilder& DebuggingCategory = DetailBuidler.EditCategory("Debugging", FText::GetEmpty(), ECategoryPriority::Important);
 
 	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, TargetActor));
 	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, TargetVolume));
@@ -39,47 +40,34 @@ void FNav3DPathfindingDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuid
 
 	TArray<TWeakObjectPtr<UObject>> SelectedObjects;
 	DetailBuidler.GetObjectsBeingCustomized(SelectedObjects);
+
+	//Path finding Button in Editor (Moved to Slate UI)
+//	auto OnRequestPathClicked = [SelectedObjects]()-> FReply
+//	{
+//		for (const TWeakObjectPtr<UObject>& SelectedObject : SelectedObjects)
+//		{
+//			if (UPathfindingComponent* PathfindingComp = Cast<UPathfindingComponent>(SelectedObject.Get()))
+//			{
+//				PathfindingComp->RequestPathToTargetActor();
+//			}
+//		}
+//		return FReply::Handled();
+//	};
+//	
+//	DebuggingCategory.AddCustomRow(FText::FromString(TEXT("Request Path"))).NameContent()
+//	[
+//		SNew(STextBlock)
+//		.Text(FText::FromString(TEXT("Execute Pathfinding")))
+//		.Font(IDetailLayoutBuilder::GetDetailFont())
+//	].ValueContent()
+//	[
+//		SNew(SButton)
+//		.Text(FText::FromString(TEXT("Request Path to Target")))
+//		.OnClicked_Lambda(OnRequestPathClicked) 
+//	];
+//
+//	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bDrawDebugPath));
 	
-	auto OnRequestPathClicked = [SelectedObjects]()-> FReply
-	{
-		for (const TWeakObjectPtr<UObject>& SelectedObject : SelectedObjects)
-		{
-			if (UPathfindingComponent* PathfindingComp = Cast<UPathfindingComponent>(SelectedObject.Get()))
-			{
-				PathfindingComp->RequestPathToTargetActor();
-			}
-		}
-		return FReply::Handled();
-	};
-	
-	DebuggingCategory.AddCustomRow(FText::FromString(TEXT("Request Path"))).NameContent()
-	[
-		SNew(STextBlock)
-		.Text(FText::FromString(TEXT("Execute Pathfinding")))
-		.Font(IDetailLayoutBuilder::GetDetailFont())
-	].ValueContent()
-	[
-		SNew(SButton)
-		.Text(FText::FromString(TEXT("Request Path to Target")))
-		.OnClicked_Lambda(OnRequestPathClicked) 
-	];
-
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bDrawDebugPath));
-
-	DebuggingCategory.AddCustomRow(FText::FromString(TEXT("Request Path"))).NameContent()
-	[
-		SNew(STextBlock)
-		.Text(FText::FromString(TEXT("Execute Pathfinding")))
-		.Font(IDetailLayoutBuilder::GetDetailFont())
-	].ValueContent()
-	[
-		SNew(SButton)
-		.Text(FText::FromString(TEXT("Request Path to Target")))
-		.OnClicked_Lambda(OnRequestPathClicked) 
-	];
-
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bDrawDebugPath));
-
 	DebuggingCategory.AddCustomRow(LOCTEXT("OpenPathfindingTunerFilter", "Open Pathfinding Tuner")) // Filter text
 	.NameContent()
 	[

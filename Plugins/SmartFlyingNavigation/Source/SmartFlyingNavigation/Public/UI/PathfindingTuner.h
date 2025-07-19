@@ -30,7 +30,7 @@ private:
     TSharedRef<SWidget> BuildBakedDataSettingsSection();
     TSharedRef<SWidget> BuildAgentSettingsSection();
     TSharedRef<SWidget> BuildVoxelDebugSettingsSection();
-    
+    TSharedRef<SWidget> BuildAgentDebugSection();
     //=================================================================================================
     // Actor Selection Handling
     //=================================================================================================
@@ -61,7 +61,8 @@ private:
     void OnBakedDataCategoryExpansionChanged(bool bIsExpanded);
     void OnAgentSettingsCategoryExpansionChanged(bool bIsExpanded);
     void OnDebugSettingsCategoryExpansionChanged(bool bIsExpanded);
-
+    void OnAgentDebugCategoryExpansionChanged(bool bIsExpanded);
+   
     //=================================================================================================
     // UI Callbacks & Value Accessors
     //=================================================================================================
@@ -99,9 +100,9 @@ private:
     TOptional<ECheckBoxState> GetDrawDebugBoxState() const;
     void OnDrawDebugBoxChanged(ECheckBoxState NewState);
     TOptional<float> GetDebugLineWidth() const;
-    void OnDebugLineWidthCommitted(float NewValue,
-                                   ETextCommit::Type CommitType);
-
+    void OnDebugLineWidthCommitted(float NewValue, ETextCommit::Type CommitType);
+   TOptional<ECheckBoxState> GetDrawDebugPathState() const;
+    void OnDrawDebugPathChanged(ECheckBoxState NewState);   
 
     // --- Agent Settings ---
     bool AreOnlyAgentsSelected() const;
@@ -125,6 +126,8 @@ private:
     // --- Actions ---
     FReply OnBakeButtonClicked();
     void ShowWarningMessage(const FText& Message) const;
+    FReply OnRequestPathButtonClicked();
+    bool IsPIEActive() const;
 private:
     //=================================================================================================
     // Member Variables

@@ -72,7 +72,7 @@ void AVoxelVolumeBase::OnConstruction(const FTransform& Transform)
 	static const FSoftObjectPath DebugMeshPath(
 		TEXT("/Script/Engine.StaticMesh'/Navigation3D/PathfinderPlugin/Debug/SM_DebugObstacle.SM_DebugObstacle'"));
 
-	DebugMeshAsset = DebugMeshPath;
+	//DebugMeshAsset = DebugMeshPath;
 
 #if WITH_EDITORONLY_DATA
 	// Load debug materials from their paths.

@@ -20,7 +20,7 @@ void FSmartFlyingNavigationEditorModule::StartupModule()
 		AOctreeVoxelVolume::StaticClass()->GetFName(),
 		FOnGetDetailCustomizationInstance::CreateStatic(&FNav3DVolumeDetails::MakeInstance)
 	);
-	
+	 
 	UE_LOG(LogTemp, Log, TEXT("Navigation3DEditor Module has started. Custom details for UPathfindingComponent registered"));
 }
 

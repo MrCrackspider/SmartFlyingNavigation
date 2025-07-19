@@ -36,7 +36,7 @@ UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class SMARTFLYINGNAVIGATION_API UPathfindingComponent : public UActorComponent
 {
 	GENERATED_BODY()
-
+ 
 public:
 	UPathfindingComponent();
 	
@@ -120,6 +120,10 @@ public:
 	/** Getter for the agent's maximum movement speed for the evasion system. */
 	UFUNCTION(BlueprintPure, Category = "Pathfinding|Avoidance")
 	float GetMovementSpeed() const { return MovementSpeed; }
+
+	bool GetbDrawDebugPath() const { return bDrawDebugPath; }
+	void SetbDrawDebugPath(bool NewValue) { bDrawDebugPath = NewValue; }
+	
 #pragma endregion
 
 #pragma region Spline Following
@@ -141,7 +145,7 @@ public:
 protected:
 	FVector PreferredVelocity;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding|Debug")
+	UPROPERTY()
 	USphereComponent* DebugSphereComponent;
 	
 #pragma region Internal Logic
@@ -174,8 +178,7 @@ protected:
 #pragma region Configuration Properties
 public:
 	// --- default settings ---
-	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,
-		meta = (AllowPrivateAccess = true))
+	UPROPERTY()
 	TSubclassOf<UPathfindingStrategy> PathfindingStrategyClass;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding", meta = (AllowPrivateAccess = true))
@@ -184,12 +187,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding", meta = (ClampMin = "0.0", AllowPrivateAccess = true))
 	float BaseAgentRadius = 50.0f;
 	
-	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,
+	UPROPERTY(Category = "Pathfinding|Configuration", BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
 	float AvoidanceRadius = 50.f;
 
-	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,
-		meta = (AllowPrivateAccess = true))
+	UPROPERTY( BlueprintReadWrite, meta = (AllowPrivateAccess = true))
 	float MovementSpeed = 500.f;
 
 	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,
@@ -205,15 +207,15 @@ public:
 		meta = (AllowPrivateAccess = true))
 	float RepathCooldown = 1.f;
 
-	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,
+	UPROPERTY(Category = "Pathfinding|Configuration", BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
 	bool bPeriodicRepath = false;
 
-	UPROPERTY(Category = "Pathfinding|Dynamic Repath", EditAnywhere, BlueprintReadWrite,
+	UPROPERTY(Category = "Pathfinding|Dynamic Repath", BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
 	int32 PathValidationLookAhead = 3;
 	
-	UPROPERTY(Category = "Pathfinding|Dynamic Repath", EditAnywhere, BlueprintReadWrite,
+	UPROPERTY(Category = "Pathfinding|Dynamic Repath", BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
 	int32 PartialPointSplineNum = 4;
 	
@@ -233,7 +235,7 @@ public:
 		meta = (EditCondition = "MovementMode == EPathMovementMode::Spline", AllowPrivateAccess = true))
 	float SafetyCheckStepSize = 50.f;
 
-	UPROPERTY(Category = "Pathfinding|Debug", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+	UPROPERTY()
 	bool bDrawDebugPath = true;
 	
 	UPROPERTY(Category = "Pathfinding|Dynamic Goal", EditAnywhere, BlueprintReadWrite,
@@ -274,14 +276,12 @@ public:
 
 #pragma region Dependencies & Handles
 
-	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,
-		meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding", meta = (AllowPrivateAccess = "true", HiddenInDetails))
 	TObjectPtr<AActor> TargetActor;
-
-	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,
-		meta = (AllowPrivateAccess = "true"))
+	
+	UPROPERTY(EditAnywhere, Category = "Pathfinding", meta = (HiddenInDetails))
 	TObjectPtr<AVoxelVolumeBase> TargetVolume;
-
+	
 	UPROPERTY()
 	TObjectPtr<UPathfindingStrategy> PathfindingStrategy;
 

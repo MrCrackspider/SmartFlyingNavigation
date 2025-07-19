@@ -9,7 +9,6 @@
 #include "Internationalization/Text.h"
 #include "Styling/AppStyle.h"
 #include "Framework/Application/SlateApplication.h"
-#include "HAL/PlatformApplicationMisc.h"
 #include "Misc/MessageDialog.h"
 #include "ScopedTransaction.h"
 
@@ -28,14 +27,11 @@
 #include "Widgets/Text/STextBlock.h"
 
 // Project
-#include "EngineUtils.h"
-#include "Framework/Notifications/NotificationManager.h"
 #include "NavData/VoxelObstacleProfile.h"
 #include "NavVolume/OctreeVoxelVolume.h"
 #include "Subsystem/PathfindingSubsystem.h"
 #include "PathfindingComponent.h"
 #include "UI/PathfindingTunerSettings.h"
-#include "Widgets/Notifications/SNotificationList.h"
 
 #define LOCTEXT_NAMESPACE "PathfindingTuner"
 
@@ -112,6 +108,13 @@ void SPathfindingTuner::Construct(const FArguments& InArgs)
             .Padding(2)
             [
                 BuildAgentSettingsSection()
+            ]
+
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0, 5)
+            [
+                BuildAgentDebugSection() // 새로 추가된 섹션 호출
             ]
         ]
     ];
@@ -210,35 +213,6 @@ TSharedRef<SWidget> SPathfindingTuner::BuildOctreeVolumeSettingsSection()
                     .ColorAndOpacity(FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>("TextBlock.Warning").ColorAndOpacity)
                 ]
             ]
-
-            // Save Directory
-            + SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
-            [
-                SNew(SHorizontalBox)
-                + SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
-                [
-                    SNew(STextBlock).Text(LOCTEXT("BakedDataSaveDirectoryLabel", "Baked Data Save Directory:")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-                ]
-                + SHorizontalBox::Slot().FillWidth(0.6f)
-                [
-                    SNew(SHorizontalBox)
-                    + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-                    [
-                        SNew(SEditableTextBox)
-                        .Text(this, &SPathfindingTuner::GetBakedDataSaveDirectoryAsText)
-                        .OnTextCommitted(this, &SPathfindingTuner::OnBakedDataSaveDirectoryTextCommitted)
-                        .HintText(LOCTEXT("DirectoryPathHint", "Path to save directory..."))
-                    ]
-                    + SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f).VAlign(VAlign_Center)
-                    [
-                        SNew(SButton)
-                        .Text(FText::FromString(TEXT("...")))
-                        .ToolTipText(LOCTEXT("BakedDataSaveDirectoryBrowseTooltip", "Choose a directory from this computer"))
-                        .OnClicked(this, &SPathfindingTuner::OnBrowseButtonClicked)
-                    ]
-                ]
-            ]
-
             // Max Octree Depth
             + SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
             [
@@ -314,10 +288,37 @@ TSharedRef<SWidget> SPathfindingTuner::BuildBakedDataSettingsSection()
         ]
         .BodyContent()
         [
+            
             // Top-level vertical box for all content in this section
             SNew(SVerticalBox)
-
-            // --- Item 1: Baked Octree Data Asset ---
+            // Item1 Save Directory
+            + SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+            [
+                  SNew(SHorizontalBox)
+                  + SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
+                  [
+                      SNew(STextBlock).Text(LOCTEXT("BakedDataSaveDirectoryLabel", "Baked Data Save Directory:")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                  ]
+                  + SHorizontalBox::Slot().FillWidth(0.6f)
+                  [
+                      SNew(SHorizontalBox)
+                      + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+                      [
+                          SNew(SEditableTextBox)
+                          .Text(this, &SPathfindingTuner::GetBakedDataSaveDirectoryAsText)
+                          .OnTextCommitted(this, &SPathfindingTuner::OnBakedDataSaveDirectoryTextCommitted)
+                          .HintText(LOCTEXT("DirectoryPathHint", "Path to save directory..."))
+                      ]
+                      + SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f).VAlign(VAlign_Center)
+                      [
+                          SNew(SButton)
+                          .Text(FText::FromString(TEXT("...")))
+                          .ToolTipText(LOCTEXT("BakedDataSaveDirectoryBrowseTooltip", "Choose a directory from this computer"))
+                          .OnClicked(this, &SPathfindingTuner::OnBrowseButtonClicked)
+                      ]
+                  ]
+            ]
+            // --- Item 2: Baked Octree Data Asset ---
             + SVerticalBox::Slot()
             .AutoHeight()
             .Padding(8.0f, 5.0f)
@@ -682,6 +683,81 @@ TSharedRef<SWidget> SPathfindingTuner::BuildVoxelDebugSettingsSection()
         .InitiallyCollapsed(!TunerSettings->bIsDebugSettingsCategoryExpanded)
         // Bind expansion change to save state
         .OnAreaExpansionChanged(this, &SPathfindingTuner::OnDebugSettingsCategoryExpansionChanged);
+}
+
+TSharedRef<SWidget> SPathfindingTuner::BuildAgentDebugSection()
+{
+    return SNew(SExpandableArea)
+       .AreaTitle(LOCTEXT("AgentDebugSettingsTitle", "Agent Debug Settings")) 
+        .IsEnabled(this, &SPathfindingTuner::AreOnlyAgentsSelected)
+       .BodyContent()
+       [
+           SNew(SVerticalBox)
+           + SVerticalBox::Slot()
+           .AutoHeight()
+           .Padding(8.0f, 5.0f)
+           [
+               SNew(SHorizontalBox)
+               + SHorizontalBox::Slot()
+               .FillWidth(0.4f)
+               .VAlign(VAlign_Center)
+               [
+                   SNew(STextBlock)
+                   .Text(LOCTEXT("DrawDebugPathLabel", "Draw Debug Path"))
+                   .Font(FAppStyle::Get().GetFontStyle("PropertyWindow.NormalFont"))
+               ]
+               + SHorizontalBox::Slot()
+               .FillWidth(0.6f)
+               .Padding(5.0f, 0.0f, 0.0f, 0.0f)
+               [
+                   SNew(SCheckBox)
+                    
+                   .IsChecked_Lambda([this]() -> ECheckBoxState {
+                        TOptional<ECheckBoxState> State = this->GetDrawDebugPathState();
+                        if (State.IsSet())
+                        {
+                            return State.GetValue();
+                        }
+                        return ECheckBoxState::Undetermined;
+                    })
+                   .OnCheckStateChanged(this, &SPathfindingTuner::OnDrawDebugPathChanged)
+               ]
+               ]
+
+                + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(8.0f, 5.0f) // Standard property row padding
+                   [
+                       SNew(SHorizontalBox)
+                       + SHorizontalBox::Slot()
+                       .FillWidth(0.4f) // Label takes 40% width
+                       .VAlign(VAlign_Center)
+                       [
+                           SNew(STextBlock)
+                           .Text(LOCTEXT("RequestPathLabel", "Request Path")) // Label for the button
+                           .Font(FAppStyle::Get().GetFontStyle("PropertyWindow.NormalFont"))
+                           .ToolTipText(LOCTEXT("RequestPathTooltip", "Requests a path for the selected agent(s) to their target actor."))
+                       ]
+                       + SHorizontalBox::Slot()
+                       .FillWidth(0.6f) // Button takes 60% width
+                       .Padding(5.0f, 0.0f, 0.0f, 0.0f) // Left padding for alignment
+                       [
+                           SNew(SButton)
+                           .Text(LOCTEXT("RequestPathButtonText", "Request Path to Target")) // Button text
+                           .ContentPadding(FMargin(4.0f, 2.0f)) // Standard button padding
+                           .HAlign(HAlign_Center) // Center align text horizontally
+                           .VAlign(VAlign_Center) // Center align text vertically
+                           .OnClicked(this, &SPathfindingTuner::OnRequestPathButtonClicked) // Bind to new handler function
+                           .ToolTipText(LOCTEXT("RequestPathButtonTooltip", "Click to request a path for the selected agent(s) to their target actor."))
+                       ]
+                   ]
+
+                
+            ]
+        
+         .InitiallyCollapsed(!TunerSettings->bAgentDebugSettingsExpanded)
+      // Bind expansion change to save state
+        .OnAreaExpansionChanged(this, &SPathfindingTuner::OnAgentDebugCategoryExpansionChanged);
 }
 
 //=================================================================================================
@@ -1096,6 +1172,33 @@ void SPathfindingTuner::OnDebugLineWidthCommitted(float NewValue, ETextCommit::T
     }
 }
 
+TOptional<ECheckBoxState> SPathfindingTuner::GetDrawDebugPathState() const
+{
+    const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
+    if (SelectedComponents.Num() == 0)
+    {
+        return ECheckBoxState::Undetermined;
+    }
+
+    bool bFirstValue = SelectedComponents[0]->GetbDrawDebugPath(); // UPathfindingComponent의 Getter 사용
+    for (int32 i = 1; i < SelectedComponents.Num(); ++i)
+    {
+        if (SelectedComponents[i]->GetbDrawDebugPath() != bFirstValue) // UPathfindingComponent의 Getter 사용
+        {
+            return ECheckBoxState::Undetermined; // Mixed state
+        }
+    }
+    return bFirstValue ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SPathfindingTuner::OnDrawDebugPathChanged(ECheckBoxState NewState)
+{
+    const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
+    SetCommonPropertyValue<UPathfindingComponent, bool>(SelectedComponents, NewState == ECheckBoxState::Checked, LOCTEXT("SetDrawDebugPath", "Set Draw Debug Path"),
+        [](UPathfindingComponent* Component, bool bDraw) {
+            Component->SetbDrawDebugPath(bDraw); // UPathfindingComponent의 Setter 사용
+        });
+}
 //=================================================================================================
 // Agent Settings
 //=================================================================================================
@@ -1144,10 +1247,10 @@ void SPathfindingTuner::OnTargetActorChanged(const FAssetData& AssetData)
 {
     AActor* NewTargetActor = Cast<AActor>(AssetData.GetAsset());
     const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
-
+ 
     SetCommonPropertyValue<UPathfindingComponent, AActor*>(SelectedComponents, NewTargetActor, LOCTEXT("SetTargetActor", "Set Target Actor"),
         [](UPathfindingComponent* C, AActor* Target) {
-            C->TargetActor = Target;
+            C->SetTargetActor(Target);
         });
 }
 
@@ -1275,6 +1378,43 @@ void SPathfindingTuner::ShowWarningMessage(const FText& Message) const
     FMessageDialog::Open(EAppMsgType::Ok, Message);
 }
 
+FReply SPathfindingTuner::OnRequestPathButtonClicked()
+{
+    if (!IsPIEActive())
+    {
+        ShowWarningMessage(LOCTEXT("NotPIEWarning", "Path requests can only be made during Play In Editor (PIE) or Standalone Game."));
+        return FReply::Handled();
+    }
+    
+    const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
+    if (SelectedComponents.Num() == 0)
+    {
+        ShowWarningMessage(LOCTEXT("NoAgentSelected", "Please select at least one agent with a Pathfinding Component."));
+        return FReply::Handled();
+    }
+
+    bool bAnyPathRequested = false;
+    for (UPathfindingComponent* Component : SelectedComponents)
+    {
+        if (Component && Component->RequestPathToTargetActor()) // UPathfindingComponent의 함수 호출
+        {
+            bAnyPathRequested = true;
+        }
+    }
+
+    if (!bAnyPathRequested)
+    {
+        ShowWarningMessage(LOCTEXT("PathRequestFailed", "Path request failed for all selected agents. Check logs for details (e.g., invalid target actor)."));
+    }
+    else
+    {
+        // Optionally, provide feedback that path request was sent
+        // GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green, TEXT("Path request sent!"));
+    }
+
+    return FReply::Handled();
+}
+
 //=================================================================================================
 // UI State & Expansion Handlers
 //=================================================================================================
@@ -1322,6 +1462,22 @@ void SPathfindingTuner::OnDebugSettingsCategoryExpansionChanged(bool bIsExpanded
         TunerSettings->bIsDebugSettingsCategoryExpanded = bIsExpanded;
         TunerSettings->SaveConfig(); // Save the new state to config
     }
+}
+
+void SPathfindingTuner::OnAgentDebugCategoryExpansionChanged(bool bIsExpanded)
+{
+    if (TunerSettings)
+    {
+        TunerSettings->bAgentDebugSettingsExpanded = bIsExpanded;
+        TunerSettings->SaveConfig(); // Save the new state to config
+    }
+}
+
+bool SPathfindingTuner::IsPIEActive() const
+{
+    // GEditor가 유효하고, 현재 게임이 실행 중인지 확인합니다.
+    // GEditor->PlayWorld는 PIE 월드를 나타냅니다.
+    return GEditor && GEditor->PlayWorld && GEditor->PlayWorld->IsGameWorld();
 }
 
 #undef LOCTEXT_NAMESPACE

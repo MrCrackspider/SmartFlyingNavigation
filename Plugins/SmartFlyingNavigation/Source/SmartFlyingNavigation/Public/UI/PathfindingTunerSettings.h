@@ -31,4 +31,7 @@ public:
 
 	UPROPERTY(Config)
 	bool bIsDebugSettingsCategoryExpanded;
+
+	UPROPERTY(Config)
+	bool bAgentDebugSettingsExpanded;
 };
