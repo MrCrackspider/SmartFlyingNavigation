@@ -5,6 +5,17 @@
 #include "PropertyEditorModule.h"
 #include "PathfindingComponent.h"
 
+
+#include "Widgets/Input/SButton.h"
+#include "Widgets/Text/STextBlock.h"
+
+#include "Framework/Application/SlateApplication.h" 
+#include "Widgets/Docking/SDockTab.h"
+
+#define LOCTEXT_NAMESPACE "FNav3DPathfindingDetails"
+
+static const FName PathfindingTunerTabName("PathfindingTuner");
+
 TSharedRef<IDetailCustomization> FNav3DPathfindingDetails::MakeInstance()
 {
 	return MakeShareable(new FNav3DPathfindingDetails);
@@ -54,4 +65,39 @@ void FNav3DPathfindingDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuid
 	];
 
 	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bDrawDebugPath));
+
+	DebuggingCategory.AddCustomRow(FText::FromString(TEXT("Request Path"))).NameContent()
+	[
+		SNew(STextBlock)
+		.Text(FText::FromString(TEXT("Execute Pathfinding")))
+		.Font(IDetailLayoutBuilder::GetDetailFont())
+	].ValueContent()
+	[
+		SNew(SButton)
+		.Text(FText::FromString(TEXT("Request Path to Target")))
+		.OnClicked_Lambda(OnRequestPathClicked) 
+	];
+
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bDrawDebugPath));
+
+	DebuggingCategory.AddCustomRow(LOCTEXT("OpenPathfindingTunerFilter", "Open Pathfinding Tuner")) // Filter text
+	.NameContent()
+	[
+		SNew(STextBlock)
+		.Text(LOCTEXT("OpenPathfindingTunerLabel", "Pathfinding Tuner UI")) // Label text
+		.Font(IDetailLayoutBuilder::GetDetailFont()) // Use standard detail font
+	]
+	.ValueContent()
+	[
+		SNew(SButton)
+		.Text(LOCTEXT("OpenPathfindingTunerButton", "Open Tuner")) // Button text
+		.HAlign(HAlign_Center)
+		.VAlign(VAlign_Center)
+		.OnClicked_Lambda([]() -> FReply // Lambda for button click event
+		{
+			// Invoke the Pathfinding Tuner tab
+			FGlobalTabmanager::Get()->TryInvokeTab(PathfindingTunerTabName);
+			return FReply::Handled();
+		})
+	];
 }
