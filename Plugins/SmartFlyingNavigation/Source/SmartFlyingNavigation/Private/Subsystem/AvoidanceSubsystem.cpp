@@ -22,11 +22,11 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     AsyncTask = nullptr;
 
     TimeHorizon = 1.f;
-    MaxNeighbors = 4;
+    MaxNeighbors = 8;
     GridCellSize = 100.f;
     SymmetryBreakingRangeMultiplier = 4.f;
     SolverIterations = 5;
-    SideBiasMagnitude = 1.f;
+    SideBiasMagnitude = 2.f;
     InterpSpeed = 10.f;
 
     bShowVelocityDebugLine = true;
@@ -142,7 +142,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
 
                 Agent->ApplyMovement(FinalVelocity.GetClampedToMaxSize(Agent->GetMovementSpeed()), DeltaTime);
 
-                if (Agent->GetMovementMode() == EPathMovementMode::Spline && !Agent->IsOnSplineLine() && Agent->GetPathfindingState() != EPathfindingState::Idle )
+                if (Agent->GetMovementMode() == EPathMovementMode::Spline && !Agent->IsOnSplineLine())
                 {
                     UE_LOG(LogTemp, Warning, TEXT("%s: Out Of Spline Line. Change MovementMode to Linear"), *Agent->GetOwner()->GetName());
                     Agent->SetMovementMode(EPathMovementMode::Linear);
@@ -221,8 +221,32 @@ void UAvoidanceSubsystem::RunAvoidanceCalculation(
     {
         for (const FAgentThreadData& Agent : AgentData)
         {
-            const FIntVector GridPosition(FMath::FloorToInt(Agent.Position.X / InGridCellSize), FMath::FloorToInt(Agent.Position.Y / InGridCellSize), FMath::FloorToInt(Agent.Position.Z / InGridCellSize));
-            AgentGrid.FindOrAdd(GridPosition).Add(&Agent);
+            const float Radius = Agent.AvoidanceRadius;
+            const FVector MinBounds = Agent.Position - FVector(Radius);
+            const FVector MaxBounds = Agent.Position + FVector(Radius);
+
+            const FIntVector MinGridPos(
+                FMath::FloorToInt(MinBounds.X / InGridCellSize),
+                FMath::FloorToInt(MinBounds.Y / InGridCellSize),
+                FMath::FloorToInt(MinBounds.Z / InGridCellSize)
+            );
+
+            const FIntVector MaxGridPos(
+                FMath::FloorToInt(MaxBounds.X / InGridCellSize),
+                FMath::FloorToInt(MaxBounds.Y / InGridCellSize),
+                FMath::FloorToInt(MaxBounds.Z / InGridCellSize)
+            );
+
+            for (int32 z = MinGridPos.Z; z <= MaxGridPos.Z; ++z)
+            {
+                for (int32 y = MinGridPos.Y; y <= MaxGridPos.Y; ++y)
+                {
+                    for (int32 x = MinGridPos.X; x <= MaxGridPos.X; ++x)
+                    {
+                        AgentGrid.FindOrAdd(FIntVector(x, y, z)).Add(&Agent);
+                    }
+                }
+            }
         }
     }
 
@@ -356,12 +380,14 @@ static void GenerateAgentConstraints_ThreadSafe(const FAgentThreadData& CurrentA
         bool bIsCollidingOrApproaching = false;
 
         const float RelativeVelSq = RelativeVelocity.SizeSquared();
+
         if (RelativeVelSq > KINDA_SMALL_NUMBER)
         {
             const float DotProduct_RelPos_RelVel = FVector::DotProduct(RelativePosition, RelativeVelocity);
             const float Discriminant = FMath::Square(DotProduct_RelPos_RelVel) - RelativeVelSq * (DistSq - CombinedRadiusSq);
 
-            if (Discriminant >= 0.f && DotProduct_RelPos_RelVel < 0.f)
+            //if (Discriminant >= 0.f && DotProduct_RelPos_RelVel < 0.f)
+            if (Discriminant >= 0.f)
             {
                 const float TTC = (-DotProduct_RelPos_RelVel - FMath::Sqrt(Discriminant)) / RelativeVelSq;
                 if (TTC > 0.f)
@@ -420,7 +446,8 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
         const float DistToAgentBSq = ToAgentB.SizeSquared();
         const float CombinedRadius = CurrentAgent.AvoidanceRadius + AgentB->AvoidanceRadius;
 
-        if (DistToAgentBSq < FMath::Square(CombinedRadius * SymmetryBreakingRangeMultiplier) && FVector::DotProduct(PreferredVelocity, ToAgentB) > 0)
+        //if (DistToAgentBSq < FMath::Square(CombinedRadius * SymmetryBreakingRangeMultiplier) && FVector::DotProduct(PreferredVelocity, ToAgentB) > 0)
+        if (DistToAgentBSq < FMath::Square(CombinedRadius * SymmetryBreakingRangeMultiplier))
         {
             if (DistToAgentBSq < MinThreatDistSq)
             {
@@ -447,7 +474,8 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
     {
         //FVector ForwardVec = ObstacleAgent->CurrentVelocity.GetSafeNormal();
         FVector ForwardVec = PreferredVelocity.GetSafeNormal();
-        FVector UpVector = ObstacleAgent->UpVector;
+        //FVector UpVector = ObstacleAgent->UpVector;
+        FVector UpVector = CurrentAgent.UpVector;
         FVector SideVector = FVector::CrossProduct(ForwardVec, UpVector);
         SideVector.Normalize();
 
