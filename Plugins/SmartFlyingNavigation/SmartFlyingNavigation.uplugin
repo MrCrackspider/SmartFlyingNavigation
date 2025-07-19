@@ -1,0 +1,30 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "SmartFlyingNavigation",
+	"Description": "This is SmartFlyingNavigation",
+	"Category": "Other",
+	"CreatedBy": "TeamHamDev",
+	"CreatedByURL": "https://www.fab.com/sellers/TeamHamDev",
+	"DocsURL": "",
+  	"FabURL": "com.epicgames.launcher://ue/Fab/product//5922d422-4b2b-4a0a-b33a-5caca08ce2be",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "SmartFlyingNavigation",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "SmartFlyingNavigationEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	]
+}
