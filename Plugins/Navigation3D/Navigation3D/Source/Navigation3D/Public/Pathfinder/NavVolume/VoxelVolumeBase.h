@@ -54,7 +54,7 @@ protected:
 	 */
 	virtual void BeginPlay() override;
 
-
+ 
 
 public:
 	/**
@@ -172,7 +172,7 @@ public:
 	/**
 	 * @brief If true, draws debug boxes for the volume.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug")
+	UPROPERTY()
 	bool bDrawDebugBox;
 
 
@@ -181,14 +181,8 @@ public:
 	/**
 	 * @brief The thickness of the debug lines.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|Debug", meta = (ClampMin = 1.f))
+	UPROPERTY()
 	float DebugLineWidth;
-
-	/**
-	 * @brief The color of the debug lines.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Voxel|Debug", meta = (ClampMin = 1.f))
-	FColor DebugLineColor;
 
 #if WITH_EDITORONLY_DATA
 

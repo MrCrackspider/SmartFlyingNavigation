@@ -1,27 +1,24 @@
-﻿#pragma once
+﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
+
+#pragma once
 
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
 
-// 전방 선언
 class UPathfindingSubsystem;
 class UPathfindingTunerSettings;
 class AActor;
-struct FAssetData;
+struct FAssetData; 
 
-/**
- * 길찾기 시스템의 다양한 속성을 조정하고 베이킹을 트리거하는 에디터 UI 위젯입니다.
- */
 class SPathfindingTuner : public SCompoundWidget
 {
 public:
     SLATE_BEGIN_ARGS(SPathfindingTuner) {}
     SLATE_END_ARGS()
 
-    /** 위젯을 구성합니다. */
+    
     void Construct(const FArguments& InArgs);
-
-    /** 소멸자에서 티커를 정리합니다. */
+    
     ~SPathfindingTuner();
 
 private:
@@ -37,27 +34,22 @@ private:
     //=================================================================================================
     // Actor Selection Handling
     //=================================================================================================
-    /** 에디터의 액터 선택 변경을 감지하기 위해 매 틱마다 호출됩니다. */
+ 
     bool TickActorSelection(float DeltaTime);
-    /** 액터 선택이 변경되었을 때 UI를 갱신합니다. */
     void OnActorSelectionChanged();
 
     //=================================================================================================
     // Property Getters & Setters (Generic Helpers)
     //=================================================================================================
-    /** 여러 객체에 걸쳐 공통된 속성 값을 가져옵니다. 다중 값이면 TOptional은 비어있습니다. */
     template <typename ObjectType, typename PropertyType>
     TOptional<PropertyType> GetCommonPropertyValue(const TArray<ObjectType*>& Objects, TFunctionRef<PropertyType(const ObjectType*)> Getter) const;
-
-    /** 여러 객체의 속성 값을 일괄적으로 설정합니다. */
+    
     template <typename ObjectType, typename PropertyType>
     void SetCommonPropertyValue(const TArray<ObjectType*>& Objects, const PropertyType& NewValue, const FText& TransactionText, TFunctionRef<void(ObjectType*, const PropertyType&)> Setter);
-
-    /** 선택된 액터 중 특정 클래스 타입의 액터만 필터링하여 반환합니다. */
+    
     template <typename T>
     TArray<T*> GetSelectedActorsOfType() const;
-
-    /** 선택된 액터들로부터 특정 타입의 컴포넌트를 모두 찾아 배열로 반환합니다. */
+    
     template <typename T>
     TArray<T*> GetSelectedComponentsOfType() const;
 
@@ -137,19 +129,15 @@ private:
     //=================================================================================================
     // Member Variables
     //=================================================================================================
-    /** 길찾기 서브시스템에 대한 약한 포인터 */
+  
     TWeakObjectPtr<UPathfindingSubsystem> PathfindingSubsystem;
-
-    /** 에디터 액터 선택을 감지하는 티커 핸들 */
+    
     FTSTicker::FDelegateHandle ActorSelectionTickerHandle;
-
-    /** 마지막으로 감지된 선택된 액터 목록 */
+    
     TArray<TWeakObjectPtr<AActor>> LastSelectedActors;
-
-    /** 맵 크기 콤보박스 옵션 */
+    
     TArray<TSharedPtr<int32>> MapSizeOptions;
-
-    /** UI 상태를 저장/로드하는 세팅 객체 */
+    
     TObjectPtr<UPathfindingTunerSettings> TunerSettings;
 };
 

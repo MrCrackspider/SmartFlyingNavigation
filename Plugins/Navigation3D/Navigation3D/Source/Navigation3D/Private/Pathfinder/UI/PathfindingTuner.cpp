@@ -473,7 +473,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildBakedDataSettingsSection()
         .InitiallyCollapsed(!TunerSettings->bIsBakedDataCategoryExpanded)
         .OnAreaExpansionChanged(this, &SPathfindingTuner::OnBakedDataCategoryExpansionChanged);
 }
-
+ 
 TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
 {
     return SNew(SExpandableArea)

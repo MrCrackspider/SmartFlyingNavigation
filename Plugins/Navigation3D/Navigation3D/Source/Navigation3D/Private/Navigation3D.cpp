@@ -7,9 +7,10 @@
 
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
+#include "EditorStyleSet.h"
 
 static const FName PathfindingTunerTabName("PathfindingTuner");
-
+static const FName PathfindingTunerIconName = "Icons.Folder"; 
 
 #define LOCTEXT_NAMESPACE "FNavigation3DModule"
 
@@ -30,7 +31,7 @@ void FNavigation3DModule::StartupModule()
                 Builder.AddMenuEntry(
                     FText::FromString("Pathfinding Tuner"),
                     FText::FromString("Open the Pathfinding Tuner window."),
-                    FSlateIcon(),
+                    FSlateIcon(FAppStyle::GetAppStyleSetName(), PathfindingTunerIconName),
                     FUIAction(
                         FExecuteAction::CreateLambda([]()
                         {
@@ -46,6 +47,7 @@ void FNavigation3DModule::StartupModule()
         FGlobalTabmanager::Get()->RegisterTabSpawner(PathfindingTunerTabName, 
             FOnSpawnTab::CreateRaw(this, &FNavigation3DModule::SpawnPathfindingTunerTab))
             .SetDisplayName(FText::FromString("Pathfinding Tuner"))
+        .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), PathfindingTunerIconName)) 
         .SetGroup(WorkspaceMenu::GetMenuStructure().GetDeveloperToolsMiscCategory());
     }
 }

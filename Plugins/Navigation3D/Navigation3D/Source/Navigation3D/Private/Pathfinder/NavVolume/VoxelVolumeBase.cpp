@@ -46,7 +46,6 @@ AVoxelVolumeBase::AVoxelVolumeBase()
 	VoxelExtent = 100.f;
 	bDrawDebugBox = true;
 	DebugLineWidth = 400.0f;
-	DebugLineColor = FColor::Green;
 }
 
 //~======================================================================
