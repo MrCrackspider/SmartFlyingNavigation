@@ -14,18 +14,18 @@
 #include "Engine/Engine.h"
 #include "Strategy/AStarStrategy.h"
 
-UPathfindingComponent::UPathfindingComponent() 
+UPathfindingComponent::UPathfindingComponent()
 { 
 	PrimaryComponentTick.bCanEverTick = true;
 
 #if WITH_EDITOR
 	bTickInEditor = true;
 #endif
-
-	PathSplinePtr = CreateDefaultSubobject<USplineComponent>(TEXT("Spline"));
-
+	
 	PathfindingStrategyClass = UAStarStrategy::StaticClass();
 
+	PathSplinePtr = CreateDefaultSubobject<USplineComponent>(TEXT("SplineComponent"));
+	
 	DebugSphereComponent = CreateDefaultSubobject<USphereComponent>(TEXT("DebugAgentRadiusSphere"));
 
 	DebugSphereComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -48,13 +48,19 @@ void UPathfindingComponent::BeginPlay()
 
 	PathSubsystem = GEngine->GetEngineSubsystem<UPathfindingSubsystem>();
 	AvoidanceSubsystem = World->GetSubsystem<UAvoidanceSubsystem>();
-
+	
 	if (!ensure(PathSubsystem))
 	{
 		UE_LOG(LogTemp, Error, TEXT("PathfindingComponent: PathfindingSubsystem not found!"));
 		return;
 	}
 
+	if (!PathSplinePtr)
+	{
+		PathSplinePtr->SetAbsolute(true, true, true);
+		PathSplinePtr->SetupAttachment(GetOwner()->GetRootComponent());
+	}
+	
 	if (AvoidanceSubsystem)
 	{
 		AvoidanceSubsystem->RegisterAgent(this);
@@ -118,7 +124,7 @@ void UPathfindingComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void UPathfindingComponent::OnRegister()
 {
 	Super::OnRegister();
-
+	
 	if (DebugSphereComponent && GetOwner() && GetOwner()->GetRootComponent())
 	{
 		DebugSphereComponent->AttachToComponent(GetOwner()->GetRootComponent(),
@@ -139,7 +145,13 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 		UE_LOG(LogTemp, Error, TEXT("RequestPathToLocation failed: Strategy or TargetVolume is not set."));
 		return false;
 	}
-
+	
+	if (!IsValid(PathSplinePtr))
+	{
+		UE_LOG(LogTemp, Error, TEXT("RequestPath SplinePtr is not Valid"));
+		return false;
+	}
+	
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(RepathCooldownTimer);
@@ -275,7 +287,7 @@ FVector UPathfindingComponent::GetPreferredVelocity() const
 void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float DeltaTime)
 {
 	AActor* Owner = GetOwner();
-	if (!Owner || !PathSplinePtr.IsValid() || FoundPath.IsEmpty()) return;
+	if (!Owner || !IsValid(PathSplinePtr) || FoundPath.IsEmpty()) return;
 
 	// 1. Actual movement (same as before)
 	const FVector CurrentLocation = Owner->GetActorLocation();
@@ -313,7 +325,7 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 
 void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 {
-	if (!PathSplinePtr.IsValid())
+	if (!IsValid(PathSplinePtr))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("PathfindingComponent: TargetSpline is not set."));
 		return;
@@ -355,7 +367,8 @@ void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 void UPathfindingComponent::ProgressNextPoint()
 {
 	++CurrentPathDestinationIndex;
-	DistanceAlongSpline = 0;
+	UE_LOG(LogTemp, Warning, TEXT("currentPath %d"),CurrentPathDestinationIndex);
+	
 	PartialSplinePointUpdate(CurrentPathDestinationIndex);
 
 	if (CurrentPathDestinationIndex >= FoundPath.Num())
@@ -377,7 +390,7 @@ bool UPathfindingComponent::IsOnSplineLine() const
 		return false;
 	}
 
-	if (!PathSplinePtr.IsValid())
+	if (!IsValid(PathSplinePtr))
 	{
 		UE_LOG(LogTemp, Error, TEXT("PathfindingComponent: PathSplinePtr is not set for %s!"), *MyActor->GetName());
 		return false;
@@ -462,19 +475,27 @@ void UPathfindingComponent::HandleVoxelPathResult(const TArray<FIntVector>& Path
 
 void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 {
+	if (PathSplinePtr->GetNumberOfSplinePoints() <= 2)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Points Count 2 down"));
+		return;
+	}
+	
+	DistanceAlongSpline = 0;
+	
 	PathSplinePtr->RemoveSplinePoint(0);
 
-	int32 AddIndex = StartIndex + PartialPointSplineNum;
-
+	int32 AddIndex = StartIndex + PartialPointSplineNum - 1;
+	
 	if (AddIndex >= FoundPath.Num())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("No more Spline Point!"));
+		UE_LOG(LogTemp, Warning, TEXT("No more Spline Point! AddIndex: %d, FoundPath: %d"), AddIndex, FoundPath.Num());
 		return;
 	}
 
-	PathSplinePtr->AddSplinePoint(FoundPath[AddIndex], ESplineCoordinateSpace::World, false);
-
-	PathSplinePtr->UpdateSpline();
+	UE_LOG(LogTemp, Warning, TEXT("Add Spline FoundPath %d: %lf %lf %lf"), AddIndex, FoundPath[AddIndex].X, FoundPath[AddIndex].Y, FoundPath[AddIndex].Z);
+	
+	PathSplinePtr->AddSplinePoint(FoundPath[AddIndex], ESplineCoordinateSpace::World, true);
 }
 
 void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess)
@@ -521,7 +542,7 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 			}
 		}
 		
-		if (PathSplinePtr.IsValid())
+		if (IsValid(PathSplinePtr))
 		{
 			PathSplinePtr->ClearSplinePoints();
 
@@ -532,6 +553,8 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 					break;
 				}
 
+				UE_LOG(LogTemp, Warning, TEXT("Add Spline FoundPath %d: %lf %lf %lf"), i, FoundPath[i].X, FoundPath[i].Y, FoundPath[i].Z);
+				
 				PathSplinePtr->AddSplinePoint(FoundPath[i], ESplineCoordinateSpace::World, false);
 			}
 
@@ -542,7 +565,7 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 			DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplineInputKey(ClosestInputKey);
 
 			int32 ClosestPointIndex = FMath::RoundToInt(ClosestInputKey);
-			CurrentPathDestinationIndex = FMath::Clamp(ClosestPointIndex + 1, 1, PartialPointSplineNum - 1);
+			CurrentPathDestinationIndex = FMath::Clamp(ClosestPointIndex + 1, 0, PartialPointSplineNum - 1);
 		}
 		else
 		{
@@ -553,7 +576,7 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed or path is too short."));
 		FoundPath.Empty();
-		CurrentPathDestinationIndex = 0;
+		CurrentPathDestinationIndex = -1;
 		CurrentState = EPathfindingState::Idle;
 	}
 
@@ -654,7 +677,7 @@ void UPathfindingComponent::UpdateLinearPreferredVelocity(float DeltaTime)
 void UPathfindingComponent::UpdateSplinePreferredVelocity(float DeltaTime)
 {
 	AActor* MyActor = GetOwner();
-	if (!MyActor || !PathSplinePtr.IsValid() || PathSplinePtr->GetNumberOfSplinePoints() < 2)
+	if (!MyActor || !IsValid(PathSplinePtr) || PathSplinePtr->GetNumberOfSplinePoints() < 2)
 	{
 		return;
 	}
@@ -667,7 +690,7 @@ void UPathfindingComponent::UpdateSplinePreferredVelocity(float DeltaTime)
 
 bool UPathfindingComponent::IsSplinePathSafe() const
 {
-	if (!PathSplinePtr.IsValid() || !GetWorld())
+	if (!IsValid(PathSplinePtr) || !GetWorld())
 	{
 		return true;
 	}

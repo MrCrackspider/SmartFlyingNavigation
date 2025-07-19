@@ -290,13 +290,13 @@ public:
 
 	UPROPERTY()
 	TObjectPtr<UAvoidanceSubsystem> AvoidanceSubsystem;
-
-	UPROPERTY()
-	TWeakObjectPtr<USplineComponent> PathSplinePtr;
-
+	
 	FTimerHandle RepathCooldownTimer;
 	
 	TFuture<TArray<FIntVector>> PathfindingTaskFuture;
 
+private:
+	UPROPERTY()
+	TObjectPtr<USplineComponent> PathSplinePtr; 
 #pragma endregion
 };

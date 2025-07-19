@@ -66,20 +66,6 @@ void FNav3DPathfindingDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuid
 
 	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bDrawDebugPath));
 
-	DebuggingCategory.AddCustomRow(FText::FromString(TEXT("Request Path"))).NameContent()
-	[
-		SNew(STextBlock)
-		.Text(FText::FromString(TEXT("Execute Pathfinding")))
-		.Font(IDetailLayoutBuilder::GetDetailFont())
-	].ValueContent()
-	[
-		SNew(SButton)
-		.Text(FText::FromString(TEXT("Request Path to Target")))
-		.OnClicked_Lambda(OnRequestPathClicked) 
-	];
-
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bDrawDebugPath));
-
 	DebuggingCategory.AddCustomRow(LOCTEXT("OpenPathfindingTunerFilter", "Open Pathfinding Tuner")) // Filter text
 	.NameContent()
 	[
