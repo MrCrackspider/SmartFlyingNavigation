@@ -24,7 +24,10 @@
 		{
 			"Name": "SmartFlyingNavigationEditor",
 			"Type": "Editor",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": [
+				"EditorScriptingUtilities"
+				]
 		}
 	]
-}
+} 
