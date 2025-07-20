@@ -613,7 +613,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildVoxelDebugSettingsSection()
         .HeaderContent()
         [
             SNew(STextBlock)
-            .Text(LOCTEXT("DebugSettingsCategory", "Debug Settings")) // Category title
+            .Text(LOCTEXT("DebugSettingsCategory", "Octree Volume Debug Settings")) // Category title
             .Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle")) // Matching font style
             .ShadowOffset(FVector2D(1.0f, 1.0f)) // Matching shadow offset
         ]
