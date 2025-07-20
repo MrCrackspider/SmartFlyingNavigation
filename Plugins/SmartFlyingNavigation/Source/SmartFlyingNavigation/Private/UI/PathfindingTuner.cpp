@@ -554,7 +554,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
                 SNew(SHorizontalBox)
                 + SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
                 [
-                    SNew(STextBlock).Text(LOCTEXT("AgentRadiusLabel", "Agent Radius:")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                    SNew(STextBlock).Text(LOCTEXT("AgentRadiusLabel", "Agent Base Radius:")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
                 ]
                 + SHorizontalBox::Slot().FillWidth(0.6f)
                 [
