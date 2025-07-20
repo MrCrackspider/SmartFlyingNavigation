@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
 
 #pragma once
 
@@ -70,7 +70,7 @@ public:
 			if (!BulkPtr)
 			{
 				UE_LOG(LogTemp, Error,
-					   TEXT("FillBulkData: Realloc 실패, 반환 포인터가 nullptr (ByteCount=%lld)"),
+					   TEXT("FillBulkData: Realloc failed, return nullptr (ByteCount=%lld)"),
 					   ByteCount);
 				return;
 			}

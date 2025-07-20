@@ -167,7 +167,6 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 				continue;
 			}
 
-
 			const int64 MoveCost = GetMoveCost(ParentNode->WorldPosition, Successor->WorldPosition);
 			const int64 NewGCost = ParentNode->GCost + MoveCost;
 
@@ -310,10 +309,10 @@ void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPat
 
 		if (!OctreeData.IsRegionDynamicallyBlocked(NeighborQueryBox))
 		{
-			FAstarPathNode* Succ = MemoryPool.NewNode();
-			Succ->NodeIndex      = NeighborIndex;
-			Succ->WorldPosition  = NeighborCenter;
-			OutSuccessors.Add(Succ);
+			FAstarPathNode* Successor = MemoryPool.NewNode();
+			Successor->NodeIndex      = NeighborIndex;
+			Successor->WorldPosition  = NeighborCenter;
+			OutSuccessors.Add(Successor);
 		}
 	}
 }
