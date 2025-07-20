@@ -37,9 +37,9 @@ AVoxelVolumeBase::AVoxelVolumeBase()
 	DebugMixedNodesComponent->SetupAttachment(PivotComponent);
 
 	// Set default paths for debug materials.
-	DebugSolidNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/Navigation3D/PathfinderPlugin/Debug/Material/MI_NavDebugMesh2.MI_NavDebugMesh2'");
-	DebugEmptyNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/Navigation3D/PathfinderPlugin/Debug/Material/MI_NavDebugMesh.MI_NavDebugMesh'");
-	DebugMixedNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/Navigation3D/PathfinderPlugin/Debug/Material/MI_NavDebugMesh1.MI_NavDebugMesh1'");
+	DebugSolidNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/SmartFlyingNavigation/PathfinderPlugin/Debug/Material/MI_NavDebugMesh2.MI_NavDebugMesh2'");
+	DebugEmptyNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/SmartFlyingNavigation/PathfinderPlugin/Debug/Material/MI_NavDebugMesh.MI_NavDebugMesh'");
+	DebugMixedNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/SmartFlyingNavigation/PathfinderPlugin/Debug/Material/MI_NavDebugMesh3.MI_NavDebugMesh3'");
 
 	// Set default volume properties.
 	MapSize = FIntVector(128, 128, 128);
@@ -70,7 +70,7 @@ void AVoxelVolumeBase::OnConstruction(const FTransform& Transform)
 
 	// Set the path for the debug static mesh.
 	static const FSoftObjectPath DebugMeshPath(
-		TEXT("/Script/Engine.StaticMesh'/Navigation3D/PathfinderPlugin/Debug/SM_DebugObstacle.SM_DebugObstacle'"));
+		TEXT("/Script/Engine.StaticMesh'/SmartFlyingNavigation/PathfinderPlugin/Debug/SM_DebugVoxel.SM_DebugVoxel'"));
 
 	//DebugMeshAsset = DebugMeshPath;
 

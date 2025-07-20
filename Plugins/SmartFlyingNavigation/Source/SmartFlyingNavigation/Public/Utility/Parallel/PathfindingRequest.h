@@ -27,12 +27,11 @@ struct FPathfindingRequest
 	TWeakObjectPtr<UPathfindingStrategy> Strategy;
 	
 	UPROPERTY()
-	FVector StartLocation;
+	FVector StartLocation = FVector::ZeroVector;
 
 	UPROPERTY()
-	FVector EndLocation;
+	FVector EndLocation = FVector::ZeroVector;
 	
-
 	UPROPERTY()
 	int32 AgentRadius = 0;
 

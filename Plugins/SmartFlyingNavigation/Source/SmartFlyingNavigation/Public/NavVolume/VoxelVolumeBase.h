@@ -213,19 +213,19 @@ public:
 	/**
 	 * @brief Soft path to the material for visualizing solid nodes (configurable in the editor).
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug", meta = (AllowedClasses = "MaterialInterface"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug", meta = (AllowedClasses = "/Script/Engine.MaterialInterface"))
 	FSoftObjectPath DebugSolidNodeMaterialPath;
 
 	/**
 	 * @brief Soft path to the material for visualizing empty nodes (configurable in the editor).
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug", meta = (AllowedClasses = "MaterialInterface"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug", meta = (AllowedClasses = "/Script/Engine.MaterialInterface"))
 	FSoftObjectPath DebugEmptyNodeMaterialPath;
 
 	/**
 	 * @brief Soft path to the material for visualizing mixed nodes (configurable in the editor).
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug", meta = (AllowedClasses = "MaterialInterface"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug", meta = (AllowedClasses = "/Script/Engine.MaterialInterface"))
 	FSoftObjectPath DebugMixedNodeMaterialPath;
 
 	/**
@@ -252,7 +252,7 @@ public:
 	 * @brief Updates the visualization of obstacles for debugging purposes.
 	 */
 	virtual void UpdateDebugObstacleVisualization();
-	void DrawMainVolumeDebugBox() const;
+
 protected:
 	/**
 	 * @brief Timer handle for scheduling debug visualization updates.
