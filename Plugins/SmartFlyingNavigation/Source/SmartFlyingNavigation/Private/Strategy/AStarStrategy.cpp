@@ -93,9 +93,9 @@ FAstarPathfinder::FAstarPathfinder(const FOctreePathfindingData& InOctreeData, i
 	: OctreeData(InOctreeData)
 	  , StartNodeIndex(InStartIndex)
 	  , GoalNodeIndex(InEndIndex)
+	  , AgentRadius(InAgentRadius)
 	  , ActualStartLocation(InStartLocation)
 	  , ActualGoalLocation(InEndLocation)
-	  , AgentRadius(InAgentRadius)
 	  , MemoryPool(InMemoryPool)
 {
 }
