@@ -203,14 +203,16 @@ TSharedRef<SWidget> SPathfindingTuner::BuildOctreeVolumeSettingsSection()
                 + SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
                 [
                     SNew(STextBlock).Text(LOCTEXT("SelectedVolumeLabel", "Selected Volume(s):")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-                    .ColorAndOpacity(FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>("TextBlock.Warning").ColorAndOpacity)
+                    .ColorAndOpacity(FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>("NormalText").ColorAndOpacity)
+
                 ]
                 + SHorizontalBox::Slot().FillWidth(0.6f)
                 .VAlign(VAlign_Center)
                 .Padding(FMargin(5.0f, 0.0f, 0.0f, 0.0f)) // Left, Top, Right, Bottom
                 [
                     SNew(STextBlock).Text(this, &SPathfindingTuner::GetSelectedVolumeDisplayText).Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont"))
-                    .ColorAndOpacity(FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>("TextBlock.Warning").ColorAndOpacity)
+                    .ColorAndOpacity(FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>("NormalText").ColorAndOpacity)
+
                 ]
             ]
             // Max Octree Depth
@@ -497,14 +499,16 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
                 + SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
                 [
                     SNew(STextBlock).Text(LOCTEXT("SelectedActorLabel", "Selected Agent(s):")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-                    .ColorAndOpacity(FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>("TextBlock.Warning").ColorAndOpacity)
+                    .ColorAndOpacity(FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>("NormalText").ColorAndOpacity)
+
                 ]
                 + SHorizontalBox::Slot()
                 .FillWidth(0.6f).VAlign(VAlign_Center)
                 .Padding(FMargin(5.0f, 0.0f, 0.0f, 0.0f)) // Left, Top, Right, Bottom
                 [
                     SNew(STextBlock).Text(this, &SPathfindingTuner::GetSelectedAgentName).Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont"))
-                    .ColorAndOpacity(FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>("TextBlock.Warning").ColorAndOpacity)
+                    .ColorAndOpacity(FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>("NormalText").ColorAndOpacity)
+
                 ]
             ]
 
