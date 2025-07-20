@@ -207,35 +207,35 @@ public:
 		meta = (AllowPrivateAccess = true))
 	float RepathCooldown = 1.f;
 
-	UPROPERTY(Category = "Pathfinding|Configuration", BlueprintReadWrite,
+	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere,BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
 	bool bPeriodicRepath = false;
 
-	UPROPERTY(Category = "Pathfinding|Dynamic Repath", BlueprintReadWrite,
+	UPROPERTY(Category = "Pathfinding|Dynamic Repath",EditAnywhere, BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
 	int32 PathValidationLookAhead = 3;
 	
-	UPROPERTY(Category = "Pathfinding|Dynamic Repath", BlueprintReadWrite,
+	UPROPERTY(Category = "Pathfinding|Dynamic Repath", EditAnywhere,BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
 	int32 PartialPointSplineNum = 4;
 	
-	UPROPERTY()
+	UPROPERTY(EditAnywhere)
 	float LastKnownBaseRadius;
 	
-	UPROPERTY()
+	UPROPERTY(EditAnywhere)
 	FVector LastKnownScale;
 
-	UPROPERTY()
+	UPROPERTY(EditAnywhere)
 	bool bIsReachDestination = false;
 
-	UPROPERTY()
+	UPROPERTY(EditAnywhere)
 	bool bContinuosFollowingWhenReached;
 	
 	UPROPERTY(Category = "Pathfinding|Spline", EditAnywhere, BlueprintReadWrite,
 		meta = (EditCondition = "MovementMode == EPathMovementMode::Spline", AllowPrivateAccess = true))
 	float SafetyCheckStepSize = 50.f;
-
-	UPROPERTY()
+ 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
 	bool bDrawDebugPath = true;
 	
 	UPROPERTY(Category = "Pathfinding|Dynamic Goal", EditAnywhere, BlueprintReadWrite,
