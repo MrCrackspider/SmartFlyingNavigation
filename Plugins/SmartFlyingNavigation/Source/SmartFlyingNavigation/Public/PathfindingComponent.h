@@ -187,11 +187,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding", meta = (ClampMin = "0.0", AllowPrivateAccess = true))
 	float BaseAgentRadius = 50.0f;
 	
-	UPROPERTY(Category = "Pathfinding|Configuration", BlueprintReadWrite,
+	UPROPERTY(EditAnywhere,Category = "Pathfinding|Configuration", BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
 	float AvoidanceRadius = 50.f;
 
-	UPROPERTY( BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
 	float MovementSpeed = 500.f;
 
 	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,

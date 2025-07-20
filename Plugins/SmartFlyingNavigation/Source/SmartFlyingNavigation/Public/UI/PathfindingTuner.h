@@ -103,7 +103,7 @@ private:
     void OnDebugLineWidthCommitted(float NewValue, ETextCommit::Type CommitType);
    TOptional<ECheckBoxState> GetDrawDebugPathState() const;
     void OnDrawDebugPathChanged(ECheckBoxState NewState);   
-
+ 
     // --- Agent Settings ---
     bool AreOnlyAgentsSelected() const;
     FText GetSelectedAgentName() const;
@@ -181,6 +181,7 @@ void SPathfindingTuner::SetCommonPropertyValue(const TArray<ObjectType*>& Object
         {
             Obj->Modify();
             Setter(Obj, NewValue);
+            Obj->MarkPackageDirty();  
             bModified = true;
         }
     }
