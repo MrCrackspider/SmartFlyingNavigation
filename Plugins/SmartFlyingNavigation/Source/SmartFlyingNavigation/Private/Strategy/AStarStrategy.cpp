@@ -297,8 +297,6 @@ void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPat
 	{
 		const auto& NeighborNode = OctreeData.StaticNodePool[NeighborIndex];
 		const FBox NeighborBounds = NeighborNode.Bounds;
-		const FVector Center = NeighborBounds.GetCenter();
-
 
 		// 1) If the cell itself is already big enough, we have instant clearance.
 		if (NeighborNode.MaxAllowedRadius < AgentRadius)

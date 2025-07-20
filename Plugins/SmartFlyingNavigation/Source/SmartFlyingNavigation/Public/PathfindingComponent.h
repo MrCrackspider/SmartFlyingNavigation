@@ -219,16 +219,16 @@ public:
 		meta = (AllowPrivateAccess = true))
 	int32 PartialPointSplineNum = 4;
 	
-	UPROPERTY(EditAnywhere)
+	UPROPERTY()
 	float LastKnownBaseRadius;
 	
-	UPROPERTY(EditAnywhere)
+	UPROPERTY()
 	FVector LastKnownScale;
 
-	UPROPERTY(EditAnywhere)
+	UPROPERTY()
 	bool bIsReachDestination = false;
 
-	UPROPERTY(EditAnywhere)
+	UPROPERTY()
 	bool bContinuosFollowingWhenReached;
 	
 	UPROPERTY(Category = "Pathfinding|Spline", EditAnywhere, BlueprintReadWrite,

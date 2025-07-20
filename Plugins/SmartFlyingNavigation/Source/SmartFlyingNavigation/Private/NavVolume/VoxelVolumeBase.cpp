@@ -71,9 +71,8 @@ void AVoxelVolumeBase::OnConstruction(const FTransform& Transform)
 	// Set the path for the debug static mesh.
 	static const FSoftObjectPath DebugMeshPath(
 		TEXT("/Script/Engine.StaticMesh'/SmartFlyingNavigation/PathfinderPlugin/Debug/SM_DebugVoxel.SM_DebugVoxel'"));
-
-	//DebugMeshAsset = DebugMeshPath;
-
+	DebugMeshAsset = DebugMeshPath;
+	
 #if WITH_EDITORONLY_DATA
 	// Load debug materials from their paths.
 	UObject* LoadedObject = DebugSolidNodeMaterialPath.TryLoad();
