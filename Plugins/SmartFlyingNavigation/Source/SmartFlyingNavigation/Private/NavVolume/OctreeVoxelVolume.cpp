@@ -24,7 +24,6 @@
 #include "ObjectTools.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Misc/ScopedSlowTask.h"
-#include "Components/InstancedStaticMeshComponent.h" 
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #endif
 
@@ -641,6 +640,7 @@ void AOctreeVoxelVolume::PrecomputeNeighbors()
 			case ENeighborDirection::Back:  TestPoint.Y = NodeBounds.Min.Y - Epsilon; break;
 			case ENeighborDirection::Up:    TestPoint.Z = NodeBounds.Max.Z + Epsilon; break;
 			case ENeighborDirection::Down:  TestPoint.Z = NodeBounds.Min.Z - Epsilon; break;
+			default: break;
 			}
 
 			// Find the leaf node at the test point and store it as the neighbor.
