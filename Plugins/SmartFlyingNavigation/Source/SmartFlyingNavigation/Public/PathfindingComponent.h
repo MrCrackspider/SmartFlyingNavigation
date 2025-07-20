@@ -191,7 +191,7 @@ public:
 		meta = (AllowPrivateAccess = true))
 	float AvoidanceRadius = 50.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+	UPROPERTY(EditAnywhere, Category = "Pathfinding", BlueprintReadWrite, meta = (AllowPrivateAccess = true))
 	float MovementSpeed = 500.f;
 
 	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,
@@ -235,7 +235,7 @@ public:
 		meta = (EditCondition = "MovementMode == EPathMovementMode::Spline", AllowPrivateAccess = true))
 	float SafetyCheckStepSize = 50.f;
  
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+	UPROPERTY(EditAnywhere, Category = "Pathfinding", BlueprintReadWrite, meta = (AllowPrivateAccess = true))
 	bool bDrawDebugPath = true;
 	
 	UPROPERTY(Category = "Pathfinding|Dynamic Goal", EditAnywhere, BlueprintReadWrite,

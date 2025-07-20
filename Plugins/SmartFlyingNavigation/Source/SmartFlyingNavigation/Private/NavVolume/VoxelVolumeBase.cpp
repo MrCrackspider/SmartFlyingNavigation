@@ -115,10 +115,6 @@ void AVoxelVolumeBase::OnConstruction(const FTransform& Transform)
 	if (!GetActorScale3D().Equals(FVector::OneVector, 0.001f))
 	{
 		SetActorScale3D(FVector::OneVector);
-		UE_LOG(LogTemp, Warning,
-			TEXT(
-				"VoxelVolume: The scale cannot be adjusted directly. Please use the 'MapSize' and 'VoxelExtent' properties."
-			));
 	}
 
 	// Calculate the total size and half-extent of the volume.

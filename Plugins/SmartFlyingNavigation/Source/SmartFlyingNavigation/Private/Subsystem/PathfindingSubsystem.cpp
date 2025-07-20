@@ -70,21 +70,14 @@ void UPathfindingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	const int32 FinalNumThreads = FMath::Clamp(RequestedNumThreads, 1, IdealMaxThreads);
 	
 
-	if (FinalNumThreads != RequestedNumThreads)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Pathfinding: Configured %d worker threads, but clamping to %d."), RequestedNumThreads, FinalNumThreads);
-	}
-
 	PathfindingThreadPool = FQueuedThreadPool::Allocate();
 	if (PathfindingThreadPool)
 	{
 		PathfindingThreadPool->Create(FinalNumThreads, 32 * 1024, TPri_Normal, TEXT("PathfindingThreadPool"));
 		this->CurrentNumWorkerThreads = FinalNumThreads;
-		UE_LOG(LogTemp, Log, TEXT("Pathfinding Thread Pool created with %d threads."), this->CurrentNumWorkerThreads);
 	}
 	else
 	{
-		UE_LOG(LogTemp, Error, TEXT("Pathfinding: Failed to allocate or create the thread pool."));
 		if(PathfindingThreadPool)
 		{
 			PathfindingThreadPool->Destroy();
@@ -133,20 +126,17 @@ int32 UPathfindingSubsystem::RequestPath(FPathfindingRequest& Request)
 {
 	if (!PathfindingThreadPool)
 	{
-		UE_LOG(LogTemp, Error, TEXT("Pathfinding thread pool is not initialized."));
 		return -1;
 	}
 
 	if (!Request.Strategy.IsValid() || !Request.RequestingObject.IsValid())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Pathfinding request is invalid."));
 		return -1;
 	}
 
 	// This subsystem now only handles Octree pathfinding.
 	if (Request.NodeType != EPathfindingNodeType::Octree)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Pathfinding request failed: This subsystem only supports Octree node types."));
 		return -1;
 	}
 	
@@ -154,13 +144,11 @@ int32 UPathfindingSubsystem::RequestPath(FPathfindingRequest& Request)
 	Request.MemoryPool = LeasePool(Request.NodeType);
 	if (!Request.MemoryPool)
 	{
-		UE_LOG(LogTemp, Error, TEXT("Pathfinding request #%d failed: could not lease a memory pool."), Request.RequestID);
 		return -1;
 	}
 
 	// Create a worker task and add it to the thread pool.
 	PathfindingThreadPool->AddQueuedWork(new FPathfindingAsyncTasks(Request, this));
-	// UE_LOG(LogTemp, Log, TEXT("Pathfinding request #%d queued."), Request.RequestID);
 	return Request.RequestID;
 
 }
@@ -216,7 +204,6 @@ void UPathfindingSubsystem::SetNumWorkerThreads(int32 NewNumThreads)
 	{
 		return;
 	}
-	UE_LOG(LogTemp, Log, TEXT("PathfindingSubsystem: Attempting to change thread count from %d to %d."), CurrentNumWorkerThreads, FinalNumThreads);
 	
 	if (PathfindingThreadPool)
 	{
@@ -229,11 +216,9 @@ void UPathfindingSubsystem::SetNumWorkerThreads(int32 NewNumThreads)
 	if (PathfindingThreadPool && PathfindingThreadPool->Create(FinalNumThreads, 32 * 1024, TPri_Normal, TEXT("PathfindingThreadPool")))
 	{
 		CurrentNumWorkerThreads = FinalNumThreads;
-		UE_LOG(LogTemp, Log, TEXT("PathfindingSubsystem: Thread pool restarted with %d worker threads."), CurrentNumWorkerThreads);
 	}
 	else
 	{
-		UE_LOG(LogTemp, Error, TEXT("Pathfinding: Failed to allocate or create new thread pool during resize."));
 		if(PathfindingThreadPool)
 		{
 			PathfindingThreadPool->Destroy();
@@ -312,6 +297,5 @@ void UPathfindingSubsystem::OnPathfindingCompleted(const FPathfindingRequest& Re
 	{
 		Request.OnWorldPathComplete.ExecuteIfBound(WorldPath, bSuccess);
 	}
-	// UE_LOG(LogTemp, Log, TEXT("Pathfinding request #%d (Octree) completed."), Request.RequestID);
 }
 

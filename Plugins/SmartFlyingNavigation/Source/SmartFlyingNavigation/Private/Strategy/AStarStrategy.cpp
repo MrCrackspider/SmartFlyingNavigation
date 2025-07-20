@@ -22,7 +22,6 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 
 	if (StartNodeIndex == -1 || OctreeData.StaticNodePool[StartNodeIndex].State != EOctreeNodeState::Empty)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("A* (Octree) Failed: Start location is invalid or inside a solid node."));
 	}
  
 	if (bIsGoalNodeInvalid)
@@ -35,26 +34,21 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 
 		if (NewGoalNodeIndex == -1)
 		{
-			UE_LOG(LogTemp, Warning,
-			       TEXT("A* (Octree) Failed: Could not find any valid (and wide enough) nearby goal location."));
 			return false;
 		}
 
 		GoalNodeIndex = NewGoalNodeIndex;
-		UE_LOG(LogTemp, Log, TEXT("A* (Octree): Found alternative valid goal at node index %d."), GoalNodeIndex);
 	}
 	
 	FBox GoalQueryBox = AStarStrategyUtils::MakeAgentQueryBox(InRequest.EndLocation, InRequest.AgentRadius);
 	if (OctreeData.IsRegionDynamicallyBlocked(GoalQueryBox))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("A* (Octree) Failed: Goal location is dynamically blocked."));
 		return false;
 	}
 
 	FPathNodeMemoryPoolBase* BasePool = InRequest.MemoryPool;
 	if (!BasePool)
 	{
-		UE_LOG(LogTemp, Error, TEXT("A* Strategy failed to lease a memory pool."));
 		return false;
 	}
 	auto& NodePool = *static_cast<TNodeMemoryPool<FAstarPathNode>*>(BasePool);

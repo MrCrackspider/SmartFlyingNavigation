@@ -1,4 +1,7 @@
-﻿#include "Utility/Parallel/ParallelAvoidanceTask.h"
+﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
+
+
+#include "Utility/Parallel/ParallelAvoidanceTask.h"
 
 FParallelAvoidanceTask::FParallelAvoidanceTask(
     UWorld* InWorld,

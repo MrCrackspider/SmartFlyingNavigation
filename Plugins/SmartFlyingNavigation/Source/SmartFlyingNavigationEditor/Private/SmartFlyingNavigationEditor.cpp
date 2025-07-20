@@ -75,8 +75,6 @@ void FSmartFlyingNavigationEditorModule::StartupModule()
 		AOctreeVoxelVolume::StaticClass()->GetFName(),
 		FOnGetDetailCustomizationInstance::CreateStatic(&FNav3DVolumeDetails::MakeInstance)
 	);
-	 
-	UE_LOG(LogTemp, Log, TEXT("SmartFlyingNavigationEditor Module has started. Custom details for UPathfindingComponent registered"));
     
     PathfindingTunerStyleInternal::Initialize();
     
@@ -170,7 +168,6 @@ void FSmartFlyingNavigationEditorModule::ShutdownModule()
     }
     PathfindingTunerStyleInternal::Shutdown(); 
     
-	UE_LOG(LogTemp, Log, TEXT("SmartFlyingNavigationEditor Module has shutdown"));
 }
 
 TSharedRef<SDockTab> FSmartFlyingNavigationEditorModule::SpawnPathfindingTunerTab(const FSpawnTabArgs& SpawnTabArgs)

@@ -6,6 +6,8 @@
 #include "Stats/Stats.h"
 #include "DrawDebugHelpers.h"
 #include "Algo/Sort.h"
+#include "CollisionQueryParams.h"
+#include "CollisionShape.h"
 #include "Utility/Parallel/ParallelAvoidanceTask.h"
 
 DECLARE_CYCLE_STAT(TEXT("AvoidanceSubsystem Tick"), STAT_AvoidanceSubsystem_Tick, STATGROUP_Game);
@@ -102,7 +104,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
                 FHitResult HitResult;
                 const FVector AgentLocation = Agent->GetOwner()->GetActorLocation();
                 const FVector MoveDelta = FinalVelocity * DeltaTime;
-
+                
                 FCollisionShape OverlapSphere = FCollisionShape::MakeSphere(Agent->GetAvoidanceRadius());
                 FCollisionQueryParams OverlapParams(TEXT("PenetrationCheck"), false);
                 if (Agent->GetOwner())
@@ -144,7 +146,6 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
 
                 if (Agent->GetMovementMode() == EPathMovementMode::Spline && !Agent->IsOnSplineLine() && Agent->FoundPath.Num() > 0)
                 {
-                    UE_LOG(LogTemp, Warning, TEXT("%s: Out Of Spline Line. Change MovementMode to Linear"), *Agent->GetOwner()->GetName());
                     Agent->SetMovementMode(EPathMovementMode::Linear);
                 }
 

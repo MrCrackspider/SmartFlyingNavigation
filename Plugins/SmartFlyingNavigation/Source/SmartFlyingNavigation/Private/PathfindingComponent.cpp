@@ -51,7 +51,6 @@ void UPathfindingComponent::BeginPlay()
 	
 	if (!ensure(PathSubsystem))
 	{
-		UE_LOG(LogTemp, Error, TEXT("PathfindingComponent: PathfindingSubsystem not found!"));
 		return;
 	}
 
@@ -75,11 +74,6 @@ void UPathfindingComponent::BeginPlay()
 			PathfindingStrategy->Initialize();
 		}
 	}
-	else
-	{
-		UE_LOG(LogTemp, Error, TEXT("PathfindingComponent on Actor '%s': PathfindingStrategyClass is not set!"),
-		       *GetOwner()->GetName());
-	}
 }
 
 void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
@@ -94,7 +88,6 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	{
 		if (!IsPathAheadValid())
 		{
-			UE_LOG(LogTemp, Warning, TEXT("Dynamic obstacle is on path. Start Repath"));
 			InvalidatePathAndRequestRepath();
 			return;
 		}
@@ -136,19 +129,16 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 {
 	if (PathfindingTaskFuture.IsValid() && !PathfindingTaskFuture.IsReady())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("RequestPathToLocation: Already requesting a path. New request ignored."));
 		return false;
 	}
 
 	if (!PathfindingStrategy || !TargetVolume)
 	{
-		UE_LOG(LogTemp, Error, TEXT("RequestPathToLocation failed: Strategy or TargetVolume is not set."));
 		return false;
 	}
 	
 	if (!IsValid(PathSplinePtr))
 	{
-		UE_LOG(LogTemp, Error, TEXT("RequestPath SplinePtr is not Valid"));
 		return false;
 	}
 	
@@ -187,13 +177,6 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 		{
 			return true; // Request successfully queued.
 		}
-	}
-	else
-	{
-		UE_LOG(LogTemp, Error,
-		       TEXT(
-			       "RequestPathToLocation failed: TargetVolume is not a supported type (currently only Octree is implemented here)."
-		       ));
 	}
 
 	return false;
@@ -240,7 +223,6 @@ bool UPathfindingComponent::RequestPathToTargetActor()
 {
 	if (!IsValid(TargetActor))
 	{
-		// UE_LOG(LogPathfinding, Warning, TEXT("RequestPathToTargetActor failed: TargetActor is not set or invalid."));
 		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("TargetActor is not valid!"));
 		return false;
 	}
@@ -327,7 +309,6 @@ void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 {
 	if (!IsValid(PathSplinePtr))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("PathfindingComponent: TargetSpline is not set."));
 		return;
 	}
 
@@ -377,8 +358,6 @@ void UPathfindingComponent::ProgressNextPoint()
 {
 	PartialSplinePointUpdate(CurrentPathDestinationIndex);
 	++CurrentPathDestinationIndex;
-	
-	UE_LOG(LogTemp, Warning, TEXT("currentPath %d"),CurrentPathDestinationIndex);
 
 	if (CurrentPathDestinationIndex >= FoundPath.Num())
 	{
@@ -395,13 +374,11 @@ bool UPathfindingComponent::IsOnSplineLine() const
 	AActor* MyActor = GetOwner();
 	if (!MyActor)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("PathfindingComponent: Actor is not set."));
 		return false;
 	}
 
 	if (!IsValid(PathSplinePtr))
 	{
-		UE_LOG(LogTemp, Error, TEXT("PathfindingComponent: PathSplinePtr is not set for %s!"), *MyActor->GetName());
 		return false;
 	}
 
@@ -439,8 +416,6 @@ void UPathfindingComponent::PeriodicRepath()
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning,
-		       TEXT("PeriodicRepath: DestinationActor is no longer valid. Stopping repath requests."));
 		return;
 	}
 
@@ -460,15 +435,9 @@ void UPathfindingComponent::UpdateSteering(float DeltaTime)
 
 void UPathfindingComponent::HandleVoxelPathResult(const TArray<FIntVector>& PathIndices, bool bSuccess)
 {
-	if (bSuccess && PathIndices.Num() > 0)
-	{
-		UE_LOG(LogTemp, Log, TEXT("Pathfinding successful for %s. State changed to FollowPath."),
-		       *GetOwner()->GetName());
-	}
-	else
+	if (!bSuccess || PathIndices.Num() == 0)
 	{
 		CurrentState = EPathfindingState::Idle;
-		UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed for %s. State changed to Idle."), *GetOwner()->GetName());
 	}
 
 	if (bPeriodicRepath && !bIsReachDestination)
@@ -486,7 +455,6 @@ void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 {
 	if (PathSplinePtr->GetNumberOfSplinePoints() <= 2)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Points Count 2 down"));
 		return;
 	}
 	
@@ -498,7 +466,6 @@ void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 	
 	if (AddIndex >= FoundPath.Num())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("No more Spline Point! AddIndex: %d, FoundPath: %d"), AddIndex, FoundPath.Num());
 		return;
 	}
 	

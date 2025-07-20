@@ -20,15 +20,29 @@
 		{
 			"Name": "SmartFlyingNavigation",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64",
+				"Mac"
+			],
+			"PlatformDenyList" : [
+				
+			]
 		},
 		{
 			"Name": "SmartFlyingNavigationEditor",
 			"Type": "Editor",
 			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64",
+				"Mac"
+			],
+			"PlatformDenyList" : [
+				
+			],
 			"AdditionalDependencies": [
 				"EditorScriptingUtilities"
-				]
+			]
 		}
 	],
 	"Plugins": [

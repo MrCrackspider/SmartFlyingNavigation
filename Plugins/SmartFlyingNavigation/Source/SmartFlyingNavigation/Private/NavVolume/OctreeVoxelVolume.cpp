@@ -51,12 +51,7 @@ void AOctreeVoxelVolume::BeginPlay()
 		{
 			// The root node is always assumed to be at the first index.
 			RootNodeIndex = 0;
-			UE_LOG(LogTemp, Log, TEXT("OctreeVoxelVolume: Loaded static octree with %d nodes."), StaticNodePool.Num());
 		}
-	}
-	else
-	{
-		UE_LOG(LogTemp, Warning, TEXT("OctreeVoxelVolume: No BakedOctreeData asset assigned. The static geometry layer will be empty."));
 	}
 
 	// 2. Initialize the dynamic obstacle layer and start a timer for periodic updates.
@@ -400,7 +395,6 @@ void AOctreeVoxelVolume::BakeStaticData()
 	const FBox VolumeBounds = VolumeBox->Bounds.GetBox();
 	if (!VolumeBounds.IsValid)
 	{
-		UE_LOG(LogTemp, Error, TEXT("Baking failed: Volume has invalid bounds."));
 		return;
 	}
 
@@ -441,7 +435,6 @@ void AOctreeVoxelVolume::BakeStaticData()
 	if (BakeTask.ShouldCancel()) return;
 	SaveOctreeToAsset();
 
-	UE_LOG(LogTemp, Log, TEXT("Baking complete! Final Octree has %d nodes."), StaticNodePool.Num());
 }
 
 void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticObstacles) const
@@ -452,20 +445,17 @@ void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticOb
 	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypesToQuery;
 	if (StaticObjectProfile)
 	{
-		UE_LOG(LogTemp, Log, TEXT("Using custom 'Static Object Filter' for baking."));
 		for (const TEnumAsByte<ECollisionChannel>& Channel : StaticObjectProfile->CollisionChannels)
 		{
 			ObjectTypesToQuery.Add(UEngineTypes::ConvertToObjectType(Channel));
 		}
 		if (ObjectTypesToQuery.IsEmpty())
 		{
-			UE_LOG(LogTemp, Warning, TEXT("ScanForAllStaticObstacles: The assigned 'Static Object Filter' has no Collision Channels specified. No objects were scanned."));
 			return;
 		}
 	}
 	else
 	{
-		UE_LOG(LogTemp, Log, TEXT("'Static Object Filter' not set. Falling back to default: scanning 'WorldStatic' objects."));
 		ObjectTypesToQuery.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_WorldStatic));
 	}
 
@@ -477,10 +467,8 @@ void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticOb
 
 	if (OverlappingActors.IsEmpty())
 	{
-		UE_LOG(LogTemp, Log, TEXT("ScanForAllStaticObstacles: No overlapping actors found for the specified query."));
 		return;
 	}
-	UE_LOG(LogTemp, Log, TEXT("ScanForAllStaticObstacles: Found %d potential actors. Applying filter and voxelizing..."), OverlappingActors.Num());
 
 	// 3. Perform a narrow-phase check: iterate through components, apply the filter, and voxelize.
 	for (AActor* Actor : OverlappingActors)
@@ -524,14 +512,12 @@ void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticOb
 			}
 		}
 	}
-	UE_LOG(LogTemp, Log, TEXT("Scan complete. Baked %d unique static obstacle voxels."), OutStaticObstacles.Num());
 }
 
 void AOctreeVoxelVolume::InsertObstacleRecursive(int32 NodeIndex, const FIntVector& ObstacleVoxel, int32 CurrentDepth)
 {
 	if (!StaticNodePool.IsValidIndex(NodeIndex))
 	{
-		UE_LOG(LogTemp, Error, TEXT("InsertObstacleRecursive: Invalid NodeIndex %d"), NodeIndex);
 		return;
 	}
 
@@ -741,14 +727,12 @@ bool AOctreeVoxelVolume::GetBakedAssetPath(FString& OutPackagePath, FString& Out
 {
 	if (BakedDataSaveDirectory.Path.IsEmpty())
 	{
-		UE_LOG(LogTemp, Error, TEXT("Cannot get asset path: 'Baked Data Save Directory' is not set in the volume's properties."));
 		return false;
 	}
 	
 	UWorld* World = GetWorld();
 	if (!World)
 	{
-		UE_LOG(LogTemp, Error, TEXT("Cannot get asset path: World context is not valid."));
 		return false;
 	}
 
@@ -782,7 +766,6 @@ void AOctreeVoxelVolume::SaveOctreeToAsset()
 	const FAssetData ExistingAssetData = AssetRegistryModule.Get().GetAssetByObjectPath(FSoftObjectPath(PackageName));
 	if (ExistingAssetData != nullptr && ExistingAssetData.IsValid() && ExistingAssetData.GetAsset() != nullptr )
 	{
-		UE_LOG(LogTemp, Log, TEXT("Found existing asset at: %s. Deleting old version."), *PackageName);
 		TArray<UObject*> ObjectsToDelete;
 		ObjectsToDelete.Add(ExistingAssetData.GetAsset());
 		ObjectTools::DeleteObjects(ObjectsToDelete, false); // false = do not show confirmation dialog
@@ -795,7 +778,6 @@ void AOctreeVoxelVolume::SaveOctreeToAsset()
 	UOctreeDataAsset* NewOctreeData = NewObject<UOctreeDataAsset>(Package, FName(*AssetName), RF_Public | RF_Standalone);
 	if (!NewOctreeData)
 	{
-		UE_LOG(LogTemp, Error, TEXT("Failed to create new UOctreeDataAsset object for package: %s"), *PackageName);
 		return;
 	}
 
@@ -812,12 +794,7 @@ void AOctreeVoxelVolume::SaveOctreeToAsset()
 
 	if (UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, true))
 	{
-		UE_LOG(LogTemp, Log, TEXT("Successfully saved Octree data to: %s.uasset"), *PackageName);
 		this->BakedOctreeData = NewOctreeData; // Assign the newly created asset to the volume property.
-	}
-	else
-	{
-		UE_LOG(LogTemp, Error, TEXT("Failed to save Octree data package: %s"), *PackageName);
 	}
 }
 

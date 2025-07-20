@@ -17,7 +17,7 @@ enum class EObstacleFilterLogic : uint8
 };
  
 
-UCLASS(BlueprintType, Blueprintable, EditInlineNew, meta=(DisplayName="Voxel Obstacle Filter"))
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, meta=(DisplayName="Voxel Obstacle Profile"))
 class SMARTFLYINGNAVIGATION_API UVoxelObstacleProfile : public UDataAsset
 {
 	GENERATED_BODY()

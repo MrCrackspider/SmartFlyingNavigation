@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "DynamicObstacle.h"
+#include "Engine/OverlapResult.h"
+#include "WorldCollision.h"
 #include "VoxelVolumeBase.generated.h"
 
 class UHierarchicalInstancedStaticMeshComponent;
@@ -192,6 +194,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug")
 	TSoftObjectPtr<UStaticMesh> DebugMeshAsset;
 
+#if WITH_EDITORONLY_DATA
 	/**
 	 * @brief Hierarchical Instanced Static Mesh Component for visualizing solid nodes.
 	 */
@@ -209,7 +212,8 @@ public:
 	 */
 	UPROPERTY()
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DebugMixedNodesComponent;
-
+#endif
+	
 	/**
 	 * @brief Soft path to the material for visualizing solid nodes (configurable in the editor).
 	 */

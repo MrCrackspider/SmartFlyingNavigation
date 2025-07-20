@@ -42,13 +42,11 @@ void UDynamicObstacleComponent::BeginPlay()
 				LastKnownTransform = OwnerActor->GetActorTransform();
 				UpdateLastKnownBounds();
 				
-				UE_LOG(LogTemp, Log, TEXT("DynamicObstacleComponent on '%s' registered with volume '%s'."), *OwnerActor->GetName(), *Volume->GetName());
 				return;
 			}
 		}
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("DynamicObstacleComponent on '%s' is not inside any OctreeVoxelVolume. Disabling tick."), *OwnerActor->GetName());
 	SetComponentTickEnabled(false);
 }
 
