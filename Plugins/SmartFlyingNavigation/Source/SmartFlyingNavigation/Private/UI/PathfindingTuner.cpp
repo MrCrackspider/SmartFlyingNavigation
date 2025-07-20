@@ -1383,10 +1383,10 @@ FReply SPathfindingTuner::OnRequestPathButtonClicked()
     // Path requests are only valid in a running game world.
     if (!IsPIEActive())
     {
-        ShowWarningMessage(LOCTEXT("NotPIEWarning", "Path requests can only be made during Play In Editor (PIE) or Standalone Game."));
+        ShowWarningMessage(LOCTEXT("NotPIEWarning", "Path requests can only be made during Play In Editor."));
         return FReply::Handled();
     }
-    
+     
     // Get all currently selected UPathfindingComponents.
     const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
     
@@ -1397,8 +1397,13 @@ FReply SPathfindingTuner::OnRequestPathButtonClicked()
         return FReply::Handled();
     }
 
-    bool bAnyPathRequested = false; // Flag to track if at least one path request was successfully initiated.
-    bool bAllConditionsMet = true;  // Flag to track if all selected components met validation criteria (valid volume, valid baked data).
+    // Flags to prevent multiple pop-ups for the same type of warning.
+    bool bVolumeNotSetWarningShown = false;
+    bool bVolumeTypeMismatchWarningShown = false;
+    bool bBakedDataNotSetWarningShown = false;
+    // --- New flag for TargetActor validation ---
+    bool bTargetActorNotSetWarningShown = false;
+    // --- End new flag ---
 
     // Iterate through each selected Pathfinding Component to request a path.
     for (UPathfindingComponent* Component : SelectedComponents)
@@ -1406,68 +1411,73 @@ FReply SPathfindingTuner::OnRequestPathButtonClicked()
         // Basic null check for the component pointer.
         if (Component == nullptr)
         {
-            bAllConditionsMet = false; // Mark that not all conditions were met due to a null component.
-            continue; // Skip to the next component.
+           
+            continue; 
+        }
+
+        // Get Agent Name for display in warnings.
+        FString AgentName = Component->GetOwner() ? Component->GetOwner()->GetActorLabel() : TEXT("Unknown Agent");
+        if (AgentName.IsEmpty()) 
+        {
+            AgentName = Component->GetOwner() ? Component->GetOwner()->GetName() : TEXT("Unknown Agent");
         }
 
         // 1. Validate the Target Volume associated with the Pathfinding Component.
-        // Assumes UPathfindingComponent has a GetTargetVolume() function returning AVoxelVolumeBase*.
         AVoxelVolumeBase* BaseVolume = Component->GetTargetVolume(); 
         if (!IsValid(BaseVolume))
         {
-            ShowWarningMessage(FText::Format(LOCTEXT("TargetVolumeNotSet", "Path request failed for agent '{0}': Target Volume is not set or invalid."), FText::FromString(Component->GetOwner()->GetName())));
-            bAllConditionsMet = false;
-            continue; // Skip to the next component.
+            if (!bVolumeNotSetWarningShown) // Show this warning only once
+            {
+                ShowWarningMessage(FText::Format(LOCTEXT("TargetVolumeNotSetSummary", "Path request failed for some selected agents: Target Volume is not set or invalid. Please ensure valid volumes are assigned."), FText::FromString(AgentName)));
+                bVolumeNotSetWarningShown = true;
+            }
+          
+            continue; 
         }
 
         // 2. Attempt to cast the BaseVolume to AOctreeVoxelVolume.
-        // Pathfinding logic might specifically require an OctreeVoxelVolume.
         AOctreeVoxelVolume* OctreeVoxelVolume = Cast<AOctreeVoxelVolume>(BaseVolume);
-        if (!IsValid(OctreeVoxelVolume)) // Check if cast was successful and pointer is valid.
+        if (!IsValid(OctreeVoxelVolume)) 
         {
-            ShowWarningMessage(FText::Format(LOCTEXT("VolumeTypeMismatch", "Path request failed for agent '{0}': Target Volume '{1}' is not an OctreeVoxelVolume."), FText::FromName(Component->GetOwner()->GetFName()),   FText::FromName(BaseVolume->GetFName())));
-            bAllConditionsMet = false;
-            continue; // Skip to the next component.
+            if (!bVolumeTypeMismatchWarningShown) // Show this warning only once
+            {
+                ShowWarningMessage(FText::Format(LOCTEXT("VolumeTypeMismatchSummary", "Path request failed for some selected agents: Target Volume is not an OctreeVoxelVolume. Please assign OctreeVoxelVolumes."), FText::FromString(AgentName)));
+                bVolumeTypeMismatchWarningShown = true;
+            }
+          
+            continue; 
         }
 
         // 3. Validate the baked data asset within the OctreeVoxelVolume.
-        // Assumes AOctreeVoxelVolume has a GetBakedOctreeData() function returning UOctreeDataAsset*.
         if (!IsValid(OctreeVoxelVolume->GetBakedOctreeData()))
         {
-            ShowWarningMessage(FText::Format(LOCTEXT("BakedDataNotSet", "Path request failed for agent '{0}': Target Volume '{1}' does not have valid Baked Octree Data."),  FText::FromName(Component->GetOwner()->GetFName()),   FText::FromName(OctreeVoxelVolume->GetFName())));
-            bAllConditionsMet = false;
-            continue; // Skip to the next component.
+            if (!bBakedDataNotSetWarningShown) // Show this warning only once
+            {
+                ShowWarningMessage(FText::Format(LOCTEXT("BakedDataNotSetSummary", "Path request failed for some selected agents: Target Volume does not have valid Baked Octree Data. Please bake the volume or assign a baked data asset."), FText::FromString(AgentName)));
+                bBakedDataNotSetWarningShown = true;
+            }
+            continue; 
         }
         
-        // If all conditions are met, attempt to request a path for the current component.
-        if (Component->RequestPathToTargetActor())
+        // --- New validation: TargetActor is set and valid ---
+        if (!IsValid(Component->TargetActor)) // Assumes TargetActor is a UPROPERTY in UPathfindingComponent
         {
-            bAnyPathRequested = true; // Mark that at least one path request was successful.
+            if (!bTargetActorNotSetWarningShown) // Show this warning only once
+            {
+                ShowWarningMessage(FText::Format(LOCTEXT("TargetActorNotSetSummary", "Path request failed for some selected agents: Target Actor is not set or invalid. Please ensure a valid target actor is assigned."), FText::FromString(AgentName)));
+                bTargetActorNotSetWarningShown = true;
+            }
+           
+            continue;
         }
-    }
+        // --- End new validation ---
 
-    // Provide final feedback to the user based on the overall outcome.
-    if (!bAnyPathRequested)
-    {
-        // If some conditions were not met for certain agents, provide a more specific warning.
-        if (!bAllConditionsMet)
-        {
-            ShowWarningMessage(LOCTEXT("OverallPathRequestFailedConditions", "Path request failed for all selected agents due to invalid volume setup or missing baked data. Please check individual agent warnings."));
-        }
-        else
-        {
-            // If all conditions were met but no path was requested (e.g., target actor invalid).
-            ShowWarningMessage(LOCTEXT("PathRequestFailed", "Path request failed for all selected agents. Check logs for details (e.g., invalid target actor)."));
-        }
+        Component->RequestPathToTargetActor();
     }
-    else
-    {
-        // Optionally, provide positive feedback that path request was sent.
-        // GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green, TEXT("Path request sent!"));
-    }
-
-    return FReply::Handled(); // Indicate that the event was handled.
+    
+    return FReply::Handled(); 
 }
+
 //=================================================================================================
 // UI State & Expansion Handlers
 //=================================================================================================

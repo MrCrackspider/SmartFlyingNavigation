@@ -342,7 +342,16 @@ void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 	if (!bIsReachDestination)
 	{
 		const FVector CurrentLocation = GetOwner()->GetActorLocation();
-		const FVector TargetPoint = FoundPath[CurrentPathDestinationIndex];
+
+		FVector TargetPoint;
+		if (FoundPath.Num() >CurrentPathDestinationIndex)
+		{
+			TargetPoint = FoundPath[CurrentPathDestinationIndex];
+		}
+		else
+		{
+			return;
+		}
 
 		if (GetMovementMode() == EPathMovementMode::Spline)
 		{
@@ -492,8 +501,6 @@ void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 		UE_LOG(LogTemp, Warning, TEXT("No more Spline Point! AddIndex: %d, FoundPath: %d"), AddIndex, FoundPath.Num());
 		return;
 	}
-
-	// UE_LOG(LogTemp, Warning, TEXT("Add Spline FoundPath %d: %lf %lf %lf"), AddIndex, FoundPath[AddIndex].X, FoundPath[AddIndex].Y, FoundPath[AddIndex].Z);
 	
 	PathSplinePtr->AddSplinePoint(FoundPath[AddIndex], ESplineCoordinateSpace::World, false);
 	PathSplinePtr->UpdateSpline();
@@ -501,7 +508,6 @@ void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 
 void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess)
 {
-	//이거를 한프레임에 특정개수만 처리
 	if (bSuccess && Path.Num() > 1)
 	{
 		FoundPath = Path;
@@ -554,8 +560,6 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 				{
 					break;
 				}
-
-				// UE_LOG(LogTemp, Warning, TEXT("Add Spline FoundPath %d: %lf %lf %lf"), i, FoundPath[i].X, FoundPath[i].Y, FoundPath[i].Z);
 				
 				PathSplinePtr->AddSplinePoint(FoundPath[i], ESplineCoordinateSpace::World, false);
 			}
