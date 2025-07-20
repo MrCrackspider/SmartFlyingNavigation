@@ -160,7 +160,7 @@ int32 UPathfindingSubsystem::RequestPath(FPathfindingRequest& Request)
 
 	// Create a worker task and add it to the thread pool.
 	PathfindingThreadPool->AddQueuedWork(new FPathfindingAsyncTasks(Request, this));
-	UE_LOG(LogTemp, Log, TEXT("Pathfinding request #%d queued."), Request.RequestID);
+	// UE_LOG(LogTemp, Log, TEXT("Pathfinding request #%d queued."), Request.RequestID);
 	return Request.RequestID;
 
 }
@@ -168,20 +168,22 @@ int32 UPathfindingSubsystem::RequestPath(FPathfindingRequest& Request)
 
 void UPathfindingSubsystem::Tick(float DeltaTime)
 {
-	
 	TArray<FPathfindingResult> TasksToProcessThisFrame;
-
+	TasksToProcessThisFrame.Reserve(MaxCallbacksPerFrame);
+	
+	for (int32 i = 0; i < MaxCallbacksPerFrame; ++i)
 	{
-		FScopeLock Lock(&QueueLock);
-		for (int32 i = 0; i < MaxCallbacksPerFrame && !CompletedTasksQueue.IsEmpty(); ++i)
+		FPathfindingResult TempResult;
+		if (CompletedTasksQueue.Dequeue(TempResult))
 		{
-			FPathfindingResult TempResult;
-			if (CompletedTasksQueue.Dequeue(TempResult))
-			{
-				TasksToProcessThisFrame.Add(TempResult);
-			}
+			TasksToProcessThisFrame.Add(MoveTemp(TempResult));
+		}
+		else
+		{
+			break;
 		}
 	}
+	
 
 	for (const FPathfindingResult& Result : TasksToProcessThisFrame)
 	{
@@ -247,7 +249,6 @@ void UPathfindingSubsystem::SetNumWorkerThreads(int32 NewNumThreads)
 
 void UPathfindingSubsystem::QueueCompletedResult(const FPathfindingResult& Result)
 {
-	FScopeLock Lock(&QueueLock);
 	CompletedTasksQueue.Enqueue(Result);
 }
 
@@ -311,6 +312,6 @@ void UPathfindingSubsystem::OnPathfindingCompleted(const FPathfindingRequest& Re
 	{
 		Request.OnWorldPathComplete.ExecuteIfBound(WorldPath, bSuccess);
 	}
-	UE_LOG(LogTemp, Log, TEXT("Pathfinding request #%d (Octree) completed."), Request.RequestID);
+	// UE_LOG(LogTemp, Log, TEXT("Pathfinding request #%d (Octree) completed."), Request.RequestID);
 }
 

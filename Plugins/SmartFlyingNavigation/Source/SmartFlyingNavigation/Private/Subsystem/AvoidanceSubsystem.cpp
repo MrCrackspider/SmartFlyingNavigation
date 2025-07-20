@@ -142,7 +142,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
 
                 Agent->ApplyMovement(FinalVelocity.GetClampedToMaxSize(Agent->GetMovementSpeed()), DeltaTime);
 
-                if (Agent->GetMovementMode() == EPathMovementMode::Spline && !Agent->IsOnSplineLine())
+                if (Agent->GetMovementMode() == EPathMovementMode::Spline && !Agent->IsOnSplineLine() && Agent->FoundPath.Num() > 0)
                 {
                     UE_LOG(LogTemp, Warning, TEXT("%s: Out Of Spline Line. Change MovementMode to Linear"), *Agent->GetOwner()->GetName());
                     Agent->SetMovementMode(EPathMovementMode::Linear);
@@ -519,7 +519,7 @@ void UAvoidanceSubsystem::DebugVisualizeVelocities(const UPathfindingComponent* 
     const FVector LineStart = Agent->GetOwner()->GetActorLocation() + FVector(0, 0, 10.f);
     const float LineLengthMultiplier = 0.2f;
 
-    DrawDebugLine(World, LineStart, LineStart + Result.PreferredVelocity * LineLengthMultiplier, FColor::Blue, false, -1, 0, 2.f);
-    DrawDebugLine(World, LineStart, LineStart + Result.ActualPreferredVelocity * LineLengthMultiplier, FColor::Yellow, false, -1, 0, 3.f);
-    DrawDebugLine(World, LineStart, LineStart + FinalOptimalVelocity * LineLengthMultiplier, FColor::Red, false, -1, 0, 5.f);
+    // DrawDebugLine(World, LineStart, LineStart + Result.PreferredVelocity * LineLengthMultiplier, FColor::Blue, false, -1, 0, 2.f);
+    // DrawDebugLine(World, LineStart, LineStart + Result.ActualPreferredVelocity * LineLengthMultiplier, FColor::Yellow, false, -1, 0, 3.f);
+    // DrawDebugLine(World, LineStart, LineStart + FinalOptimalVelocity * LineLengthMultiplier, FColor::Red, false, -1, 0, 5.f);
 }

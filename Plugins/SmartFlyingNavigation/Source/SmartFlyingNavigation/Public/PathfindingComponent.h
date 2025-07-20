@@ -159,7 +159,7 @@ protected:
 	void HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess);
 
 	void PartialSplinePointUpdate(int32 StartIndex);
-	
+
 	void CreateOctreeDataSnapshot(const AOctreeVoxelVolume* OctreeVolume, FOctreePathfindingData& SnapshotData) const;
 
 	void UpdateAgentRadiusFromScale(bool bForceUpdate = false);

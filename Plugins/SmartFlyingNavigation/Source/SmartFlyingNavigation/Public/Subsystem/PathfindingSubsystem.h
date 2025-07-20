@@ -146,16 +146,13 @@ private:
 
 	/** The maximum number of completed pathfinding callbacks to fire per frame. */
 	UPROPERTY(Config)
-	int32 MaxCallbacksPerFrame = 10;
+	int32 MaxCallbacksPerFrame = 5;
 
 	/** A thread-safe counter for generating unique request IDs. */
 	FThreadSafeCounter NextRequestID;
 
 	/** A queue for holding results from worker threads that are ready to be processed on the game thread. */
-	TQueue<FPathfindingResult> CompletedTasksQueue;
-
-	/** A critical section to protect access to the CompletedTasksQueue. */
-	FCriticalSection QueueLock;
+	TQueue<FPathfindingResult, EQueueMode::Mpsc> CompletedTasksQueue;
 
 	//~=============================================================================
 	// Memory Pooling
@@ -169,5 +166,4 @@ private:
 
 	/** A collection of idle memory pools for octree-based pathfinding nodes. */
 	TArray<FPathNodeMemoryPoolBase*> IdleOctreePools;
-	
 };
