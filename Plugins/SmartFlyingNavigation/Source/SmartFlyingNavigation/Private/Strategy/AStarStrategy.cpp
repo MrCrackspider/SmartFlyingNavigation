@@ -24,7 +24,7 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	{
 		UE_LOG(LogTemp, Warning, TEXT("A* (Octree) Failed: Start location is invalid or inside a solid node."));
 	}
-
+ 
 	if (bIsGoalNodeInvalid)
 	{
 		const int32 NewGoalNodeIndex = OctreeData.FindNearestValidLeafForAgent(

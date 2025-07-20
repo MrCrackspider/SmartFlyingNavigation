@@ -1145,7 +1145,6 @@ void SPathfindingTuner::OnDrawDebugBoxChanged(ECheckBoxState NewState)
                 V->SetbDrawDebugBox(Value);
                 // Important: Call OnConstruction to re-trigger debug drawing update
                 V->OnConstruction(V->GetActorTransform());
-                V->MarkPackageDirty();
             });
     }
 }
@@ -1380,41 +1379,95 @@ void SPathfindingTuner::ShowWarningMessage(const FText& Message) const
 
 FReply SPathfindingTuner::OnRequestPathButtonClicked()
 {
+    // Check if Play In Editor (PIE) or Standalone Game is active.
+    // Path requests are only valid in a running game world.
     if (!IsPIEActive())
     {
         ShowWarningMessage(LOCTEXT("NotPIEWarning", "Path requests can only be made during Play In Editor (PIE) or Standalone Game."));
         return FReply::Handled();
     }
     
+    // Get all currently selected UPathfindingComponents.
     const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
+    
+    // If no Pathfinding Components are selected, show a warning.
     if (SelectedComponents.Num() == 0)
     {
         ShowWarningMessage(LOCTEXT("NoAgentSelected", "Please select at least one agent with a Pathfinding Component."));
         return FReply::Handled();
     }
 
-    bool bAnyPathRequested = false;
+    bool bAnyPathRequested = false; // Flag to track if at least one path request was successfully initiated.
+    bool bAllConditionsMet = true;  // Flag to track if all selected components met validation criteria (valid volume, valid baked data).
+
+    // Iterate through each selected Pathfinding Component to request a path.
     for (UPathfindingComponent* Component : SelectedComponents)
     {
-        if (Component && Component->RequestPathToTargetActor()) // UPathfindingComponent의 함수 호출
+        // Basic null check for the component pointer.
+        if (Component == nullptr)
         {
-            bAnyPathRequested = true;
+            bAllConditionsMet = false; // Mark that not all conditions were met due to a null component.
+            continue; // Skip to the next component.
+        }
+
+        // 1. Validate the Target Volume associated with the Pathfinding Component.
+        // Assumes UPathfindingComponent has a GetTargetVolume() function returning AVoxelVolumeBase*.
+        AVoxelVolumeBase* BaseVolume = Component->GetTargetVolume(); 
+        if (!IsValid(BaseVolume))
+        {
+            ShowWarningMessage(FText::Format(LOCTEXT("TargetVolumeNotSet", "Path request failed for agent '{0}': Target Volume is not set or invalid."), FText::FromString(Component->GetOwner()->GetName())));
+            bAllConditionsMet = false;
+            continue; // Skip to the next component.
+        }
+
+        // 2. Attempt to cast the BaseVolume to AOctreeVoxelVolume.
+        // Pathfinding logic might specifically require an OctreeVoxelVolume.
+        AOctreeVoxelVolume* OctreeVoxelVolume = Cast<AOctreeVoxelVolume>(BaseVolume);
+        if (!IsValid(OctreeVoxelVolume)) // Check if cast was successful and pointer is valid.
+        {
+            ShowWarningMessage(FText::Format(LOCTEXT("VolumeTypeMismatch", "Path request failed for agent '{0}': Target Volume '{1}' is not an OctreeVoxelVolume."), FText::FromName(Component->GetOwner()->GetFName()),   FText::FromName(BaseVolume->GetFName())));
+            bAllConditionsMet = false;
+            continue; // Skip to the next component.
+        }
+
+        // 3. Validate the baked data asset within the OctreeVoxelVolume.
+        // Assumes AOctreeVoxelVolume has a GetBakedOctreeData() function returning UOctreeDataAsset*.
+        if (!IsValid(OctreeVoxelVolume->GetBakedOctreeData()))
+        {
+            ShowWarningMessage(FText::Format(LOCTEXT("BakedDataNotSet", "Path request failed for agent '{0}': Target Volume '{1}' does not have valid Baked Octree Data."),  FText::FromName(Component->GetOwner()->GetFName()),   FText::FromName(OctreeVoxelVolume->GetFName())));
+            bAllConditionsMet = false;
+            continue; // Skip to the next component.
+        }
+        
+        // If all conditions are met, attempt to request a path for the current component.
+        if (Component->RequestPathToTargetActor())
+        {
+            bAnyPathRequested = true; // Mark that at least one path request was successful.
         }
     }
 
+    // Provide final feedback to the user based on the overall outcome.
     if (!bAnyPathRequested)
     {
-        ShowWarningMessage(LOCTEXT("PathRequestFailed", "Path request failed for all selected agents. Check logs for details (e.g., invalid target actor)."));
+        // If some conditions were not met for certain agents, provide a more specific warning.
+        if (!bAllConditionsMet)
+        {
+            ShowWarningMessage(LOCTEXT("OverallPathRequestFailedConditions", "Path request failed for all selected agents due to invalid volume setup or missing baked data. Please check individual agent warnings."));
+        }
+        else
+        {
+            // If all conditions were met but no path was requested (e.g., target actor invalid).
+            ShowWarningMessage(LOCTEXT("PathRequestFailed", "Path request failed for all selected agents. Check logs for details (e.g., invalid target actor)."));
+        }
     }
     else
     {
-        // Optionally, provide feedback that path request was sent
+        // Optionally, provide positive feedback that path request was sent.
         // GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green, TEXT("Path request sent!"));
     }
 
-    return FReply::Handled();
+    return FReply::Handled(); // Indicate that the event was handled.
 }
-
 //=================================================================================================
 // UI State & Expansion Handlers
 //=================================================================================================

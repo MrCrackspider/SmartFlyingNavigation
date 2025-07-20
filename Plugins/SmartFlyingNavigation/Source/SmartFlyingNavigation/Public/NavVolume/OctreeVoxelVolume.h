@@ -88,7 +88,7 @@ public:
 	/** Returns the data asset where the baked octree data is stored. */
 	TObjectPtr<UOctreeDataAsset> GetBakedOctreeData() const { return BakedOctreeData; }
 
-	/**
+	/** 
 	 * Sets the data asset to use for the baked octree.
 	 * @param NewData The new data asset to assign.
 	 */

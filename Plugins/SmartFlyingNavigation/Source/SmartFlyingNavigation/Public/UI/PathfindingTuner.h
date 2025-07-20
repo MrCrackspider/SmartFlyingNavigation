@@ -143,7 +143,7 @@ private:
     
     TObjectPtr<UPathfindingTunerSettings> TunerSettings;
 };
-
+ 
 //=================================================================================================
 // Template Member Function Implementations (Must be in header)
 //=================================================================================================

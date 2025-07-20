@@ -172,7 +172,7 @@ public:
 	/**
 	 * @brief If true, draws debug boxes for the volume.
 	 */
-	UPROPERTY()
+	UPROPERTY(EditAnywhere, Category = "Voxel Volume|Debug")
 	bool bDrawDebugBox;
 
 
