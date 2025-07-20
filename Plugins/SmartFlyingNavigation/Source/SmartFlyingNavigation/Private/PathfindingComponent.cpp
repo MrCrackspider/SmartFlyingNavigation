@@ -366,10 +366,10 @@ void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 
 void UPathfindingComponent::ProgressNextPoint()
 {
-	++CurrentPathDestinationIndex;
-	UE_LOG(LogTemp, Warning, TEXT("currentPath %d"),CurrentPathDestinationIndex);
-	
 	PartialSplinePointUpdate(CurrentPathDestinationIndex);
+	++CurrentPathDestinationIndex;
+	
+	UE_LOG(LogTemp, Warning, TEXT("currentPath %d"),CurrentPathDestinationIndex);
 
 	if (CurrentPathDestinationIndex >= FoundPath.Num())
 	{
@@ -495,7 +495,8 @@ void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 
 	UE_LOG(LogTemp, Warning, TEXT("Add Spline FoundPath %d: %lf %lf %lf"), AddIndex, FoundPath[AddIndex].X, FoundPath[AddIndex].Y, FoundPath[AddIndex].Z);
 	
-	PathSplinePtr->AddSplinePoint(FoundPath[AddIndex], ESplineCoordinateSpace::World, true);
+	PathSplinePtr->AddSplinePoint(FoundPath[AddIndex], ESplineCoordinateSpace::World, false);
+	PathSplinePtr->UpdateSpline();
 }
 
 void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess)
