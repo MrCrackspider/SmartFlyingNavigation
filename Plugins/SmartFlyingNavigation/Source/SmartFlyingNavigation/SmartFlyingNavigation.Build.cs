@@ -40,7 +40,7 @@ public class SmartFlyingNavigation : ModuleRules
 			}
 		);
 		
-		if (Target.bBuildEditor == true)
+		if (Target.bBuildEditor)
 		{
 			PrivateDependencyModuleNames.AddRange(
 				new string[]
