@@ -1,3 +1,6 @@
+// Copyright © 2025 TeamHamDev. All Rights Reserved.
+
+
 #include "Nav3DPathfindingDetails.h"
 #include "DetailLayoutBuilder.h"
 #include "DetailWidgetRow.h"
@@ -12,9 +15,6 @@
 #include "Framework/Application/SlateApplication.h" 
 #include "Widgets/Docking/SDockTab.h"
 #include "PathfindingTunerTabName.h"
-
-
-#define LOCTEXT_NAMESPACE "FNav3DPathfindingDetails"
 
 
 TSharedRef<IDetailCustomization> FNav3DPathfindingDetails::MakeInstance()

@@ -1,3 +1,5 @@
+// Copyright © 2025 TeamHamDev. All Rights Reserved.
+
 #include "Nav3DVolumeDetails.h"
 #include "DetailLayoutBuilder.h"
 #include "DetailWidgetRow.h"
@@ -5,8 +7,6 @@
 #include "PropertyEditorModule.h"
 #include "NavVolume/OctreeVoxelVolume.h"
 #include "PathfindingTunerTabName.h"
-
-#define LOCTEXT_NAMESPACE "FNav3DVolumeDetails"
 
 TSharedRef<IDetailCustomization> FNav3DVolumeDetails::MakeInstance()
 {

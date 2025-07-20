@@ -1,16 +1,13 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
-#include "PathfindingTunerSettings.generated.h"
+#include "SPathfindingTunerSettings.generated.h"
 
-/**
- * 
- */
 UCLASS(Config = EditorPerProjectUserSettings)
-class SMARTFLYINGNAVIGATION_API UPathfindingTunerSettings : public UObject
+class UPathfindingTunerSettings : public UObject
 {
 	GENERATED_BODY()
 

@@ -1,6 +1,6 @@
 ﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
 
-#include "UI/PathfindingTuner.h"
+#include "SPathfindingTuner.h"
 
 // Engine
 #include "Editor.h"
@@ -31,7 +31,7 @@
 #include "NavVolume/OctreeVoxelVolume.h"
 #include "Subsystem/PathfindingSubsystem.h"
 #include "PathfindingComponent.h"
-#include "UI/PathfindingTunerSettings.h"
+#include "SPathfindingTunerSettings.h"
 
 #define LOCTEXT_NAMESPACE "PathfindingTuner"
 
@@ -114,7 +114,7 @@ void SPathfindingTuner::Construct(const FArguments& InArgs)
             .AutoHeight()
             .Padding(0, 5)
             [
-                BuildAgentDebugSection() // 새로 추가된 섹션 호출
+                BuildAgentDebugSection() 
             ]
         ]
     ];
@@ -1183,10 +1183,10 @@ TOptional<ECheckBoxState> SPathfindingTuner::GetDrawDebugPathState() const
         return ECheckBoxState::Undetermined;
     }
 
-    bool bFirstValue = SelectedComponents[0]->GetbDrawDebugPath(); // UPathfindingComponent의 Getter 사용
+    bool bFirstValue = SelectedComponents[0]->GetbDrawDebugPath(); 
     for (int32 i = 1; i < SelectedComponents.Num(); ++i)
     {
-        if (SelectedComponents[i]->GetbDrawDebugPath() != bFirstValue) // UPathfindingComponent의 Getter 사용
+        if (SelectedComponents[i]->GetbDrawDebugPath() != bFirstValue) 
         {
             return ECheckBoxState::Undetermined; // Mixed state
         }
@@ -1199,7 +1199,7 @@ void SPathfindingTuner::OnDrawDebugPathChanged(ECheckBoxState NewState)
     const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
     SetCommonPropertyValue<UPathfindingComponent, bool>(SelectedComponents, NewState == ECheckBoxState::Checked, LOCTEXT("SetDrawDebugPath", "Set Draw Debug Path"),
         [](UPathfindingComponent* Component, bool bDraw) {
-            Component->SetbDrawDebugPath(bDraw); // UPathfindingComponent의 Setter 사용
+            Component->SetbDrawDebugPath(bDraw);
         });
 }
 //=================================================================================================
@@ -1542,8 +1542,6 @@ void SPathfindingTuner::OnAgentDebugCategoryExpansionChanged(bool bIsExpanded)
 
 bool SPathfindingTuner::IsPIEActive() const
 {
-    // GEditor가 유효하고, 현재 게임이 실행 중인지 확인합니다.
-    // GEditor->PlayWorld는 PIE 월드를 나타냅니다.
     return GEditor && GEditor->PlayWorld && GEditor->PlayWorld->IsGameWorld();
 }
 

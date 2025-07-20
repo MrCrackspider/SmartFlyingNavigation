@@ -1,3 +1,6 @@
+// Copyright © 2025 TeamHamDev. All Rights Reserved.
+
+
 #pragma once
 #include "IDetailCustomization.h"
 

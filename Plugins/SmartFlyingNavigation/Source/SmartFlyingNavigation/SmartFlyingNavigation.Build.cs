@@ -35,22 +35,22 @@ public class SmartFlyingNavigation : ModuleRules
 			{
 				"CoreUObject",
 				"Engine",
-				"UnrealEd",
-				"Slate",
-				"SlateCore",
-				"AssetTools",
-				"LevelEditor",    
-				"EditorStyle",
-				"WorkspaceMenuStructure",
 				"InputCore",
-				"EditorSubsystem",
-				"LevelEditor",
-				"PropertyEditor", 
-				"DesktopWidgets",
-				"DesktopPlatform", "EditorScriptingUtilities",
-				"Projects" 
+				"Projects",
 			}
 		);
+		
+		if (Target.bBuildEditor == true)
+		{
+			PrivateDependencyModuleNames.AddRange(
+				new string[]
+				{
+					"UnrealEd",
+					"EditorScriptingUtilities",
+					"AssetRegistry"
+				}
+			);
+		}
       
       
 		DynamicallyLoadedModuleNames.AddRange(

@@ -18,8 +18,8 @@ public:
 
      
     void Construct(const FArguments& InArgs);
-    
-    ~SPathfindingTuner();
+
+    virtual ~SPathfindingTuner() override;
 
 private:
     //=================================================================================================

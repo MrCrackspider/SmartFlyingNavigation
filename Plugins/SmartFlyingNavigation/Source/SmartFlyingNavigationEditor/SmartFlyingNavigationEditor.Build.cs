@@ -11,18 +11,29 @@ public class SmartFlyingNavigationEditor : ModuleRules
 			{
 				"Core",
 			}
-		);
+		);  
 		
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
 				"CoreUObject",
 				"Engine",
+				"UnrealEd",
 				"Slate",
 				"SlateCore",
-				"UnrealEd",
-				"PropertyEditor",
-				"SmartFlyingNavigation"
+				"AssetTools",
+				"LevelEditor",    
+				"EditorStyle",
+				"WorkspaceMenuStructure",
+				"EditorSubsystem",
+				"LevelEditor",
+				"PropertyEditor", 
+				"DesktopWidgets",
+				"DesktopPlatform",
+				"EditorScriptingUtilities",
+				"Projects", "SmartFlyingNavigation", 
+				"SmartFlyingNavigation",
+				"InputCore"    
 			}
 		);
 	}
