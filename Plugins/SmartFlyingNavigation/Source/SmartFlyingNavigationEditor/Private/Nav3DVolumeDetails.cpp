@@ -68,3 +68,4 @@ void FNav3DVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
 		 })
 	];
 }
+#undef LOCTEXT_NAMESPACE
