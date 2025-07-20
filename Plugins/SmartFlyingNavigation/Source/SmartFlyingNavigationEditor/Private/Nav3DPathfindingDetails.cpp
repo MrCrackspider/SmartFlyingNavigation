@@ -24,7 +24,7 @@ TSharedRef<IDetailCustomization> FNav3DPathfindingDetails::MakeInstance()
 
 void FNav3DPathfindingDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuidler)
 {
-	IDetailCategoryBuilder& DebuggingCategory = DetailBuidler.EditCategory("Tunner", FText::GetEmpty(), ECategoryPriority::Important);
+	IDetailCategoryBuilder& DebuggingCategory = DetailBuidler.EditCategory("Tuner", FText::GetEmpty(), ECategoryPriority::Important);
 	IDetailCategoryBuilder& PathfindingCategory = DetailBuidler.EditCategory("Navigation Configuration", FText::GetEmpty(), ECategoryPriority::Important);
 
 	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, TargetActor));

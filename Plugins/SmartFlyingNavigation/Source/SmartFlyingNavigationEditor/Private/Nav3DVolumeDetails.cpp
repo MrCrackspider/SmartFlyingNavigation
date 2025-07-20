@@ -16,7 +16,7 @@ TSharedRef<IDetailCustomization> FNav3DVolumeDetails::MakeInstance()
 void FNav3DVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
 {
     IDetailCategoryBuilder& VolumeCategory = DetailBuilder.EditCategory("Volume Setup", FText::GetEmpty(), ECategoryPriority::Important);
-    IDetailCategoryBuilder& DebuggingCategory = DetailBuilder.EditCategory("Tunner", FText::GetEmpty(), ECategoryPriority::Important);
+    IDetailCategoryBuilder& DebuggingCategory = DetailBuilder.EditCategory("Tuner", FText::GetEmpty(), ECategoryPriority::Important);
 
 	// Begin Test
     VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AVoxelVolumeBase, VoxelExtent));
@@ -68,4 +68,3 @@ void FNav3DVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
 		 })
 	];
 }
-#undef LOCTEXT_NAMESPACE
