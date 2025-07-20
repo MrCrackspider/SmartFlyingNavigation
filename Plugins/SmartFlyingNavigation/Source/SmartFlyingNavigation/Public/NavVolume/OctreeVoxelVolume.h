@@ -11,13 +11,6 @@
 class UDynamicObstacleComponent;
 class UVoxelObstacleProfile;
 
-struct FDebugNodeInfo
-{
-	int32 NodeIndex;
-	FBox Bounds;
-	EOctreeNodeState State; 
-};
-
 /**
  * @class AOctreeVoxelVolume
  * @brief A navigation volume that employs a hybrid data structure for pathfinding.
@@ -226,6 +219,13 @@ private:
 
 #if WITH_EDITOR
 private:
+	
+	struct FDebugNodeInfo
+	{
+		int32 NodeIndex;
+		FBox Bounds;
+		EOctreeNodeState State; 
+	};
 	/** Recursively inserts a single obstacle voxel into the octree during the baking process. */
 	void InsertObstacleRecursive(int32 NodeIndex, const FIntVector& ObstacleVoxel, int32 CurrentDepth);
 
