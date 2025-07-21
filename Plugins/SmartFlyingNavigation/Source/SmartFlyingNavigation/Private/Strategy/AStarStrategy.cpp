@@ -17,9 +17,10 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	int32 GoalNodeIndex = OctreeData.FindLeafNodeAt(InRequest.EndLocation);
 
 	bool bIsGoalNodeInvalid = (GoalNodeIndex == -1) ||
-		(OctreeData.StaticNodePool[GoalNodeIndex].State != EOctreeNodeState::Empty) ||
-		(OctreeData.StaticNodePool[GoalNodeIndex].MaxAllowedRadius < InRequest.AgentRadius);
-	
+			(OctreeData.StaticNodePool[GoalNodeIndex].State != EOctreeNodeState::Empty) ||
+			(OctreeData.StaticNodePool[GoalNodeIndex].MaxAllowedRadius < InRequest.AgentRadius);
+
+
 	if (bIsGoalNodeInvalid)
 	{
 		const int32 NewGoalNodeIndex = OctreeData.FindNearestValidLeafForAgent(
@@ -134,7 +135,7 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 
 		if (CurrentNode->NodeIndex == GoalNodeIndex)
 		{
-			ReconstructAndSmoothPath(CurrentNode, OutPath);
+		 	ReconstructAndSmoothPath(CurrentNode, OutPath);
 			return EPathfindingResult::Success;
 		}
 
@@ -150,13 +151,6 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 			}
 
 			FAstarPathNode* ParentNode = CurrentNode;
-
-			// const float NodeRadius = Pool[SuccIdx].MaxAllowedRadius;
-			// if (NodeRadius < AgentRadius)
-			// {
-			// 	continue;
-			// }
-
 			const int64 MoveCost = GetMoveCost(ParentNode->WorldPosition, Successor->WorldPosition);
 			const int64 NewGCost = ParentNode->GCost + MoveCost;
 
@@ -192,7 +186,7 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 
 	if (BestPartialNode)
 	{
-		ReconstructAndSmoothPath(BestPartialNode, OutPath);
+		ReconstructPath(BestPartialNode, OutPath);
 		return EPathfindingResult::Success_Partial;
 	}
 
@@ -284,22 +278,22 @@ void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPat
 
 	TArray<int32> AdjacentNodeIndices;
 	OctreeData.FindAdjacentEmptyLeaves(Node->NodeIndex, AdjacentNodeIndices);
+	const FVector CurrentNodeCenter = Node->WorldPosition;
 
 	for (const int32 NeighborIndex : AdjacentNodeIndices)
 	{
 		const auto& NeighborNode = OctreeData.StaticNodePool[NeighborIndex];
 		const FBox NeighborBounds = NeighborNode.Bounds;
+		FVector NeighborCenter = NeighborBounds.GetCenter();
 
 		// 1) If the cell itself is already big enough, we have instant clearance.
-		if (NeighborNode.MaxAllowedRadius < AgentRadius)
+		if (!HasGuaranteedLineOfSight(CurrentNodeCenter, NeighborCenter))
 		{
 			continue;
 		}
-
-		FVector NeighborCenter = NeighborBounds.GetCenter();
-
+		
 		FBox NeighborQueryBox = AStarStrategyUtils::MakeAgentQueryBox(NeighborCenter,AgentRadius);
-
+		
 		if (!OctreeData.IsRegionDynamicallyBlocked(NeighborQueryBox))
 		{
 			FAstarPathNode* Successor = MemoryPool.NewNode();

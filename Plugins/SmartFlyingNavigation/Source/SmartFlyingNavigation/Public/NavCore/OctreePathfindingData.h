@@ -224,21 +224,7 @@ private:
 public:
 	bool IsPathClearHierarchically(const FVector& Start, const FVector& End, float AgentRadius) const
 	{
-		TArray<int32> TraversedNodes;
-		if (!VoxelRayMarch(Start, End, TraversedNodes))
-		{
-			return false;
-		}
-
-		for (int32 NodeIndex : TraversedNodes)
-		{
-			if (StaticNodePool[NodeIndex].MaxAllowedRadius < AgentRadius)
-			{
-				return false;
-			}
-		}
-
-		return true;
+		return !CheckForSolidNodesInCapsule(Start, End, AgentRadius);
 	}
 	bool VoxelRayMarch(const FVector& Start, const FVector& End, TArray<int32>& OutPathNodes) const
 	{
