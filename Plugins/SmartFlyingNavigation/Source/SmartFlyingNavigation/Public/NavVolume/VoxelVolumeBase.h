@@ -177,7 +177,6 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Voxel Volume|Debug")
 	bool bDrawDebugBox;
 
-
 #if WITH_EDITOR
 	float GetDebugLineWidth() const { return DebugLineWidth; }
 	void SetDebugLineWidth(float Value) { DebugLineWidth = Value; }
@@ -201,13 +200,7 @@ public:
 	 */
 	UPROPERTY()
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DebugSolidNodesComponent;
-
-	/**
-	 * @brief Hierarchical Instanced Static Mesh Component for visualizing empty nodes.
-	 */
-	UPROPERTY()
-	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DebugEmptyNodesComponent;
-
+	
 	/**
 	 * @brief Hierarchical Instanced Static Mesh Component for visualizing mixed (partially filled) nodes.
 	 */
@@ -220,13 +213,7 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug", meta = (AllowedClasses = "/Script/Engine.MaterialInterface"))
 	FSoftObjectPath DebugSolidNodeMaterialPath;
-
-	/**
-	 * @brief Soft path to the material for visualizing empty nodes (configurable in the editor).
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug", meta = (AllowedClasses = "/Script/Engine.MaterialInterface"))
-	FSoftObjectPath DebugEmptyNodeMaterialPath;
-
+	
 	/**
 	 * @brief Soft path to the material for visualizing mixed nodes (configurable in the editor).
 	 */

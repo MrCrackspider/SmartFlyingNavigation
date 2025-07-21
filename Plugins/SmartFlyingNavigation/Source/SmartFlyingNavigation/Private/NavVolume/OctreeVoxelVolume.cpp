@@ -831,7 +831,6 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 
 					// Clear all existing debug instances.
 					if (StrongThis->DebugSolidNodesComponent) StrongThis->DebugSolidNodesComponent->ClearInstances();
-					if (StrongThis->DebugEmptyNodesComponent) StrongThis->DebugEmptyNodesComponent->ClearInstances();
 					if (StrongThis->DebugMixedNodesComponent) StrongThis->DebugMixedNodesComponent->ClearInstances();
 
 					if (NodesToDraw.IsEmpty())
@@ -841,7 +840,7 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 					}
 
 					// Collect transforms for each node type.
-					TArray<FTransform> SolidTransforms, EmptyTransforms, MixedTransforms;
+					TArray<FTransform> SolidTransforms, MixedTransforms;
 					for (const FDebugNodeInfo& NodeInfo : NodesToDraw)
 					{
 						const FVector Scale = NodeInfo.Bounds.GetSize() / 100.0f; // Assuming 100-unit debug mesh.
@@ -850,10 +849,6 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 						if (NodeInfo.State == EOctreeNodeState::Solid && StrongThis->DebugSolidNodesComponent)
 						{
 							SolidTransforms.Add(NodeTransform);
-						}
-						else if (NodeInfo.State == EOctreeNodeState::Empty && StrongThis->DebugEmptyNodesComponent)
-						{
-							EmptyTransforms.Add(NodeTransform);
 						}
 						else if (NodeInfo.State == EOctreeNodeState::Mixed && StrongThis->DebugMixedNodesComponent)
 						{
@@ -865,10 +860,6 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 					if (StrongThis->DebugSolidNodesComponent && !SolidTransforms.IsEmpty())
 					{
 						StrongThis->DebugSolidNodesComponent->AddInstances(SolidTransforms, false, true);
-					}
-					if (StrongThis->DebugEmptyNodesComponent && !EmptyTransforms.IsEmpty())
-					{
-						StrongThis->DebugEmptyNodesComponent->AddInstances(EmptyTransforms, false, true);
 					}
 					if (StrongThis->DebugMixedNodesComponent && !MixedTransforms.IsEmpty())
 					{

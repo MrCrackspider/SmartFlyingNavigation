@@ -32,17 +32,13 @@ AVoxelVolumeBase::AVoxelVolumeBase()
 	// Create HISM components for debug visualization.
 	DebugSolidNodesComponent = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("DebugSolidNodesComponent"));
 	DebugSolidNodesComponent->SetupAttachment(PivotComponent);
-
-	DebugEmptyNodesComponent = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("DebugEmptyNodesComponent"));
-	DebugEmptyNodesComponent->SetupAttachment(PivotComponent);
-
+	
 	DebugMixedNodesComponent = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("DebugMixedNodesComponent"));
 	DebugMixedNodesComponent->SetupAttachment(PivotComponent);
 
 	// Set default paths for debug materials.
-	DebugSolidNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/SmartFlyingNavigation/Debug/Material/MI_NavDebugMesh2.MI_NavDebugMesh2'");
-	DebugEmptyNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/SmartFlyingNavigation/Debug/Material/MI_NavDebugMesh.MI_NavDebugMesh'");
-	DebugMixedNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/SmartFlyingNavigation/Debug/Material/MI_NavDebugMesh3.MI_NavDebugMesh3'");
+	DebugSolidNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/SmartFlyingNavigation/Debug/Material/MI_NavDebugSolidVoxel.MI_NavDebugSolidVoxel'");
+	DebugMixedNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/SmartFlyingNavigation/Debug/Material/MI_NavDebugMixedVoxel.MI_NavDebugMixedVoxel'");
 	DebugLineWidth = 400.0f;
 #endif
 	
@@ -84,11 +80,7 @@ void AVoxelVolumeBase::OnConstruction(const FTransform& Transform)
 	{
 		SolidNodeMaterial = Cast<UMaterialInstance>(LoadedObject);
 	}
-	LoadedObject = DebugEmptyNodeMaterialPath.TryLoad();
-	if (LoadedObject)
-	{
-		EmptyNodeMaterial = Cast<UMaterialInstance>(LoadedObject);
-	}
+	
 	LoadedObject = DebugMixedNodeMaterialPath.TryLoad();
 	if (LoadedObject)
 	{
@@ -100,17 +92,14 @@ void AVoxelVolumeBase::OnConstruction(const FTransform& Transform)
 	{
 		// Assign the same mesh to all 3 components.
 		DebugSolidNodesComponent->SetStaticMesh(LoadedMesh);
-		DebugEmptyNodesComponent->SetStaticMesh(LoadedMesh);
 		DebugMixedNodesComponent->SetStaticMesh(LoadedMesh);
 
 		// Disable collision for debug meshes.
 		DebugSolidNodesComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		DebugEmptyNodesComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		DebugMixedNodesComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 		// Assign materials (if they were loaded successfully).
 		if (SolidNodeMaterial) DebugSolidNodesComponent->SetMaterial(0, SolidNodeMaterial);
-		if (EmptyNodeMaterial) DebugEmptyNodesComponent->SetMaterial(0, EmptyNodeMaterial);
 		if (MixedNodeMaterial) DebugMixedNodesComponent->SetMaterial(0, MixedNodeMaterial);
 	}
 	VolumeBox->SetLineThickness(DebugLineWidth);
@@ -148,10 +137,6 @@ void AVoxelVolumeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (DebugSolidNodesComponent)
 	{
 		DebugSolidNodesComponent->ClearInstances();
-	}
-	if (DebugEmptyNodesComponent)
-	{
-		DebugEmptyNodesComponent->ClearInstances();
 	}
 	if (DebugMixedNodesComponent)
 	{
@@ -295,7 +280,6 @@ void AVoxelVolumeBase::UpdateDebugObstacleVisualization()
 	if (!bDrawDebugBox)
 	{
 		DebugSolidNodesComponent->ClearInstances();
-		DebugEmptyNodesComponent->ClearInstances();
 		DebugMixedNodesComponent->ClearInstances();
 	}
 #endif
