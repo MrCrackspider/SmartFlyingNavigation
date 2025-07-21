@@ -1,54 +1,58 @@
 {
-	"FileVersion": 3,
-	"Version": 1,
-	"VersionName": "1.0",
-	"FriendlyName": "SmartFlyingNavigation",
-	"Description": "This is SmartFlyingNavigation",
-	"Category": "Other",
-	"CreatedBy": "TeamHamDev",
-	"CreatedByURL": "https://www.fab.com/sellers/TeamHamDev",
-	"DocsURL": "",
-  	"FabURL": "com.epicgames.launcher://ue/Fab/product//5922d422-4b2b-4a0a-b33a-5caca08ce2be",
-	"MarketplaceURL": "",
-	"SupportURL": "",
-	"EngineVersion": "5.3.2",
-	"CanContainContent": true,
-	"IsBetaVersion": false,
-	"IsExperimentalVersion": false,
-	"Installed": false,
-	"Modules": [
-		{
-			"Name": "SmartFlyingNavigation",
-			"Type": "Runtime",
-			"LoadingPhase": "Default",
-			"PlatformAllowList": [
-				"Win64",
-				"Mac"
-			],
-			"PlatformDenyList" : [
-				
-			]
-		},
-		{
-			"Name": "SmartFlyingNavigationEditor",
-			"Type": "Editor",
-			"LoadingPhase": "Default",
-			"PlatformAllowList": [
-				"Win64",
-				"Mac"
-			],
-			"PlatformDenyList" : [
-				
-			],
-			"AdditionalDependencies": [
-				"EditorScriptingUtilities"
-			]
-		}
-	],
-	"Plugins": [
-		{
-			"Name": "EditorScriptingUtilities",
-			"Enabled": true
-		}
-	]
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0",
+  "FriendlyName": "SmartFlyingNavigation",
+  "Description": "This is SmartFlyingNavigation",
+  "Category": "Other",
+  "CreatedBy": "TeamHamDev",
+  "CreatedByURL": "https://www.fab.com/sellers/TeamHamDev",
+  "DocsURL": "",
+  "FabURL": "com.epicgames.launcher://ue/Fab/product//5922d422-4b2b-4a0a-b33a-5caca08ce2be",
+  "MarketplaceURL": "",
+  "SupportURL": "",
+  "EngineVersion": "5.6.0",
+  "SupportedEngineVersions": [
+    "5.3",
+    "5.4",
+    "5.5",
+    "5.6"
+  ],
+  "CanContainContent": true,
+  "IsBetaVersion": false,
+  "IsExperimentalVersion": false,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "SmartFlyingNavigation",
+      "Type": "Runtime",
+      "LoadingPhase": "Default",
+      "PlatformAllowList": [
+        "Win64",
+        "Mac"
+      ],
+      "PlatformDenyList": [
+      ]
+    },
+    {
+      "Name": "SmartFlyingNavigationEditor",
+      "Type": "Editor",
+      "LoadingPhase": "Default",
+      "PlatformAllowList": [
+        "Win64",
+        "Mac"
+      ],
+      "PlatformDenyList": [
+      ],
+      "AdditionalDependencies": [
+        "EditorScriptingUtilities"
+      ]
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "EditorScriptingUtilities",
+      "Enabled": true
+    }
+  ]
 } 
