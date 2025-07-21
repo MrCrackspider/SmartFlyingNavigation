@@ -19,11 +19,7 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	bool bIsGoalNodeInvalid = (GoalNodeIndex == -1) ||
 		(OctreeData.StaticNodePool[GoalNodeIndex].State != EOctreeNodeState::Empty) ||
 		(OctreeData.StaticNodePool[GoalNodeIndex].MaxAllowedRadius < InRequest.AgentRadius);
-
-	if (StartNodeIndex == -1 || OctreeData.StaticNodePool[StartNodeIndex].State != EOctreeNodeState::Empty)
-	{
-	}
- 
+	
 	if (bIsGoalNodeInvalid)
 	{
 		const int32 NewGoalNodeIndex = OctreeData.FindNearestValidLeafForAgent(
@@ -155,11 +151,11 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 
 			FAstarPathNode* ParentNode = CurrentNode;
 
-			const float NodeRadius = Pool[SuccIdx].MaxAllowedRadius;
-			if (NodeRadius < AgentRadius)
-			{
-				continue;
-			}
+			// const float NodeRadius = Pool[SuccIdx].MaxAllowedRadius;
+			// if (NodeRadius < AgentRadius)
+			// {
+			// 	continue;
+			// }
 
 			const int64 MoveCost = GetMoveCost(ParentNode->WorldPosition, Successor->WorldPosition);
 			const int64 NewGCost = ParentNode->GCost + MoveCost;
@@ -227,7 +223,10 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 	{
 		OutPath.Empty();
 		if (RawPath.Num() > 0) OutPath.Add(ActualStartLocation);
-		OutPath.Add(ActualGoalLocation);
+		if (HasFastLineOfSight(RawPath.Last(), ActualGoalLocation))
+		{
+			OutPath.Add(ActualGoalLocation);
+		}
 		return;
 	}
 
