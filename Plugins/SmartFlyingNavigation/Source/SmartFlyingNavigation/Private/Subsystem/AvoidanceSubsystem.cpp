@@ -4,6 +4,7 @@
 #include "PathfindingComponent.h"
 #include "GameFramework/Actor.h"
 #include "Stats/Stats.h"
+#include "Engine/Engine.h"
 #include "DrawDebugHelpers.h"
 #include "Algo/Sort.h"
 #include "CollisionQueryParams.h"
@@ -314,7 +315,7 @@ static void GenerateVoxelConstraints_ThreadSafe(const UWorld* World, const FAgen
     CollisionParams.bTraceComplex = true;
 
     TArray<FHitResult> HitResults;
-    const bool bHasHits = World->SweepMultiByObjectType(
+    bool bHasHits = World->SweepMultiByObjectType(
         HitResults,
         PositionA,
         EndPoint,

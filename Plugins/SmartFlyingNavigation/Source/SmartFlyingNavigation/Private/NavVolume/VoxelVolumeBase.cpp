@@ -2,6 +2,8 @@
 
 #include "NavVolume/VoxelVolumeBase.h"
 #include "Components/BoxComponent.h"
+#include "TimerManager.h"
+#include "Engine/World.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 
 //~======================================================================
@@ -25,7 +27,8 @@ AVoxelVolumeBase::AVoxelVolumeBase()
 	VolumeBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	VolumeBox->SetCollisionResponseToAllChannels(ECR_Ignore);
 	VolumeBox->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
-
+	
+#if WITH_EDITOR
 	// Create HISM components for debug visualization.
 	DebugSolidNodesComponent = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("DebugSolidNodesComponent"));
 	DebugSolidNodesComponent->SetupAttachment(PivotComponent);
@@ -40,12 +43,13 @@ AVoxelVolumeBase::AVoxelVolumeBase()
 	DebugSolidNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/SmartFlyingNavigation/Debug/Material/MI_NavDebugMesh2.MI_NavDebugMesh2'");
 	DebugEmptyNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/SmartFlyingNavigation/Debug/Material/MI_NavDebugMesh.MI_NavDebugMesh'");
 	DebugMixedNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/SmartFlyingNavigation/Debug/Material/MI_NavDebugMesh3.MI_NavDebugMesh3'");
-
+	DebugLineWidth = 400.0f;
+#endif
+	
 	// Set default volume properties.
 	MapSize = FIntVector(128, 128, 128);
 	VoxelExtent = 100.f;
 	bDrawDebugBox = true;
-	DebugLineWidth = 400.0f;
 }
 
 //~======================================================================
@@ -68,12 +72,12 @@ void AVoxelVolumeBase::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 
+#if WITH_EDITOR
 	// Set the path for the debug static mesh.
 	static const FSoftObjectPath DebugMeshPath(
 		TEXT("/Script/Engine.StaticMesh'/SmartFlyingNavigation/Debug/SM_DebugVoxel.SM_DebugVoxel'"));
 	DebugMeshAsset = DebugMeshPath;
 	
-#if WITH_EDITORONLY_DATA
 	// Load debug materials from their paths.
 	UObject* LoadedObject = DebugSolidNodeMaterialPath.TryLoad();
 	if (LoadedObject)
@@ -109,6 +113,8 @@ void AVoxelVolumeBase::OnConstruction(const FTransform& Transform)
 		if (EmptyNodeMaterial) DebugEmptyNodesComponent->SetMaterial(0, EmptyNodeMaterial);
 		if (MixedNodeMaterial) DebugMixedNodesComponent->SetMaterial(0, MixedNodeMaterial);
 	}
+	VolumeBox->SetLineThickness(DebugLineWidth);
+	
 #endif
 
 	// Prevent direct scaling of the actor and log a warning.
@@ -125,7 +131,7 @@ void AVoxelVolumeBase::OnConstruction(const FTransform& Transform)
 	// to position the entire volume in positive coordinate space.
 	VolumeBox->SetBoxExtent(HalfExtent);
 	VolumeBox->SetRelativeLocation(HalfExtent);
-	VolumeBox->SetLineThickness(DebugLineWidth);
+	
 }
 
 void AVoxelVolumeBase::Tick(float DeltaTime)
@@ -137,7 +143,7 @@ void AVoxelVolumeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	// Clear the debug update timer.
 	GetWorldTimerManager().ClearTimer(DebugUpdateTimer);
-
+#if WITH_EDITOR 
 	// Clear all instances from the debug mesh components.
 	if (DebugSolidNodesComponent)
 	{
@@ -151,7 +157,7 @@ void AVoxelVolumeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		DebugMixedNodesComponent->ClearInstances();
 	}
-
+#endif
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -273,6 +279,7 @@ bool AVoxelVolumeBase::IsVoxelOverlapping(const FIntVector& VoxelIndex, UPrimiti
 
 void AVoxelVolumeBase::UpdateDebugObstacleVisualization()
 {
+#if WITH_EDITORONLY_DATA
 	if (!bDrawDebugBox || !GetWorld())
 	{
 		return;
@@ -291,4 +298,5 @@ void AVoxelVolumeBase::UpdateDebugObstacleVisualization()
 		DebugEmptyNodesComponent->ClearInstances();
 		DebugMixedNodesComponent->ClearInstances();
 	}
+#endif
 }

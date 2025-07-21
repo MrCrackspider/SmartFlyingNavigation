@@ -22,7 +22,7 @@ void UDynamicObstacleComponent::BeginPlay()
 	}
 
 	TArray<AActor*> FoundVolumes;
-	UGameplayStatics::GetAllActorsOfClass(GetWorld(), AOctreeVoxelVolume::StaticClass(), FoundVolumes);
+	UGameplayStatics::GetAllActorsOfClass(this, AOctreeVoxelVolume::StaticClass(), FoundVolumes);
 
 	if (FoundVolumes.Num() == 0)
 	{

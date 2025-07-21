@@ -2,6 +2,7 @@
 
 #include "NavData/VoxelObstacleProfile.h"
 #include "Components/PrimitiveComponent.h"
+#include "GameFramework/Actor.h"
 
 bool UVoxelObstacleProfile::DoesActorMatch(const AActor* InActor, const UPrimitiveComponent* InPrimitiveComponent) const
 {

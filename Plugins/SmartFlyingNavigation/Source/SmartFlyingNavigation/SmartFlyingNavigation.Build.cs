@@ -1,5 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
-
+// Copyright © 2025 TeamHamDev. All Rights Reserved.
 using UnrealBuildTool;
 
 public class SmartFlyingNavigation : ModuleRules
@@ -25,6 +24,8 @@ public class SmartFlyingNavigation : ModuleRules
 			new string[]
 			{
 				"Core",
+				"CoreUObject",
+				"Engine",
 				// ... add other public dependencies that you statically link with here ...
 			}
 		);
@@ -33,8 +34,6 @@ public class SmartFlyingNavigation : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"CoreUObject",
-				"Engine",
 				"InputCore",
 				"Projects",
 			}

@@ -178,23 +178,24 @@ public:
 	bool bDrawDebugBox;
 
 
+#if WITH_EDITOR
 	float GetDebugLineWidth() const { return DebugLineWidth; }
 	void SetDebugLineWidth(float Value) { DebugLineWidth = Value; }
+#endif
 	/**
 	 * @brief The thickness of the debug lines.
 	 */
-	UPROPERTY()
-	float DebugLineWidth;
 
 #if WITH_EDITORONLY_DATA
-
+	
+	UPROPERTY(EditAnywhere, Category = "Voxel Volume|Debug")
+	float DebugLineWidth;
 	/**
 	 * @brief The static mesh to use for debug visualization.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug")
 	TSoftObjectPtr<UStaticMesh> DebugMeshAsset;
-
-#if WITH_EDITORONLY_DATA
+	
 	/**
 	 * @brief Hierarchical Instanced Static Mesh Component for visualizing solid nodes.
 	 */
@@ -212,7 +213,7 @@ public:
 	 */
 	UPROPERTY()
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DebugMixedNodesComponent;
-#endif
+
 	
 	/**
 	 * @brief Soft path to the material for visualizing solid nodes (configurable in the editor).

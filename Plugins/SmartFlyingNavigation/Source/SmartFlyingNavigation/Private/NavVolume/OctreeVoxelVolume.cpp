@@ -11,7 +11,7 @@
 
 // Pathfinder Core Headers
 #include "NavData/VoxelObstacleProfile.h"
-#include "DynamicObstacle.h" // FIX-ME
+#include "DynamicObstacle.h"
 
 // SIMD Headers for Dynamic Grid Query
 #include "emmintrin.h"
@@ -801,7 +801,7 @@ void AOctreeVoxelVolume::SaveOctreeToAsset()
 void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 {
 	Super::UpdateDebugObstacleVisualization();
-
+#if WITH_EDITORONLY_DATA
 	if (!VolumeBox || bIsUpdatingVisualization)
 	{
 		return;
@@ -878,6 +878,7 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 					StrongThis->bIsUpdatingVisualization = false;
 				});
 		});
+#endif
 }
 
 void AOctreeVoxelVolume::GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex, const FBox& NodeBounds, int32 CurrentDepth) const

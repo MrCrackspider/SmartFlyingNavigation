@@ -217,6 +217,9 @@ private:
 	// Baking Internals
 	//~======================================================================
 
+	/** Calculates the bounding box for one of the 8 children of a parent node. */
+	FBox CalculateChildBounds(const FBox& ParentBounds, int32 ChildIndex) const;
+
 #if WITH_EDITOR
 private:
 	
@@ -237,10 +240,7 @@ private:
 
 	/** Traverses the octree bottom-up to merge child nodes that have the same state, optimizing memory usage. */
 	void OptimizeAndCollapse(int32 NodeIndex, const FBox& NodeBounds);
-
-	/** Calculates the bounding box for one of the 8 children of a parent node. */
-	FBox CalculateChildBounds(const FBox& ParentBounds, int32 ChildIndex) const;
-
+	
 	/** Determines which of the 8 octants a given voxel belongs to within a node's bounds. */
 	int32 GetOctantContainingVoxel(const FBox& NodeBounds, const FVector& VoxelWorldPos) const;
 

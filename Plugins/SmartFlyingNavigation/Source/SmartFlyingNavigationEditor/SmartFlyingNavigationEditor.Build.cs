@@ -1,3 +1,4 @@
+// Copyright © 2025 TeamHamDev. All Rights Reserved.
 using UnrealBuildTool;
 
 public class SmartFlyingNavigationEditor : ModuleRules

@@ -3,14 +3,15 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "Subsystems/EngineSubsystem.h"
+#include "Tickable.h"
+#include "Async/AsyncWork.h"
+#include "Containers/Queue.h"
+#include "HAL/ThreadSafeCounter.h"
+#include "HAL/CriticalSection.h"
 #include "GameFramework/Actor.h"
 #include "Utility/Parallel/PathfindingRequest.h"
 #include "PathfindingSubsystem.generated.h"
-
-// Forward Declarations
-class FQueuedThreadPool;
-struct FPathNodeMemoryPoolBase;
 
 class FPathfindingAsyncTasks : public IQueuedWork
 {

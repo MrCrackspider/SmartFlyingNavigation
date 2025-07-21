@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "Engine/EngineTypes.h"
+#include "Components/ActorComponent.h"
 #include "VoxelObstacleProfile.generated.h"
 
 // Enum to define how filter criteria are combined

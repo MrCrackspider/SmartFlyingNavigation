@@ -293,8 +293,6 @@ public:
 	
 	FTimerHandle RepathCooldownTimer;
 	
-	TFuture<TArray<FIntVector>> PathfindingTaskFuture;
-
 private:
 	UPROPERTY()
 	TObjectPtr<USplineComponent> PathSplinePtr; 

@@ -6,6 +6,7 @@
 #include "Subsystem/AvoidanceSubsystem.h"
 #include "Strategy/PathfindingStrategy.h"
 #include "GameFramework/Actor.h"
+#include "TimerManager.h"
 #include "Engine/World.h"
 #include "DrawDebugHelpers.h"
 #include "Components/BoxComponent.h"
@@ -92,11 +93,7 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 			return;
 		}
 	}
-
-	if (PathfindingTaskFuture.IsValid())
-	{
-		HandlePathfindingResult();
-	}
+	
 }
 
 void UPathfindingComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -127,11 +124,6 @@ void UPathfindingComponent::OnRegister()
 
 bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 {
-	if (PathfindingTaskFuture.IsValid() && !PathfindingTaskFuture.IsReady())
-	{
-		return false;
-	}
-
 	if (!PathfindingStrategy || !TargetVolume)
 	{
 		return false;
@@ -591,12 +583,6 @@ void UPathfindingComponent::UpdateAgentRadiusFromScale(bool bForceUpdate)
 
 void UPathfindingComponent::HandlePathfindingResult()
 {
-	if (PathfindingTaskFuture.IsValid() && PathfindingTaskFuture.IsReady())
-	{
-		TArray<FIntVector> PathIndices = PathfindingTaskFuture.Get();
-		PathfindingTaskFuture.Reset();
-	}
-
 	if (bPeriodicRepath && !bIsReachDestination)
 	{
 		if (UWorld* World = GetWorld())
