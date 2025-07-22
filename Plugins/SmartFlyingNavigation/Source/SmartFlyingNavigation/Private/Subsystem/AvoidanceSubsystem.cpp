@@ -29,7 +29,7 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     GridCellSize = 100.f;
     SymmetryBreakingRangeMultiplier = 8.f;
     SolverIterations = 5;
-    SideBiasMagnitude = 2.f;
+    SideBiasMagnitude = 4.f;
     InterpSpeed = 10.f;
 
     bShowVelocityDebugLine = true;
@@ -475,28 +475,46 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
         {
             bShouldYield = true;
         }
-        else if (FMath::IsNearlyEqual(CurrentAgent.AvoidanceRadius, ObstacleAgent->AvoidanceRadius) && CurrentAgent.PreferredVelocity.Size() > ObstacleAgent->PreferredVelocity.Size())
+        else if (FMath::IsNearlyEqual(CurrentAgent.AvoidanceRadius, ObstacleAgent->AvoidanceRadius))
         {
-            bShouldYield = true;
+            if (CurrentAgent.PreferredVelocity.SizeSquared() > ObstacleAgent->PreferredVelocity.SizeSquared())
+            {
+                bShouldYield = true;
+            }
+            else if (FMath::IsNearlyEqual(CurrentAgent.PreferredVelocity.SizeSquared(), ObstacleAgent->PreferredVelocity.SizeSquared()))
+            {
+                if (CurrentAgent.AgentId > ObstacleAgent->AgentId)
+                {
+                    bShouldYield = true;
+                }
+            }
         }
     }
 
     if (bShouldYield)
     {
-        //FVector ForwardVec = PreferredVelocity.GetSafeNormal();
-        //FVector UpVector = CurrentAgent.UpVector;
-        FVector ForwardVec = ObstacleAgent->CurrentVelocity.GetSafeNormal();
-        FVector UpVector = ObstacleAgent->UpVector;
+        const FVector ForwardVec = PreferredVelocity.GetSafeNormal();
+        const FVector UpVector = CurrentAgent.UpVector;
+
         FVector SideVector = FVector::CrossProduct(ForwardVec, UpVector);
         SideVector.Normalize();
 
-        // bCanPass
-        FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
-        return ActualPreferredVelocity.GetSafeNormal() * CurrentAgent.MovementSpeed;
-        //FVector ActualPreferredVelocity = SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
-        //return ActualPreferredVelocity;
-    }
+        if (ObstacleAgent)
+        {
+            const FVector ToObstacle = ObstacleAgent->Position - CurrentAgent.Position;
+            const float DotWithSide = FVector::DotProduct(ToObstacle, SideVector);
 
+            if (DotWithSide > 0.0f)
+            {
+                SideVector *= -1.0f;
+            }
+        }
+
+        //FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
+        //return ActualPreferredVelocity.GetSafeNormal() * CurrentAgent.MovementSpeed;
+        FVector ActualPreferredVelocity = SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
+        return ActualPreferredVelocity;
+    }
     return PreferredVelocity;
 }
 
