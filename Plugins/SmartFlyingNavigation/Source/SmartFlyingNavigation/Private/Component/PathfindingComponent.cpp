@@ -188,8 +188,6 @@ void UPathfindingComponent::CreateOctreeDataSnapshot(const AOctreeVoxelVolume* O
 	const TArray<FOctreeNode>* SourceNodePoolPtr  = OctreeVolume->GetNodePoolPtr();
 	if (SourceNodePoolPtr && !SourceNodePoolPtr->IsEmpty())
 	{
-		//const int32 NodeCount = SourceNodePoolPtr->Num();
-
 		SnapshotData.StaticNodePoolPtr = SourceNodePoolPtr;
 	}
 	
