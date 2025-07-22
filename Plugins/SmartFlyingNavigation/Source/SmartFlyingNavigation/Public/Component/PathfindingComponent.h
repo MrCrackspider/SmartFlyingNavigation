@@ -121,6 +121,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Pathfinding|Avoidance")
 	float GetMovementSpeed() const { return MovementSpeed; }
 
+	UPROPERTY()
+	FVector AppliedVelocity;
+
+	UFUNCTION(BlueprintPure, Category = "Pathfinding|Avoidance")
+	FVector GetAppliedVelocity() const { return AppliedVelocity; }
+	void SetAppliedVelocity(FVector InAppliedVelocity) { AppliedVelocity = InAppliedVelocity; }
+
 	bool GetbDrawDebugPath() const { return bDrawDebugPath; }
 	void SetbDrawDebugPath(bool NewValue) { bDrawDebugPath = NewValue; }
 	

@@ -100,4 +100,5 @@ private:
     bool bShowVelocityDebugLine;
     void DebugVisualizeVelocities(const UPathfindingComponent* Agent, const FThreadAvoidanceResult& Result, const FVector& FinalOptimalVelocity) const;
 
+    bool bUseAvoidance;
 };
