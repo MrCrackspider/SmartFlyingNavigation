@@ -1,7 +1,7 @@
 ﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
 
 #include "Subsystem/AvoidanceSubsystem.h"
-#include "PathfindingComponent.h"
+#include "Component/PathfindingComponent.h"
 #include "GameFramework/Actor.h"
 #include "Stats/Stats.h"
 #include "Engine/Engine.h"
@@ -27,7 +27,7 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     TimeHorizon = 1.f;
     MaxNeighbors = 8;
     GridCellSize = 100.f;
-    SymmetryBreakingRangeMultiplier = 4.f;
+    SymmetryBreakingRangeMultiplier = 8.f;
     SolverIterations = 5;
     SideBiasMagnitude = 2.f;
     InterpSpeed = 10.f;
@@ -462,7 +462,7 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
     bool bShouldYield = false;
     if (ObstacleAgent)
     {
-        if (CurrentAgent.AvoidanceRadius < ObstacleAgent->AvoidanceRadius)
+        if (CurrentAgent.AvoidanceRadius <= ObstacleAgent->AvoidanceRadius)
         {
             bShouldYield = true;
         }
@@ -474,10 +474,10 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
 
     if (bShouldYield)
     {
-        //FVector ForwardVec = ObstacleAgent->CurrentVelocity.GetSafeNormal();
-        FVector ForwardVec = PreferredVelocity.GetSafeNormal();
-        //FVector UpVector = ObstacleAgent->UpVector;
-        FVector UpVector = CurrentAgent.UpVector;
+        //FVector ForwardVec = PreferredVelocity.GetSafeNormal();
+        //FVector UpVector = CurrentAgent.UpVector;
+        FVector ForwardVec = ObstacleAgent->CurrentVelocity.GetSafeNormal();
+        FVector UpVector = ObstacleAgent->UpVector;
         FVector SideVector = FVector::CrossProduct(ForwardVec, UpVector);
         SideVector.Normalize();
 
