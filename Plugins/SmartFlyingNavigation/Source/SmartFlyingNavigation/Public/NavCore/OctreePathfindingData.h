@@ -220,7 +220,47 @@ private:
 			}
 		}
 	}
+	bool CheckForObstaclesInBox(const FBox& QueryBox) const
+	{
+		// First, check for dynamic obstacles which is a fast bitmask operation.
+		if (IsRegionDynamicallyBlocked(QueryBox))
+		{
+			return true;
+		}
 
+		// If no dynamic obstacles, check against the static octree.
+		TArray<int32> NodesToVisit;
+		NodesToVisit.Push(RootNodeIndex);
+
+		while (NodesToVisit.Num() > 0)
+		{
+			const int32 CurrentNodeIndex = NodesToVisit.Pop();
+			if (!StaticNodePool.IsValidIndex(CurrentNodeIndex)) continue;
+
+			const FOctreeNode& Node = StaticNodePool[CurrentNodeIndex];
+			
+			if (!Node.Bounds.Intersect(QueryBox))
+			{
+				continue;
+			}
+
+			if (Node.State == EOctreeNodeState::Solid)
+			{
+				return true; // Collision with a solid node.
+			}
+
+			if (Node.State == EOctreeNodeState::Mixed)
+			{
+				for (int32 ChildIndex : Node.ChildrenIndices)
+				{
+					if (ChildIndex != -1) NodesToVisit.Push(ChildIndex);
+				}
+			}
+		}
+
+		return false; // No obstacles found.
+	}
+	
 public:
 	bool IsPathClearHierarchically(const FVector& Start, const FVector& End, float AgentRadius) const
 	{
@@ -290,7 +330,34 @@ public:
 
 		return false;
 	}
+	bool IsPathClearWithVoxelSweep(const FVector& Start, const FVector& End, float AgentRadius) const
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(Octree_IsPathClearWithVoxelSweep);
 
+		if (RootNodeIndex == -1) return true;
+
+		const FVector RayDirection = End - Start;
+		const float TotalDistance = RayDirection.Size();
+		if (TotalDistance < KINDA_SMALL_NUMBER) return true;
+
+		const FVector AgentExtent(AgentRadius);
+		const FVector StepVector = RayDirection / TotalDistance * VoxelSize;
+		const int32 NumSteps = FMath::CeilToInt(TotalDistance / VoxelSize);
+
+		for (int32 i = 0; i <= NumSteps; ++i)
+		{
+			const FVector CurrentPos = Start + StepVector * i;
+			const FBox AgentQueryBox(CurrentPos - AgentExtent, CurrentPos + AgentExtent);
+
+			// Check for collisions with both static and dynamic obstacles at each step.
+			if (CheckForObstaclesInBox(AgentQueryBox))
+			{
+				return false; // Path is blocked.
+			}
+		}
+
+		return true; // Path is clear.
+	}
 	int32 FindLeafNodeAt(const FVector& WorldPos) const
 	{
 		if (!VolumeBounds.IsInside(WorldPos) || RootNodeIndex == -1)
@@ -315,7 +382,6 @@ public:
 		}
 		return -1;
 	}
-
 	FBox GetNodeBounds(int32 NodeIndex) const
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(Octree_GetNodeBounds);
@@ -389,7 +455,7 @@ public:
 					const __m128i Mask = CreateMask(StartBitInChunk, EndBitInChunk);
 					const __m128i ChunkData = _mm_loadu_si128(
 						reinterpret_cast<const __m128i*>(&DynamicObstacleBitmask[StartChunkIndex]));
-					if (_mm_testz_si128(ChunkData, Mask) == 0) return true; // 막힘
+					if (_mm_testz_si128(ChunkData, Mask) == 0) return true;
 				}
 				else
 				{
@@ -439,7 +505,7 @@ public:
 		{
 			if (StaticNodePool.IsValidIndex(LeafIndex) && StaticNodePool[LeafIndex].State == EOctreeNodeState::Empty)
 			{
-				const FBox& LeafBounds = StaticNodePool[LeafIndex].Bounds; // GetNodeBounds 대신 직접 접근
+				const FBox& LeafBounds = StaticNodePool[LeafIndex].Bounds;
 				if (!IsRegionDynamicallyBlocked(LeafBounds))
 				{
 					const float DistSq = FVector::DistSquared(Origin, LeafBounds.GetCenter());

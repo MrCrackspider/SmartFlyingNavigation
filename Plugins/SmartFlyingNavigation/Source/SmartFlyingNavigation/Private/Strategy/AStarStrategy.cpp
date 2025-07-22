@@ -125,6 +125,23 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 		FAstarPathNode* CurrentNode;
 		OpenSet.HeapPop(CurrentNode, Predicate);
 
+
+
+
+		// --- LAZY THETA* CORE LOGIC (CLEANED UP) ---
+		// This is the moment to check for a shortcut from the grandparent.
+		if (CurrentNode->Parent != nullptr && CurrentNode->Parent->Parent != nullptr)
+		{
+			FAstarPathNode* GrandparentNode = CurrentNode->Parent->Parent;
+			if (HasGuaranteedLineOfSight(GrandparentNode->WorldPosition, CurrentNode->WorldPosition))
+			{
+				// A shortcut is possible. Update the node's parent and its G-cost.
+				// This is the only line needed to change the path's structure.
+				const int64 NewGCost = GrandparentNode->GCost + GetMoveCost(GrandparentNode->WorldPosition, CurrentNode->WorldPosition);
+				CurrentNode->SetParent(GrandparentNode, NewGCost, CurrentNode->HCost);
+			}
+		}
+		// --- END OF LAZY THETA* LOGIC ---
 		OpenSetLookup.Remove(CurrentNode->NodeIndex);
 		ClosedSet.Add(CurrentNode->NodeIndex, CurrentNode);
 
@@ -135,7 +152,7 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 
 		if (CurrentNode->NodeIndex == GoalNodeIndex)
 		{
-		 	ReconstructAndSmoothPath(CurrentNode, OutPath);
+		 	ReconstructPath(CurrentNode, OutPath);
 			return EPathfindingResult::Success;
 		}
 
@@ -186,7 +203,7 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 
 	if (BestPartialNode)
 	{
-		ReconstructPath(BestPartialNode, OutPath);
+		ReconstructAndSmoothPath(BestPartialNode, OutPath);
 		return EPathfindingResult::Success_Partial;
 	}
 
@@ -201,11 +218,17 @@ bool FAstarPathfinder::HasFastLineOfSight(const FVector& Start, const FVector& E
 	return OctreeData.VoxelRayMarch(Start, End, CenterlineNodes);
 }
 
+bool FAstarPathfinder::HasSimpleLineOfSight(const FVector& Start, const FVector& End) const
+{
+	TArray<int32> IgnoredNodes; // We don't need the list of nodes here.
+	return OctreeData.VoxelRayMarch(Start, End, IgnoredNodes);
+}
+
 void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<FVector>& OutPath)
 {
+	// --- Step 1: Reconstruct the initial path from A* nodes (reversed) ---
 	TArray<FVector> RawPath;
 	FAstarPathNode* CurrentNode = EndNode;
-
 	while (CurrentNode != nullptr)
 	{
 		RawPath.Add(CurrentNode->WorldPosition);
@@ -213,62 +236,58 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 	}
 	Algo::Reverse(RawPath);
 
-	if (RawPath.Num() <= 1)
+	// --- Step 2: Handle trivial cases ---
+	if (RawPath.Num() < 2)
 	{
-		OutPath.Empty();
-		if (RawPath.Num() > 0) OutPath.Add(ActualStartLocation);
-		if (HasFastLineOfSight(RawPath.Last(), ActualGoalLocation))
-		{
-			OutPath.Add(ActualGoalLocation);
-		}
+		OutPath = RawPath;
+		// Ensure actual start/goal are used if possible
+		if (OutPath.Num() > 0) OutPath[0] = ActualStartLocation;
+		OutPath.Add(ActualGoalLocation);
 		return;
 	}
 
+	// --- Step 3: Anchor the true start and end locations ---
+	// This ensures the smoothing process works from the agent's exact position to the goal's exact position.
 	RawPath[0] = ActualStartLocation;
-	if (HasFastLineOfSight(RawPath.Last(), ActualGoalLocation))
-	{
-		RawPath.Last() = ActualGoalLocation;
-	}
+	RawPath.Last() = ActualGoalLocation;
 
+	// --- Step 4: Perform the "String Pulling" algorithm ---
 	OutPath.Empty();
-	OutPath.Add(RawPath[0]);
+	OutPath.Add(RawPath[0]); // Start the final path with the first point.
 
-	int32 CurrentPointIndex = 0;
-	while (CurrentPointIndex < RawPath.Num() - 1)
+	int32 AnchorIndex = 0;
+	while (AnchorIndex < RawPath.Num() - 1)
 	{
-		int32 LookAheadLow = CurrentPointIndex + 1;
-		int32 LookAheadHigh = RawPath.Num() - 1;
-		int32 BestLookAheadIndex = LookAheadLow;
+		int32 FurthestVisibleIndex = AnchorIndex + 1;
 
-		while (LookAheadLow <= LookAheadHigh)
+		// Find the furthest point in RawPath that is visible from the current anchor point.
+		// We iterate forward from the next point.
+		for (int32 LookAheadIndex = AnchorIndex + 2; LookAheadIndex < RawPath.Num(); ++LookAheadIndex)
 		{
-			const int32 Mid = LookAheadLow + (LookAheadHigh - LookAheadLow) / 2;
-
-			if (HasGuaranteedLineOfSight(OutPath.Last(), RawPath[Mid]))
+			// Check line-of-sight from the anchor to the look-ahead point.
+			if (HasGuaranteedLineOfSight(RawPath[AnchorIndex], RawPath[LookAheadIndex]))
 			{
-				BestLookAheadIndex = Mid;
-				LookAheadLow = Mid + 1;
+				// If we can see this point, it's our new best candidate.
+				FurthestVisibleIndex = LookAheadIndex;
 			}
 			else
 			{
-				LookAheadHigh = Mid - 1;
+				// As soon as we can't see a point, we stop looking further.
+				// The previous point was the last one in our line of sight.
+				break;
 			}
 		}
 
-		OutPath.Add(RawPath[BestLookAheadIndex]);
+		// Add the furthest visible point to our final path.
+		OutPath.Add(RawPath[FurthestVisibleIndex]);
 
-		if (BestLookAheadIndex == RawPath.Num() - 1)
-		{
-			break;
-		}
-
-		CurrentPointIndex = BestLookAheadIndex;
+		// The point we just added becomes the new anchor for the next iteration.
+		AnchorIndex = FurthestVisibleIndex;
 	}
 }
-
 bool FAstarPathfinder::HasGuaranteedLineOfSight(const FVector& Start, const FVector& End) const
 {
-	return OctreeData.IsPathClearHierarchically(Start, End, AgentRadius);
+	return OctreeData.IsPathClearWithVoxelSweep(Start, End, AgentRadius);
 }
 
 void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPathNode*>& OutSuccessors)
@@ -287,7 +306,7 @@ void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPat
 		FVector NeighborCenter = NeighborBounds.GetCenter();
 
 		// 1) If the cell itself is already big enough, we have instant clearance.
-		if (!HasGuaranteedLineOfSight(CurrentNodeCenter, NeighborCenter))
+		if (!HasFastLineOfSight(CurrentNodeCenter, NeighborCenter))
 		{
 			continue;
 		}
