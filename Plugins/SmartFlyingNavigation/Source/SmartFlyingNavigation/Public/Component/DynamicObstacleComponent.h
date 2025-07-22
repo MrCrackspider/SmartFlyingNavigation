@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "DynamicObstacle.generated.h"
+#include "DynamicObstacleComponent.generated.h"
 
 class AOctreeVoxelVolume;
 

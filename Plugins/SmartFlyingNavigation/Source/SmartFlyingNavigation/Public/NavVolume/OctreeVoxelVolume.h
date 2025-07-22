@@ -34,16 +34,6 @@ public:
 	//~======================================================================
 
 	/**
-	 * Checks if a specified region is walkable for an agent of a given size.
-	 * This query considers both the static octree (world geometry) and the dynamic obstacle grid.
-	 *
-	 * @param VoxelIndex The center of the query region in voxel coordinates.
-	 * @param AgentRadiusInVoxels The radius of the agent in number of voxels, defining the query's extent.
-	 * @return True if the entire region is free of both static and dynamic obstacles, false otherwise.
-	 */
-	bool IsRegionWalkable(const FIntVector& VoxelIndex, int32 AgentRadiusInVoxels) const;
-
-	/**
 	 * Registers a component to be treated as a dynamic obstacle.
 	 * The component's bounds will be voxelized and updated periodically.
 	 *
@@ -193,7 +183,7 @@ private:
 	 * @param QueryBox The box to check for intersections.
 	 * @return True if the region is empty, false if it contains an obstacle.
 	 */
-	bool IsRegionEmpty_StaticOctree(const FBox& QueryBox) const;
+	bool IsRegionEmpty(const FBox& QueryBox) const;
 
 	/**
 	 * The recursive implementation for checking a region against the static octree.
@@ -202,16 +192,7 @@ private:
 	 * @param QueryBox The original query box.
 	 * @return True if the region is empty, false otherwise.
 	 */
-	bool IsRegionEmptyRecursive(int32 NodeIndex, const FBox& NodeBounds, const FBox& QueryBox) const;
-
-	/**
-	 * Internal function to check for collisions within the dynamic obstacle grid.
-	 * Uses SIMD instructions for performance where possible.
-	 * @param MinCorner The minimum corner of the query box in voxel coordinates.
-	 * @param MaxCorner The maximum corner of the query box in voxel coordinates.
-	 * @return True if the region is empty, false if it contains a dynamic obstacle.
-	 */
-	bool IsRegionEmpty_DynamicGrid(const FIntVector& MinCorner, const FIntVector& MaxCorner) const;
+	bool IsRegionEmpty_Internal(int32 NodeIndex, const FBox& NodeBounds, const FBox& QueryBox) const;
 
 	//~======================================================================
 	// Baking Internals

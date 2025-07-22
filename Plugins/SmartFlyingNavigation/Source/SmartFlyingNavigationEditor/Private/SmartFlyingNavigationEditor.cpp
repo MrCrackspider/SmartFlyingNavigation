@@ -5,7 +5,7 @@
 #include "Nav3DPathfindingDetails.h"
 #include "Nav3DVolumeDetails.h"
 #include "LevelEditor.h"
-#include "PathfindingComponent.h"
+#include "Component/PathfindingComponent.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "SmartFlyingNavigationEditor/Public/SPathfindingTuner.h" 
 #include "WorkspaceMenuStructure.h"

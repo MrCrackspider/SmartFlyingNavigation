@@ -30,7 +30,7 @@
 #include "NavData/VoxelObstacleProfile.h"
 #include "NavVolume/OctreeVoxelVolume.h"
 #include "Subsystem/PathfindingSubsystem.h"
-#include "PathfindingComponent.h"
+#include "Component/PathfindingComponent.h"
 #include "SPathfindingTunerSettings.h"
 
 #define LOCTEXT_NAMESPACE "PathfindingTuner"

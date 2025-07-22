@@ -1,6 +1,6 @@
 ﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
 
-#include "PathfindingComponent.h"
+#include "Component/PathfindingComponent.h"
 #include "Components/SplineComponent.h"
 #include "Subsystem/PathfindingSubsystem.h"
 #include "Subsystem/AvoidanceSubsystem.h"

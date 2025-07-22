@@ -1,6 +1,6 @@
 // Copyright © 2025 TeamHamDev. All Rights Reserved.
 
-#include "DynamicObstacle.h"
+#include "Component/DynamicObstacleComponent.h"
 #include "Components/BoxComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "NavVolume/OctreeVoxelVolume.h"

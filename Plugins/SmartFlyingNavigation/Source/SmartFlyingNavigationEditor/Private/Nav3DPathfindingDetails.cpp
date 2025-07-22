@@ -6,7 +6,7 @@
 #include "DetailWidgetRow.h"
 #include "DetailCategoryBuilder.h" 
 #include "PropertyEditorModule.h"
-#include "PathfindingComponent.h"
+#include "Component/PathfindingComponent.h"
 
 
 #include "Widgets/Input/SButton.h"

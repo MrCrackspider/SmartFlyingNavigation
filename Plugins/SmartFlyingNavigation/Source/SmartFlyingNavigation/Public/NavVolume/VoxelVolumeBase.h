@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "DynamicObstacle.h"
+#include "Component/DynamicObstacleComponent.h"
 #include "Engine/OverlapResult.h"
 #include "WorldCollision.h"
 #include "VoxelVolumeBase.generated.h"

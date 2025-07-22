@@ -11,7 +11,7 @@
 
 // Pathfinder Core Headers
 #include "NavData/VoxelObstacleProfile.h"
-#include "DynamicObstacle.h"
+#include "Component/DynamicObstacleComponent.h"
 
 // SIMD Headers for Dynamic Grid Query
 #include "emmintrin.h"
@@ -68,33 +68,6 @@ void AOctreeVoxelVolume::Tick(float DeltaTime)
 //~======================================================================
 // Core Public API
 //~======================================================================
-
-bool AOctreeVoxelVolume::IsRegionWalkable(const FIntVector& VoxelIndex, int32 AgentRadiusInVoxels) const
-{
-	const FIntVector AgentRadius(AgentRadiusInVoxels);
-	const FIntVector MinCorner = VoxelIndex - AgentRadius;
-	const FIntVector MaxCorner = VoxelIndex + AgentRadius;
-
-	// The query box in world space must span the full extent of the voxels.
-	const FVector QueryMinWorld = VoxelIndexToWorld(MinCorner);
-	const FVector QueryMaxWorld = VoxelIndexToWorld(MaxCorner + FIntVector(1, 1, 1));
-	const FBox QueryBox(QueryMinWorld, QueryMaxWorld);
-
-	// 1. Check for collisions against the static octree layer.
-	if (!IsRegionEmpty_StaticOctree(QueryBox))
-	{
-		return false; // Blocked by static geometry.
-	}
-
-	// 2. Check for collisions against the dynamic obstacle grid.
-	if (!IsRegionEmpty_DynamicGrid(MinCorner, MaxCorner))
-	{
-		return false; // Blocked by a dynamic obstacle.
-	}
-
-	// The region is clear if both layers are free.
-	return true;
-}
 
 void AOctreeVoxelVolume::RegisterDynamicObstacle(UDynamicObstacleComponent* ObstacleComponent)
 {
@@ -264,16 +237,16 @@ void AOctreeVoxelVolume::UpdateDynamicVoxelState(const FIntVector& Index, bool b
 // Query Helpers
 //~======================================================================
 
-bool AOctreeVoxelVolume::IsRegionEmpty_StaticOctree(const FBox& QueryBox) const
+bool AOctreeVoxelVolume::IsRegionEmpty(const FBox& QueryBox) const
 {
 	// If there's no octree data, the region is considered empty.
 	if (RootNodeIndex == -1) return true;
 
 	const FBox VolumeBounds = GetComponentsBoundingBox(true, true);
-	return IsRegionEmptyRecursive(RootNodeIndex, VolumeBounds, QueryBox);
+	return IsRegionEmpty_Internal(RootNodeIndex, VolumeBounds, QueryBox);
 }
 
-bool AOctreeVoxelVolume::IsRegionEmptyRecursive(int32 NodeIndex, const FBox& NodeBounds, const FBox& QueryBox) const
+bool AOctreeVoxelVolume::IsRegionEmpty_Internal(int32 NodeIndex, const FBox& NodeBounds, const FBox& QueryBox) const
 {
 	// If the query box doesn't intersect this node's bounds, there's no collision here.
 	if (!NodeBounds.Intersect(QueryBox))
@@ -300,7 +273,7 @@ bool AOctreeVoxelVolume::IsRegionEmptyRecursive(int32 NodeIndex, const FBox& Nod
 		if (Node.ChildrenIndices[i] != -1)
 		{
 			const FBox ChildBounds = CalculateChildBounds(NodeBounds, i);
-			if (!IsRegionEmptyRecursive(Node.ChildrenIndices[i], ChildBounds, QueryBox))
+			if (!IsRegionEmpty_Internal(Node.ChildrenIndices[i], ChildBounds, QueryBox))
 			{
 				// If any child reports a collision, the query fails.
 				return false;
@@ -311,78 +284,6 @@ bool AOctreeVoxelVolume::IsRegionEmptyRecursive(int32 NodeIndex, const FBox& Nod
 	// If all children were checked and none reported a collision, the region is clear.
 	return true;
 }
-
-bool AOctreeVoxelVolume::IsRegionEmpty_DynamicGrid(const FIntVector& MinCorner, const FIntVector& MaxCorner) const
-{
-	// Clamp query to volume bounds.
-	const FIntVector ClampedMin(FMath::Max(MinCorner.X, 0), FMath::Max(MinCorner.Y, 0), FMath::Max(MinCorner.Z, 0));
-	const FIntVector ClampedMax(FMath::Min(MaxCorner.X, MapSize.X - 1), FMath::Min(MaxCorner.Y, MapSize.Y - 1), FMath::Min(MaxCorner.Z, MapSize.Z - 1));
-
-	if (ClampedMin.X > ClampedMax.X || ClampedMin.Y > ClampedMax.Y || ClampedMin.Z > ClampedMax.Z) return true;
-	if (DynamicObstacleBitmask.IsEmpty()) return true;
-
-	// Helper lambda to create a 128-bit mask for a given bit range.
-	auto CreateMask = [](int32 StartBit, int32 EndBit) -> __m128i
-	{
-		uint64 LowMask = (StartBit < 64) ? (~0ULL << StartBit) : 0;
-		if (EndBit < 64) LowMask &= (~0ULL >> (63 - EndBit));
-		uint64 HighMask = (EndBit >= 64) ? (~0ULL >> (127 - EndBit)) : 0;
-		if (StartBit >= 64) HighMask &= (~0ULL << (StartBit - 64));
-		return _mm_set_epi64x(HighMask, LowMask);
-	};
-
-	const int32 ChunksPerRow = MapSize.X / 128;
-	for (int32 z = ClampedMin.Z; z <= ClampedMax.Z; ++z)
-	{
-		for (int32 y = ClampedMin.Y; y <= ClampedMax.Y; ++y)
-		{
-			const int32 RowStartChunkIndex = (z * MapSize.Y + y) * ChunksPerRow;
-			const int32 StartChunkIndex = RowStartChunkIndex + ClampedMin.X / 128;
-			const int32 EndChunkIndex = RowStartChunkIndex + ClampedMax.X / 128;
-			const int32 StartBitInChunk = ClampedMin.X % 128;
-			const int32 EndBitInChunk = ClampedMax.X % 128;
-
-			if (StartChunkIndex == EndChunkIndex)
-			{
-				// Case 1: The entire query range is within a single 128-bit chunk.
-				if (!DynamicObstacleBitmask.IsValidIndex(StartChunkIndex)) continue;
-				const __m128i Mask = CreateMask(StartBitInChunk, EndBitInChunk);
-				const __m128i ChunkData = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&DynamicObstacleBitmask[StartChunkIndex]));
-				if (_mm_testz_si128(ChunkData, Mask) == 0) return false; // Test if any masked bits are set.
-			}
-			else
-			{
-				// Case 2: The query range spans multiple chunks.
-				// Check the first (partial) chunk.
-				if (DynamicObstacleBitmask.IsValidIndex(StartChunkIndex))
-				{
-					const __m128i StartMask = CreateMask(StartBitInChunk, 127);
-					const __m128i ChunkData = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&DynamicObstacleBitmask[StartChunkIndex]));
-					if (_mm_testz_si128(ChunkData, StartMask) == 0) return false;
-				}
-
-				// Check all full chunks in the middle.
-				for (int32 i = StartChunkIndex + 1; i < EndChunkIndex; ++i)
-				{
-					if (!DynamicObstacleBitmask.IsValidIndex(i)) continue;
-					const __m128i MiddleChunkData = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&DynamicObstacleBitmask[i]));
-					// Check if the chunk is non-zero.
-					if (_mm_testz_si128(MiddleChunkData, _mm_set1_epi32(-1)) == 0) return false;
-				}
-
-				// Check the last (partial) chunk.
-				if (DynamicObstacleBitmask.IsValidIndex(EndChunkIndex))
-				{
-					const __m128i EndMask = CreateMask(0, EndBitInChunk);
-					const __m128i ChunkData = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&DynamicObstacleBitmask[EndChunkIndex]));
-					if (_mm_testz_si128(ChunkData, EndMask) == 0) return false;
-				}
-			}
-		}
-	}
-	return true; // No obstacles found in the dynamic grid.
-}
-
 
 #if WITH_EDITOR
 
