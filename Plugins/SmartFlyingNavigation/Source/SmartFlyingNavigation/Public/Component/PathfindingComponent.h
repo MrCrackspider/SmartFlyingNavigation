@@ -184,7 +184,7 @@ protected:
 
 #pragma region Configuration Properties
 public:
-	// --- default settings ---
+
 	UPROPERTY()
 	TSubclassOf<UPathfindingStrategy> PathfindingStrategyClass;
 
