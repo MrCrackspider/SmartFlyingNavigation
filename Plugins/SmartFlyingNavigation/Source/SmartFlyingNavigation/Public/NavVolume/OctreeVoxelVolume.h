@@ -54,8 +54,8 @@ public:
 	//~======================================================================
 
 	/** Returns a thread-safe copy of the node pool for the static octree. */
-	FORCEINLINE TArray<FOctreeNode> GetStaticNodePool() const { return StaticNodePool; }
-
+	FORCEINLINE const TArray<FOctreeNode>* GetNodePoolPtr() const { return StaticNodePoolPtr; }
+	// ...
 	/** Returns the index of the root node within the static node pool. */
 	FORCEINLINE int32 GetRootNodeIndex() const { return RootNodeIndex; }
 
@@ -274,7 +274,8 @@ private:
 	//~======================================================================
 
 	/** The runtime pool of nodes for the static octree, loaded from BakedOctreeData. */
-	TArray<FOctreeNode> StaticNodePool;
+	TArray<FOctreeNode>* StaticNodePoolPtr = nullptr; 
+	TArray<FOctreeNode> StaticNodePool; 
 
 	/** The index of the root node in the StaticNodePool array. Initialized to -1. */
 	int32 RootNodeIndex = -1;

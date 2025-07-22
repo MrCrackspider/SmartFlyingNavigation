@@ -185,18 +185,22 @@ void UPathfindingComponent::CreateOctreeDataSnapshot(const AOctreeVoxelVolume* O
 	SnapshotData.VoxelSize = OctreeVolume->VoxelExtent;
 
 	// --- Step 2: Perform a high-speed bulk memory copy for the static node pool. ---
-	const TArray<FOctreeNode>& SourceNodePool = OctreeVolume->GetStaticNodePool();
-	const int32 NodeCount = SourceNodePool.Num();
-	if (NodeCount > 0)
+	const TArray<FOctreeNode>* SourceNodePoolPtr  = OctreeVolume->GetNodePoolPtr();
+	if (SourceNodePoolPtr && !SourceNodePoolPtr->IsEmpty())
 	{
-		// Pre-allocate memory without initializing elements to avoid overhead.
+		const int32 NodeCount = SourceNodePoolPtr->Num();
+
 		SnapshotData.StaticNodePool.SetNumUninitialized(NodeCount);
 
-		// Copy the entire block of memory from the source array to the destination.
-		FMemory::Memcpy(SnapshotData.StaticNodePool.GetData(), SourceNodePool.GetData(),
-		                NodeCount * sizeof(FOctreeNode));
+		FMemory::Memcpy(SnapshotData.StaticNodePool.GetData(), SourceNodePoolPtr->GetData(),
+						NodeCount * sizeof(FOctreeNode));
 	}
-
+	else
+	{
+		// If the source is invalid, ensure the snapshot is also empty.
+		SnapshotData.StaticNodePool.Empty();
+	}
+	
 	// --- Step 3: Perform a high-speed bulk memory copy for the dynamic obstacle bitmask. ---
 	const TArray<F128BitChunk>& SourceBitmask = OctreeVolume->GetDynamicObstacleBitmask();
 	const int32 ChunkCount = SourceBitmask.Num();

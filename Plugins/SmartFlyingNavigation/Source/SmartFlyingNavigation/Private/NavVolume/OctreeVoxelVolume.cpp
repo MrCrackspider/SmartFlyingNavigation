@@ -46,11 +46,32 @@ void AOctreeVoxelVolume::BeginPlay()
 	// 1. Load the pre-baked static octree data from the assigned data asset.
 	if (BakedOctreeData)
 	{
-		StaticNodePool = BakedOctreeData->NodePool;
-		if (!StaticNodePool.IsEmpty())
+		UE_LOG(LogTemp, Log, TEXT("Step 1: BakedOctreeData is VALID. Asset Name: %s"), *BakedOctreeData->GetName());
+
+		BakedOctreeData->DecompressAndInitialize();
+		if (BakedOctreeData->NodePool.Num() > 0)
+		{
+			UE_LOG(LogTemp, Log, TEXT("Step 2: Decompression SUCCESS. NodePool has %d nodes."), BakedOctreeData->NodePool.Num());
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("Step 2: Decompression FAILED or data is empty. NodePool is EMPTY."));
+		}
+
+		StaticNodePoolPtr = &BakedOctreeData->NodePool;
+
+		if (!StaticNodePoolPtr->IsEmpty())
 		{
 			// The root node is always assumed to be at the first index.
 			RootNodeIndex = 0;
+		}
+		if (StaticNodePoolPtr)
+		{
+			UE_LOG(LogTemp, Error, TEXT("Step 3. Complete"));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("Step 3: Decompression FAILED or StaticNodePoolPtr is empty. StaticNodePoolPtr is EMPTY."));
 		}
 	}
 
@@ -240,8 +261,11 @@ void AOctreeVoxelVolume::UpdateDynamicVoxelState(const FIntVector& Index, bool b
 bool AOctreeVoxelVolume::IsRegionEmpty(const FBox& QueryBox) const
 {
 	// If there's no octree data, the region is considered empty.
-	if (RootNodeIndex == -1) return true;
-
+	if (RootNodeIndex == -1 || !StaticNodePoolPtr || StaticNodePoolPtr->IsEmpty())
+	{
+		return true;
+	}
+	
 	const FBox VolumeBounds = GetComponentsBoundingBox(true, true);
 	return IsRegionEmpty_Internal(RootNodeIndex, VolumeBounds, QueryBox);
 }
@@ -254,8 +278,12 @@ bool AOctreeVoxelVolume::IsRegionEmpty_Internal(int32 NodeIndex, const FBox& Nod
 		return true;
 	}
 
-	if (!StaticNodePool.IsValidIndex(NodeIndex)) return true; // Should not happen, but safe check.
-	const FOctreeNode& Node = StaticNodePool[NodeIndex];
+	if (!StaticNodePoolPtr || !StaticNodePoolPtr->IsValidIndex(NodeIndex))
+	{
+		return true;
+	}
+	
+	const FOctreeNode& Node = (*StaticNodePoolPtr)[NodeIndex];
 
 	// Terminal conditions for the recursion.
 	if (Node.State == EOctreeNodeState::Solid)
@@ -304,16 +332,28 @@ void AOctreeVoxelVolume::BakeStaticData()
 	ScanForAllStaticObstacles(AllStaticObstacles);
 
 	// --- 2. Set up a progress dialog for the editor UI ---
-	const double TotalWorkAmount = static_cast<double>(AllStaticObstacles.Num()) + 3.0; // Obstacles + final steps
+	const double TotalWorkAmount = static_cast<double>(AllStaticObstacles.Num()) + 3.0;
 	FScopedSlowTask BakeTask(TotalWorkAmount, FText::FromString(TEXT("Baking Octree Data...")));
 	BakeTask.MakeDialog();
 
+	
 	// --- 3. Build the initial octree structure ---
 	BakeTask.EnterProgressFrame(0.f, FText::FromString(TEXT("Building Octree... (1/4)")));
-	StaticNodePool.Empty();
-	RootNodeIndex = StaticNodePool.Emplace(FOctreeNode()); // Create the root node.
-	StaticNodePool[RootNodeIndex].Bounds = VolumeBounds;
 
+	StaticNodePool.Empty();
+
+	RootNodeIndex = StaticNodePool.AddDefaulted();
+	
+	if (StaticNodePool.IsValidIndex(RootNodeIndex))
+	{
+		StaticNodePool[RootNodeIndex].Bounds = VolumeBounds;
+	}
+	else
+	{
+		UE_LOG(LogTemp, Fatal, TEXT("Failed to create root node for Octree."));
+		return;
+	}
+	
 	for (const FIntVector& ObstacleVoxel : AllStaticObstacles)
 	{
 		BakeTask.EnterProgressFrame(1.f);
@@ -655,6 +695,7 @@ void AOctreeVoxelVolume::SaveOctreeToAsset()
 	FString PackageName, AssetName;
 	if (!GetBakedAssetPath(PackageName, AssetName))
 	{
+		UE_LOG(LogTemp, Error, TEXT("Could not determine a valid path for the Data Asset."));
 		return;
 	}
 
@@ -665,11 +706,9 @@ void AOctreeVoxelVolume::SaveOctreeToAsset()
 	// Check for and delete any existing asset at the target path to prevent conflicts.
 	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	const FAssetData ExistingAssetData = AssetRegistryModule.Get().GetAssetByObjectPath(FSoftObjectPath(PackageName));
-	if (ExistingAssetData != nullptr && ExistingAssetData.IsValid() && ExistingAssetData.GetAsset() != nullptr )
+	if (ExistingAssetData.IsValid())
 	{
-		TArray<UObject*> ObjectsToDelete;
-		ObjectsToDelete.Add(ExistingAssetData.GetAsset());
-		ObjectTools::DeleteObjects(ObjectsToDelete, false); // false = do not show confirmation dialog
+		ObjectTools::DeleteAssets({ ExistingAssetData }, false); // false = do not show confirmation dialog
 	}
 
 	// Create a new package and data asset object.
@@ -682,20 +721,27 @@ void AOctreeVoxelVolume::SaveOctreeToAsset()
 		return;
 	}
 
-	// Mark the asset as modified and populate it with the baked data.
+	// --- KEY ADDITIONS ---
+	// 1. Notify the engine that we are about to modify this object. This is important for the transaction buffer (Undo/Redo).
 	NewOctreeData->Modify();
-	NewOctreeData->NodePool = StaticNodePool;
-	NewOctreeData->BakedMapSize = this->MapSize;
-	NewOctreeData->BakedMaxOctreeDepth = this->MaxOctreeDepth;
 
-	// Notify the asset registry and save the package.
+	// 2. Call your function to populate and compress the data.
+	NewOctreeData->SetAndCompressBakedData(StaticNodePool, this->MapSize, this->MaxOctreeDepth);
+  
+	// 3. Mark the package as dirty. This is the flag that tells the engine "this file needs to be saved".
+	Package->MarkPackageDirty();
+
+	// Notify the asset registry that a new asset has been created. This helps the Content Browser update immediately.
 	FAssetRegistryModule::AssetCreated(NewOctreeData);
+	
 	TArray<UPackage*> PackagesToSave;
 	PackagesToSave.Add(Package);
 
 	if (UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, true))
 	{
-		this->BakedOctreeData = NewOctreeData; // Assign the newly created asset to the volume property.
+		// Assign the newly created asset to the volume property for immediate use in the editor.
+		this->BakedOctreeData = NewOctreeData;
+		UE_LOG(LogTemp, Log, TEXT("Successfully baked and saved Octree data to: %s"), *PackageName);
 	}
 }
 
@@ -775,9 +821,13 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 
 void AOctreeVoxelVolume::GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex, const FBox& NodeBounds, int32 CurrentDepth) const
 {
-	if (!StaticNodePool.IsValidIndex(NodeIndex) || CurrentDepth > MaxOctreeDepth) return;
+	if (!StaticNodePoolPtr || StaticNodePoolPtr->IsEmpty()) return;
 
-	const FOctreeNode& Node = StaticNodePool[NodeIndex];
+	if (!StaticNodePoolPtr->IsValidIndex(NodeIndex) || CurrentDepth > MaxOctreeDepth)
+	{
+		return;
+	}
+	const FOctreeNode& Node = (*StaticNodePoolPtr)[NodeIndex];
 
 	// Add node info if it's a leaf or if we've reached the desired debug draw depth.
 	if (Node.State != EOctreeNodeState::Mixed || CurrentDepth == MaxOctreeDepth)

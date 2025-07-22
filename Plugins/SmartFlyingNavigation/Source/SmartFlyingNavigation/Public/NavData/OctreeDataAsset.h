@@ -62,22 +62,53 @@ struct FOctreeNode
 	}
 };
 
+FORCEINLINE FArchive& operator<<(FArchive& Ar, FOctreeNode& Node)
+{
+	for (int32& ChildIndex : Node.ChildrenIndices)
+	{
+		Ar << ChildIndex;
+	}
+
+	Ar << Node.State;
+	Ar << Node.Bounds;
+	
+	// Serialize the neighbors array element by element.
+	for (int32& NeighborIndex : Node.Neighbors)
+	{
+		Ar << NeighborIndex;
+	}
+
+	Ar << Node.MaxAllowedRadius;
+
+	return Ar;
+}
+
 UCLASS(BlueprintType)
 class SMARTFLYINGNAVIGATION_API UOctreeDataAsset : public UPrimaryDataAsset
 {
 	GENERATED_BODY()
 
 public:
-	static const FName OctreeAssetType;
-
-	UPROPERTY(VisibleAnywhere, Category = "OctreeData")
-	TArray<FOctreeNode> NodePool;
-
 	UPROPERTY(VisibleAnywhere, Category = "OctreeData")
 	FIntVector BakedMapSize;
 
 	UPROPERTY(VisibleAnywhere, Category = "OctreeData")
 	int32 BakedMaxOctreeDepth;
 
+	static const FName OctreeAssetType;
+
+	UPROPERTY(Transient, VisibleAnywhere, Category = "OctreeData")
+	TArray<FOctreeNode> NodePool;
+
+	UPROPERTY()
+	TArray<uint8> CompressedData;
+
+	UPROPERTY()
+	int32 UncompressedSize;
+public:
+	void DecompressAndInitialize();
+#if WITH_EDITOR
+	void SetAndCompressBakedData(const TArray<FOctreeNode>& InNodePool, const FIntVector& InMapSize, int32 InMaxDepth);
+#endif
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
 };
