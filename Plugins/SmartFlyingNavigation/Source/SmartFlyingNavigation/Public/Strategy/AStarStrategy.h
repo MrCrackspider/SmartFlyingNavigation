@@ -26,7 +26,7 @@ private:
 	void ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<FVector>& OutPath);
 	
 	bool HasGuaranteedLineOfSight(const FVector& Start, const FVector& End) const;
-	
+	bool HasClearPath(const FVector& Start, const FVector& End) const;
 	const FOctreePathfindingData& OctreeData;
 	const int32 StartNodeIndex;
 	const int32 GoalNodeIndex;

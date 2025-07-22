@@ -39,14 +39,11 @@ struct FOctreePathfindingData
 
 				if (LeafNode.State == EOctreeNodeState::Empty && LeafNode.MaxAllowedRadius > AgentRadius)
 				{
-					if (!IsRegionDynamicallyBlocked(LeafNode.Bounds))
+					const float DistSq = FVector::DistSquared(Origin, LeafNode.Bounds.GetCenter());
+					if (DistSq < MinDistSq)
 					{
-						const float DistSq = FVector::DistSquared(Origin, LeafNode.Bounds.GetCenter());
-						if (DistSq < MinDistSq)
-						{
-							MinDistSq = DistSq;
-							BestNodeIndex = LeafIndex;
-						}
+						MinDistSq = DistSq;
+						BestNodeIndex = LeafIndex;
 					}
 				}
 			}
@@ -153,7 +150,7 @@ public:
 			else
 			{
 				if (Node.State == EOctreeNodeState::Solid) return true;
-				if (IsRegionDynamicallyBlocked(Node.Bounds)) return true;
+				//if (IsRegionDynamicallyBlocked(Node.Bounds)) return true;
 			}
 		}
 
@@ -225,32 +222,31 @@ public:
 			}
 		}
 	}
+
 	bool IsPathDynamicallyBlocked_Sweep(const FVector& Start, const FVector& End, float AgentRadius) const
 	{
-		// 경로의 방향과 총 길이 계산
 		const FVector PathVector = End - Start;
 		const float TotalDistance = PathVector.Size();
 		if (TotalDistance < KINDA_SMALL_NUMBER)
 		{
 			return IsRegionDynamicallyBlocked(FBox::BuildAABB(Start, FVector(AgentRadius)));
 		}
-    
+
 		const FVector Direction = PathVector / TotalDistance;
-    
-		const float StepSize = AgentRadius; 
-    
+
+		const float StepSize = AgentRadius;
+
 		for (float Distance = 0; Distance < TotalDistance; Distance += StepSize)
 		{
 			const FVector CurrentPosition = Start + Direction * Distance;
-        
-			const FBox QueryBox = FBox::BuildAABB(CurrentPosition, FVector(AgentRadius));
-        
+
+			const FBox QueryBox = FBox::BuildAABB(CurrentPosition, FVector(AgentRadius * 1.2f));
 			if (IsRegionDynamicallyBlocked(QueryBox))
 			{
 				return true;
 			}
 		}
-    
+
 		const FBox EndQueryBox = FBox::BuildAABB(End, FVector(AgentRadius));
 		if (IsRegionDynamicallyBlocked(EndQueryBox))
 		{
@@ -259,13 +255,24 @@ public:
 
 		return false;
 	}
+
 	bool IsRegionDynamicallyBlocked(const FBox& QueryBox) const
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(Octree_IsRegionDynamicallyBlocked);
 
 		const FIntVector MinCorner = WorldToVoxelIndex(QueryBox.Min);
-		const FIntVector MaxCorner = WorldToVoxelIndex(QueryBox.Max - FVector(KINDA_SMALL_NUMBER));
 
+		const FVector LocalMax = QueryBox.Max - VolumeBounds.Min;
+		const FVector VoxelDimensions = VolumeBounds.GetSize() / FVector(MapSize);
+
+		if (VoxelDimensions.X == 0 || VoxelDimensions.Y == 0 || VoxelDimensions.Z == 0) return false;
+
+		const FIntVector MaxCorner(
+		   FMath::CeilToInt(LocalMax.X / VoxelDimensions.X),
+		   FMath::CeilToInt(LocalMax.Y / VoxelDimensions.Y),
+		   FMath::CeilToInt(LocalMax.Z / VoxelDimensions.Z)
+	   );
+		
 		const FIntVector ClampedMin(FMath::Max(MinCorner.X, 0), FMath::Max(MinCorner.Y, 0), FMath::Max(MinCorner.Z, 0));
 		const FIntVector ClampedMax(FMath::Min(MaxCorner.X, MapSize.X - 1), FMath::Min(MaxCorner.Y, MapSize.Y - 1),
 		                            FMath::Min(MaxCorner.Z, MapSize.Z - 1));
