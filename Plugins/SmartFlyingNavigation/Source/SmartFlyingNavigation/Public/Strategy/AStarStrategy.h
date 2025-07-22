@@ -20,14 +20,12 @@ public:
 
 private:
 	void IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPathNode*>& OutSuccessors);
-	int64 CalculateHeuristic(const FVector& A, const FVector& B) const;
+	bool TryToRepairPartialPath(FAstarPathNode* PartialEndNode, TArray<FVector>& OutPath);
+	int64 CalculateBoundHeuristic(int32 NodeIndex) const;
 	int64 GetMoveCost(const FVector& A, const FVector& B) const;
-	void ReconstructPath(FAstarPathNode* EndNode, TArray<FVector>& OutPath) const;
 	void ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<FVector>& OutPath);
 	
 	bool HasGuaranteedLineOfSight(const FVector& Start, const FVector& End) const;
-	bool HasFastLineOfSight(const FVector& Start, const FVector& End) const;
-	bool HasSimpleLineOfSight(const FVector& Start, const FVector& End) const;
 	
 	const FOctreePathfindingData& OctreeData;
 	const int32 StartNodeIndex;

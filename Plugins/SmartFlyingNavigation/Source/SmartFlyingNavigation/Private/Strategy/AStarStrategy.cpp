@@ -10,15 +10,15 @@ void UAStarStrategy::Initialize()
 bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, TArray<FVector>& OutPath)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_FindPathWithStrategy);
-	
+
 	const FOctreePathfindingData& OctreeData = InRequest.NavigationData;
 
 	const int32 StartNodeIndex = OctreeData.FindLeafNodeAt(InRequest.StartLocation);
 	int32 GoalNodeIndex = OctreeData.FindLeafNodeAt(InRequest.EndLocation);
 
 	bool bIsGoalNodeInvalid = (GoalNodeIndex == -1) ||
-			(OctreeData.StaticNodePool[GoalNodeIndex].State != EOctreeNodeState::Empty) ||
-			(OctreeData.StaticNodePool[GoalNodeIndex].MaxAllowedRadius < InRequest.AgentRadius);
+		(OctreeData.StaticNodePool[GoalNodeIndex].State != EOctreeNodeState::Empty) ||
+		(OctreeData.StaticNodePool[GoalNodeIndex].MaxAllowedRadius < InRequest.AgentRadius);
 
 
 	if (bIsGoalNodeInvalid)
@@ -36,7 +36,7 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 
 		GoalNodeIndex = NewGoalNodeIndex;
 	}
-	
+
 	FBox GoalQueryBox = AStarStrategyUtils::MakeAgentQueryBox(InRequest.EndLocation, InRequest.AgentRadius);
 	if (OctreeData.IsRegionDynamicallyBlocked(GoalQueryBox))
 	{
@@ -100,8 +100,6 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 	OpenSetLookup.Empty();
 	ClosedSet.Empty();
 
-	const auto& Pool = OctreeData.StaticNodePool;
-	const FVector GoalCenter = Pool[GoalNodeIndex].Bounds.GetCenter();
 	const TPathNodePtrCompare<FAstarPathNode> Predicate;
 
 	TArray<FAstarPathNode*> Successors;
@@ -112,7 +110,7 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 
 	StartNode->NodeIndex = StartNodeIndex;
 	StartNode->WorldPosition = OctreeData.StaticNodePool[StartNodeIndex].Bounds.GetCenter();
-	StartNode->HCost = CalculateHeuristic(StartNode->WorldPosition, GoalCenter);
+	StartNode->HCost = CalculateBoundHeuristic(StartNode->NodeIndex);
 	StartNode->CalculateAndSetFCost();
 
 	OpenSet.HeapPush(StartNode, Predicate);
@@ -125,10 +123,7 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 		FAstarPathNode* CurrentNode;
 		OpenSet.HeapPop(CurrentNode, Predicate);
 
-
-
-
-		// --- LAZY THETA* CORE LOGIC (CLEANED UP) ---
+		// --- LAZY THETA* CORE LOGIC ---
 		// This is the moment to check for a shortcut from the grandparent.
 		if (CurrentNode->Parent != nullptr && CurrentNode->Parent->Parent != nullptr)
 		{
@@ -137,7 +132,8 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 			{
 				// A shortcut is possible. Update the node's parent and its G-cost.
 				// This is the only line needed to change the path's structure.
-				const int64 NewGCost = GrandparentNode->GCost + GetMoveCost(GrandparentNode->WorldPosition, CurrentNode->WorldPosition);
+				const int64 NewGCost = GrandparentNode->GCost + GetMoveCost(
+					GrandparentNode->WorldPosition, CurrentNode->WorldPosition);
 				CurrentNode->SetParent(GrandparentNode, NewGCost, CurrentNode->HCost);
 			}
 		}
@@ -152,7 +148,7 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 
 		if (CurrentNode->NodeIndex == GoalNodeIndex)
 		{
-		 	ReconstructPath(CurrentNode, OutPath);
+			ReconstructAndSmoothPath(CurrentNode, OutPath);
 			return EPathfindingResult::Success;
 		}
 
@@ -194,7 +190,7 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 			}
 			else
 			{
-				Successor->SetParent(ParentNode, NewGCost, CalculateHeuristic(Successor->WorldPosition, GoalCenter));
+				Successor->SetParent(ParentNode, NewGCost, CalculateBoundHeuristic(SuccIdx));
 				OpenSet.HeapPush(Successor, Predicate);
 				OpenSetLookup.Add(Successor->NodeIndex, Successor);
 			}
@@ -203,25 +199,15 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 
 	if (BestPartialNode)
 	{
+		if (TryToRepairPartialPath(BestPartialNode, OutPath))
+		{
+			return EPathfindingResult::Success; // Repair was successful!
+		}
 		ReconstructAndSmoothPath(BestPartialNode, OutPath);
 		return EPathfindingResult::Success_Partial;
 	}
 
 	return EPathfindingResult::Failed_Unreachable;
-}
-
-bool FAstarPathfinder::HasFastLineOfSight(const FVector& Start, const FVector& End) const
-{
-	TRACE_CPUPROFILER_EVENT_SCOPE(ThetaStar_HasLineOfSightWithRadius_Hierarchical);
-
-	TArray<int32> CenterlineNodes;
-	return OctreeData.VoxelRayMarch(Start, End, CenterlineNodes);
-}
-
-bool FAstarPathfinder::HasSimpleLineOfSight(const FVector& Start, const FVector& End) const
-{
-	TArray<int32> IgnoredNodes; // We don't need the list of nodes here.
-	return OctreeData.VoxelRayMarch(Start, End, IgnoredNodes);
 }
 
 void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<FVector>& OutPath)
@@ -236,58 +222,67 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 	}
 	Algo::Reverse(RawPath);
 
-	// --- Step 2: Handle trivial cases ---
+	// --- Step 2: Handle trivial cases (path is too short) ---
 	if (RawPath.Num() < 2)
 	{
-		OutPath = RawPath;
-		// Ensure actual start/goal are used if possible
-		if (OutPath.Num() > 0) OutPath[0] = ActualStartLocation;
-		OutPath.Add(ActualGoalLocation);
+		OutPath.Empty();
+		OutPath.Add(ActualStartLocation);
+		if (HasGuaranteedLineOfSight(ActualStartLocation, ActualGoalLocation))
+		{
+			OutPath.Add(ActualGoalLocation);
+		}
+		else if (RawPath.Num() > 0)
+		{
+			// If no direct path to goal, use the first safe node from A*.
+			OutPath.Add(RawPath[0]);
+		}
 		return;
 	}
 
-	// --- Step 3: Anchor the true start and end locations ---
-	// This ensures the smoothing process works from the agent's exact position to the goal's exact position.
-	RawPath[0] = ActualStartLocation;
-	RawPath.Last() = ActualGoalLocation;
+	// --- Step 3: Safely tether the actual start and end locations to the raw path. ---
+	if (HasGuaranteedLineOfSight(ActualStartLocation, RawPath[1]))
+	{
+		RawPath[0] = ActualStartLocation;
+	}
+
+	// 2. Connect the End Point:
+	if (HasGuaranteedLineOfSight(RawPath.Last(), ActualGoalLocation))
+	{
+		RawPath.Add(ActualGoalLocation);
+	}
 
 	// --- Step 4: Perform the "String Pulling" algorithm ---
+	// Now, perform the smoothing on the safely-modified path.
 	OutPath.Empty();
-	OutPath.Add(RawPath[0]); // Start the final path with the first point.
+	if (RawPath.Num() > 0)
+	{
+		OutPath.Add(RawPath[0]);
+	}
 
 	int32 AnchorIndex = 0;
 	while (AnchorIndex < RawPath.Num() - 1)
 	{
 		int32 FurthestVisibleIndex = AnchorIndex + 1;
 
-		// Find the furthest point in RawPath that is visible from the current anchor point.
-		// We iterate forward from the next point.
 		for (int32 LookAheadIndex = AnchorIndex + 2; LookAheadIndex < RawPath.Num(); ++LookAheadIndex)
 		{
-			// Check line-of-sight from the anchor to the look-ahead point.
 			if (HasGuaranteedLineOfSight(RawPath[AnchorIndex], RawPath[LookAheadIndex]))
 			{
-				// If we can see this point, it's our new best candidate.
 				FurthestVisibleIndex = LookAheadIndex;
 			}
 			else
 			{
-				// As soon as we can't see a point, we stop looking further.
-				// The previous point was the last one in our line of sight.
 				break;
 			}
 		}
-
-		// Add the furthest visible point to our final path.
 		OutPath.Add(RawPath[FurthestVisibleIndex]);
-
-		// The point we just added becomes the new anchor for the next iteration.
 		AnchorIndex = FurthestVisibleIndex;
 	}
 }
+
 bool FAstarPathfinder::HasGuaranteedLineOfSight(const FVector& Start, const FVector& End) const
 {
-	return OctreeData.IsPathClearWithVoxelSweep(Start, End, AgentRadius);
+	return !OctreeData.CheckForSolidNodesInCapsule(Start, End, AgentRadius);
 }
 
 void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPathNode*>& OutSuccessors)
@@ -297,36 +292,29 @@ void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPat
 
 	TArray<int32> AdjacentNodeIndices;
 	OctreeData.FindAdjacentEmptyLeaves(Node->NodeIndex, AdjacentNodeIndices);
-	const FVector CurrentNodeCenter = Node->WorldPosition;
-
+	
 	for (const int32 NeighborIndex : AdjacentNodeIndices)
 	{
 		const auto& NeighborNode = OctreeData.StaticNodePool[NeighborIndex];
 		const FBox NeighborBounds = NeighborNode.Bounds;
 		FVector NeighborCenter = NeighborBounds.GetCenter();
 
-		// 1) If the cell itself is already big enough, we have instant clearance.
-		if (!HasFastLineOfSight(CurrentNodeCenter, NeighborCenter))
+		// // 1) If the cell itself is already big enough, we have instant clearance.
+		if (NeighborNode.MaxAllowedRadius <= AgentRadius)
 		{
 			continue;
 		}
 		
-		FBox NeighborQueryBox = AStarStrategyUtils::MakeAgentQueryBox(NeighborCenter,AgentRadius);
-		
+		FBox NeighborQueryBox = AStarStrategyUtils::MakeAgentQueryBox(NeighborCenter, AgentRadius);
+
 		if (!OctreeData.IsRegionDynamicallyBlocked(NeighborQueryBox))
 		{
 			FAstarPathNode* Successor = MemoryPool.NewNode();
-			Successor->NodeIndex      = NeighborIndex;
-			Successor->WorldPosition  = NeighborCenter;
+			Successor->NodeIndex = NeighborIndex;
+			Successor->WorldPosition = NeighborCenter;
 			OutSuccessors.Add(Successor);
 		}
 	}
-}
-
-int64 FAstarPathfinder::CalculateHeuristic(const FVector& A, const FVector& B) const
-{
-	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_CalculateHeuristic);
-	return static_cast<int64>(FVector::DistSquared(A, B));
 }
 
 int64 FAstarPathfinder::GetMoveCost(const FVector& A, const FVector& B) const
@@ -335,14 +323,36 @@ int64 FAstarPathfinder::GetMoveCost(const FVector& A, const FVector& B) const
 	return static_cast<int64>(FVector::DistSquared(A, B));
 }
 
-void FAstarPathfinder::ReconstructPath(FAstarPathNode* EndNode, TArray<FVector>& OutPath) const
+int64 FAstarPathfinder::CalculateBoundHeuristic(int32 NodeIndex) const
 {
-	OutPath.Empty();
-	FAstarPathNode* CurrentNode = EndNode;
-	while (CurrentNode != nullptr)
+	const FBox& Bounds = OctreeData.StaticNodePool[NodeIndex].Bounds;
+	const FVector ClosestPoint = Bounds.GetClosestPointTo(ActualGoalLocation);
+	const float RawDist = (ClosestPoint - ActualGoalLocation).Size();
+	const float EffectiveDist = FMath::Max(0.0f, RawDist - AgentRadius);
+	return static_cast<int64>(EffectiveDist * EffectiveDist);
+}
+
+bool FAstarPathfinder::TryToRepairPartialPath(FAstarPathNode* PartialEndNode, TArray<FVector>& OutPath)
+{
+	FVector PartialPos = PartialEndNode->WorldPosition;
+	float   Radius     = AgentRadius * 2;
+	FVector BestPoint;
+
+	for (int32 i = 0; i < 16; ++i)
 	{
-		OutPath.Add(CurrentNode->WorldPosition);
-		CurrentNode = CurrentNode->Parent;
+		FVector Dir       = FMath::VRand();
+		FVector Candidate = PartialPos + Dir * FMath::FRandRange(0, Radius);
+		if (!OctreeData.CheckForSolidNodesInCapsule(Candidate, Candidate, AgentRadius)
+			&& HasGuaranteedLineOfSight(PartialPos, Candidate)
+			&& HasGuaranteedLineOfSight(Candidate, ActualGoalLocation))
+		{
+			BestPoint = Candidate;
+			OutPath.Empty();
+			ReconstructAndSmoothPath(PartialEndNode, OutPath);
+			OutPath.Add(BestPoint);
+			OutPath.Add(ActualGoalLocation);
+			return true;
+		}
 	}
-	Algo::Reverse(OutPath);
+	return false;
 }

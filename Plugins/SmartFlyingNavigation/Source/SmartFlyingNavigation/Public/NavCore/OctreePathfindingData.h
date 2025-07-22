@@ -36,7 +36,7 @@ struct FOctreePathfindingData
 			{
 				const FOctreeNode& LeafNode = StaticNodePool[LeafIndex];
             
-				if (LeafNode.State == EOctreeNodeState::Empty && LeafNode.MaxAllowedRadius >= AgentRadius)
+				if (LeafNode.State == EOctreeNodeState::Empty && LeafNode.MaxAllowedRadius > AgentRadius)
 				{
 					if (!IsRegionDynamicallyBlocked(LeafNode.Bounds))
 					{
@@ -54,26 +54,6 @@ struct FOctreePathfindingData
 		return BestNodeIndex;
 	}
 private:
-	FBox CalculateChildBounds(const FBox& ParentBounds, int32 ChildIndex) const
-	{
-		const FVector Center = ParentBounds.GetCenter();
-		const FVector Min = ParentBounds.Min;
-		const FVector Max = ParentBounds.Max;
-
-		switch (ChildIndex)
-		{
-		case 0: return FBox(Min, Center); // ---
-		case 1: return FBox(FVector(Center.X, Min.Y, Min.Z), FVector(Max.X, Center.Y, Center.Z)); // +--
-		case 2: return FBox(FVector(Min.X, Center.Y, Min.Z), FVector(Center.X, Max.Y, Center.Z)); // -+-
-		case 3: return FBox(FVector(Center.X, Center.Y, Min.Z), FVector(Max.X, Max.Y, Center.Z)); // ++-
-		case 4: return FBox(FVector(Min.X, Min.Y, Center.Z), FVector(Center.X, Center.Y, Max.Z)); // --+
-		case 5: return FBox(FVector(Center.X, Min.Y, Center.Z), FVector(Max.X, Center.Y, Max.Z)); // +-+
-		case 6: return FBox(FVector(Min.X, Center.Y, Center.Z), FVector(Center.X, Max.Y, Max.Z)); // -++
-		case 7: return FBox(Center, Max); // +++
-		default: return FBox();
-		}
-		return FBox(ForceInit);
-	}
 
 	int32 GetOctantContainingPosition(const FBox& NodeBounds, const FVector& Position) const
 	{
@@ -84,42 +64,7 @@ private:
 		if (Position.Z >= Center.Z) Octant |= 4; // 100
 		return Octant;
 	}
-
-	FBox GetNodeBoundsRecursive(int32 TargetNodeIndex, int32 CurrentNodeIndex, const FBox& CurrentNodeBounds) const
-	{
-		if (CurrentNodeIndex == TargetNodeIndex)
-		{
-			return CurrentNodeBounds;
-		}
-
-		if (!StaticNodePool.IsValidIndex(CurrentNodeIndex))
-		{
-			return FBox(ForceInit);
-		}
-
-		const FOctreeNode& Node = StaticNodePool[CurrentNodeIndex];
-		if (Node.State != EOctreeNodeState::Mixed)
-		{
-			return FBox(ForceInit);
-		}
-
-		// 자식 노드들을 재귀적으로 탐색
-		for (int i = 0; i < 8; ++i)
-		{
-			if (Node.ChildrenIndices[i] != -1)
-			{
-				const FBox ChildBounds = CalculateChildBounds(CurrentNodeBounds, i);
-				const FBox Result = GetNodeBoundsRecursive(TargetNodeIndex, Node.ChildrenIndices[i], ChildBounds);
-				if (Result.IsValid)
-				{
-					return Result;
-				}
-			}
-		}
-
-		return FBox(ForceInit);
-	}
-
+	
 	FIntVector WorldToVoxelIndex(const FVector& WorldPos) const
 	{
 		if (MapSize.IsZero() || !VolumeBounds.IsValid) return FIntVector::ZeroValue;
@@ -127,7 +72,6 @@ private:
 		const FVector LocalPos = WorldPos - VolumeBounds.Min;
 		const FVector VoxelDimensions = VolumeBounds.GetSize() / FVector(MapSize);
 
-		// 0으로 나누기 방지
 		if (VoxelDimensions.X == 0 || VoxelDimensions.Y == 0 || VoxelDimensions.Z == 0) return FIntVector::ZeroValue;
 
 		return FIntVector(
@@ -147,52 +91,6 @@ private:
 		return DistSq <= (Radius * Radius);
 	}
 	
-	bool CheckForSolidNodesInCapsuleRecursive(int32 NodeIndex, const FVector& Start, const FVector& End,
-	                                          float Radius) const
-	{
-		if (!StaticNodePool.IsValidIndex(NodeIndex))
-		{
-			return false;
-		}
-
-		const FOctreeNode& Node = StaticNodePool[NodeIndex];
-		const FBox& NodeBounds = GetNodeBounds(NodeIndex);
-
-		if (!IntersectsCapsule(NodeBounds, Start, End, Radius))
-		{
-			return false;
-		}
-
-		if (Node.State != EOctreeNodeState::Mixed)
-		{
-			if (Node.State == EOctreeNodeState::Solid)
-			{
-				return true;
-			}
-
-			if (IsRegionDynamicallyBlocked(NodeBounds))
-			{
-				return true;
-			}
-
-			return false;
-		}
-
-		for (int32 i = 0; i < 8; ++i)
-		{
-			const int32 ChildIndex = Node.ChildrenIndices[i];
-			if (ChildIndex != -1)
-			{
-				if (CheckForSolidNodesInCapsuleRecursive(ChildIndex, Start, End, Radius))
-				{
-					return true;
-				}
-			}
-		}
-
-		return false;
-	}
-
 	void FindLeavesInBoxRecursive(TArray<int32>& OutLeaves, int32 NodeIndex, const FBox& QueryBox) const
 	{
 		if (!StaticNodePool.IsValidIndex(NodeIndex)) return;
@@ -220,80 +118,9 @@ private:
 			}
 		}
 	}
-	bool CheckForObstaclesInBox(const FBox& QueryBox) const
-	{
-		// First, check for dynamic obstacles which is a fast bitmask operation.
-		if (IsRegionDynamicallyBlocked(QueryBox))
-		{
-			return true;
-		}
 
-		// If no dynamic obstacles, check against the static octree.
-		TArray<int32> NodesToVisit;
-		NodesToVisit.Push(RootNodeIndex);
-
-		while (NodesToVisit.Num() > 0)
-		{
-			const int32 CurrentNodeIndex = NodesToVisit.Pop();
-			if (!StaticNodePool.IsValidIndex(CurrentNodeIndex)) continue;
-
-			const FOctreeNode& Node = StaticNodePool[CurrentNodeIndex];
-			
-			if (!Node.Bounds.Intersect(QueryBox))
-			{
-				continue;
-			}
-
-			if (Node.State == EOctreeNodeState::Solid)
-			{
-				return true; // Collision with a solid node.
-			}
-
-			if (Node.State == EOctreeNodeState::Mixed)
-			{
-				for (int32 ChildIndex : Node.ChildrenIndices)
-				{
-					if (ChildIndex != -1) NodesToVisit.Push(ChildIndex);
-				}
-			}
-		}
-
-		return false; // No obstacles found.
-	}
-	
 public:
-	bool IsPathClearHierarchically(const FVector& Start, const FVector& End, float AgentRadius) const
-	{
-		return !CheckForSolidNodesInCapsule(Start, End, AgentRadius);
-	}
-	bool VoxelRayMarch(const FVector& Start, const FVector& End, TArray<int32>& OutPathNodes) const
-	{
-		OutPathNodes.Empty();
-		FVector RayDirection = End - Start;
-		const float RayLength = RayDirection.Size();
-		if (RayLength < KINDA_SMALL_NUMBER) return true;
-		RayDirection /= RayLength; // Normalize
-
-		FVector CurrentPos = Start;
-		int32 LastNodeIndex = -1;
-
-		for (float Dist = 0; Dist < RayLength; Dist += VoxelSize * 0.5f)
-		{
-			CurrentPos = Start + RayDirection * Dist;
-			const int32 CurrentNodeIndex = FindLeafNodeAt(CurrentPos);
-
-			if (CurrentNodeIndex != -1 && CurrentNodeIndex != LastNodeIndex)
-			{
-				if (StaticNodePool[CurrentNodeIndex].State == EOctreeNodeState::Solid)
-				{
-					return false;
-				}
-				OutPathNodes.Add(CurrentNodeIndex);
-				LastNodeIndex = CurrentNodeIndex;
-			}
-		}
-		return true;
-	}
+	
 	bool CheckForSolidNodesInCapsule(const FVector& Start, const FVector& End, float Radius) const
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(Octree_CheckForSolidNodesInCapsule_Iterative);
@@ -330,34 +157,7 @@ public:
 
 		return false;
 	}
-	bool IsPathClearWithVoxelSweep(const FVector& Start, const FVector& End, float AgentRadius) const
-	{
-		TRACE_CPUPROFILER_EVENT_SCOPE(Octree_IsPathClearWithVoxelSweep);
-
-		if (RootNodeIndex == -1) return true;
-
-		const FVector RayDirection = End - Start;
-		const float TotalDistance = RayDirection.Size();
-		if (TotalDistance < KINDA_SMALL_NUMBER) return true;
-
-		const FVector AgentExtent(AgentRadius);
-		const FVector StepVector = RayDirection / TotalDistance * VoxelSize;
-		const int32 NumSteps = FMath::CeilToInt(TotalDistance / VoxelSize);
-
-		for (int32 i = 0; i <= NumSteps; ++i)
-		{
-			const FVector CurrentPos = Start + StepVector * i;
-			const FBox AgentQueryBox(CurrentPos - AgentExtent, CurrentPos + AgentExtent);
-
-			// Check for collisions with both static and dynamic obstacles at each step.
-			if (CheckForObstaclesInBox(AgentQueryBox))
-			{
-				return false; // Path is blocked.
-			}
-		}
-
-		return true; // Path is clear.
-	}
+	
 	int32 FindLeafNodeAt(const FVector& WorldPos) const
 	{
 		if (!VolumeBounds.IsInside(WorldPos) || RootNodeIndex == -1)
@@ -488,36 +288,4 @@ public:
 		return false;
 	}
 
-	int32 FindNearestEmptyLeaf(const FVector& Origin, float InitialSearchRadius, int32 MaxIterations) const
-	{
-		if (RootNodeIndex == -1) return -1;
-
-		const float MaxSearchRadius = InitialSearchRadius * MaxIterations;
-		const FBox SearchBox(Origin - FVector(MaxSearchRadius), Origin + FVector(MaxSearchRadius));
-
-		TArray<int32> CandidateLeaves;
-		FindLeavesInBoxRecursive(CandidateLeaves, RootNodeIndex, SearchBox);
-
-		int32 BestNodeIndex = -1;
-		float MinDistSq = TNumericLimits<float>::Max();
-
-		for (const int32 LeafIndex : CandidateLeaves)
-		{
-			if (StaticNodePool.IsValidIndex(LeafIndex) && StaticNodePool[LeafIndex].State == EOctreeNodeState::Empty)
-			{
-				const FBox& LeafBounds = StaticNodePool[LeafIndex].Bounds;
-				if (!IsRegionDynamicallyBlocked(LeafBounds))
-				{
-					const float DistSq = FVector::DistSquared(Origin, LeafBounds.GetCenter());
-					if (DistSq < MinDistSq)
-					{
-						MinDistSq = DistSq;
-						BestNodeIndex = LeafIndex;
-					}
-				}
-			}
-		}
-
-		return BestNodeIndex;
-	}
 };
