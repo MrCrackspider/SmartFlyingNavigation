@@ -8,7 +8,7 @@
 
 struct FOctreePathfindingData
 {
-	TArray<FOctreeNode> StaticNodePool;
+	const TArray<FOctreeNode>* StaticNodePoolPtr = nullptr;
 	int32 RootNodeIndex = -1;
 	int32 MaxOctreeDepth = 0;
 	FBox VolumeBounds;
@@ -16,10 +16,11 @@ struct FOctreePathfindingData
 	TArray<F128BitChunk> DynamicObstacleBitmask;
 	FIntVector MapSize;
 	float VoxelSize = 100.0f;
-	
-	int32 FindNearestValidLeafForAgent(const FVector& Origin,float AgentRadius, float InitialSearchRadius, int32 MaxIterations) const
+
+	int32 FindNearestValidLeafForAgent(const FVector& Origin, float AgentRadius, float InitialSearchRadius,
+	                                   int32 MaxIterations) const
 	{
-		if (RootNodeIndex == -1) return -1;
+		if (RootNodeIndex == -1 || !StaticNodePoolPtr) return -1;
 
 		const float MaxSearchRadius = InitialSearchRadius * MaxIterations;
 		const FBox SearchBox(Origin - FVector(MaxSearchRadius), Origin + FVector(MaxSearchRadius));
@@ -32,10 +33,10 @@ struct FOctreePathfindingData
 
 		for (const int32 LeafIndex : CandidateLeaves)
 		{
-			if (StaticNodePool.IsValidIndex(LeafIndex))
+			if (StaticNodePoolPtr->IsValidIndex(LeafIndex))
 			{
-				const FOctreeNode& LeafNode = StaticNodePool[LeafIndex];
-            
+				const FOctreeNode& LeafNode = (*StaticNodePoolPtr)[LeafIndex];
+
 				if (LeafNode.State == EOctreeNodeState::Empty && LeafNode.MaxAllowedRadius > AgentRadius)
 				{
 					if (!IsRegionDynamicallyBlocked(LeafNode.Bounds))
@@ -53,8 +54,8 @@ struct FOctreePathfindingData
 
 		return BestNodeIndex;
 	}
-private:
 
+private:
 	int32 GetOctantContainingPosition(const FBox& NodeBounds, const FVector& Position) const
 	{
 		int32 Octant = 0;
@@ -64,7 +65,7 @@ private:
 		if (Position.Z >= Center.Z) Octant |= 4; // 100
 		return Octant;
 	}
-	
+
 	FIntVector WorldToVoxelIndex(const FVector& WorldPos) const
 	{
 		if (MapSize.IsZero() || !VolumeBounds.IsValid) return FIntVector::ZeroValue;
@@ -90,10 +91,11 @@ private:
 
 		return DistSq <= (Radius * Radius);
 	}
-	
+
 	void FindLeavesInBoxRecursive(TArray<int32>& OutLeaves, int32 NodeIndex, const FBox& QueryBox) const
 	{
-		if (!StaticNodePool.IsValidIndex(NodeIndex)) return;
+		if (!StaticNodePoolPtr) return;
+		if (!StaticNodePoolPtr->IsValidIndex(NodeIndex)) return;
 
 		const FBox NodeBounds = GetNodeBounds(NodeIndex);
 
@@ -102,7 +104,7 @@ private:
 			return;
 		}
 
-		const FOctreeNode& Node = StaticNodePool[NodeIndex];
+		const FOctreeNode& Node = (*StaticNodePoolPtr)[NodeIndex];
 
 		if (Node.State != EOctreeNodeState::Mixed)
 		{
@@ -120,7 +122,6 @@ private:
 	}
 
 public:
-	
 	bool CheckForSolidNodesInCapsule(const FVector& Start, const FVector& End, float Radius) const
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(Octree_CheckForSolidNodesInCapsule_Iterative);
@@ -130,12 +131,13 @@ public:
 		TArray<int32> NodesToVisit;
 		NodesToVisit.Push(RootNodeIndex);
 
+		if (!StaticNodePoolPtr) return true;
 		while (NodesToVisit.Num() > 0)
 		{
 			const int32 CurrentNodeIndex = NodesToVisit.Pop();
-			if (!StaticNodePool.IsValidIndex(CurrentNodeIndex)) continue;
+			if (!StaticNodePoolPtr->IsValidIndex(CurrentNodeIndex)) continue;
 
-			const FOctreeNode& Node = StaticNodePool[CurrentNodeIndex];
+			const FOctreeNode& Node = (*StaticNodePoolPtr)[CurrentNodeIndex];
 			if (!IntersectsCapsule(Node.Bounds, Start, End, Radius))
 			{
 				continue;
@@ -157,7 +159,7 @@ public:
 
 		return false;
 	}
-	
+
 	int32 FindLeafNodeAt(const FVector& WorldPos) const
 	{
 		if (!VolumeBounds.IsInside(WorldPos) || RootNodeIndex == -1)
@@ -168,9 +170,9 @@ public:
 		int32 CurrentNodeIndex = RootNodeIndex;
 		int32 CurrentDepth = 0;
 
-		while (StaticNodePool.IsValidIndex(CurrentNodeIndex))
+		while (StaticNodePoolPtr->IsValidIndex(CurrentNodeIndex))
 		{
-			const FOctreeNode& Node = StaticNodePool[CurrentNodeIndex];
+			const FOctreeNode& Node = (*StaticNodePoolPtr)[CurrentNodeIndex];
 			if (Node.State != EOctreeNodeState::Mixed || CurrentDepth >= MaxOctreeDepth)
 			{
 				return CurrentNodeIndex;
@@ -182,39 +184,81 @@ public:
 		}
 		return -1;
 	}
+
 	FBox GetNodeBounds(int32 NodeIndex) const
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(Octree_GetNodeBounds);
-
-		if (!StaticNodePool.IsValidIndex(NodeIndex))
+		if (!StaticNodePoolPtr)
+		{
+			return FBox(ForceInit);
+		}
+		if (!StaticNodePoolPtr->IsValidIndex(NodeIndex))
 		{
 			return FBox(ForceInit);
 		}
 
-		return StaticNodePool[NodeIndex].Bounds;
+		return (*StaticNodePoolPtr)[NodeIndex].Bounds;
 	}
 
 	void FindAdjacentEmptyLeaves(int32 NodeIndex, TArray<int32>& OutNeighbors) const
 	{
 		OutNeighbors.Empty();
-		if (!StaticNodePool.IsValidIndex(NodeIndex))
+
+		if (!StaticNodePoolPtr)
 		{
 			return;
 		}
 
-		const FOctreeNode& Node = StaticNodePool[NodeIndex];
+		if (!StaticNodePoolPtr->IsValidIndex(NodeIndex))
+		{
+			return;
+		}
+
+		const FOctreeNode& Node = (*StaticNodePoolPtr)[NodeIndex];
 
 		for (const int32 NeighborIndex : Node.Neighbors)
 		{
-
-			if (StaticNodePool.IsValidIndex(NeighborIndex) &&
-				StaticNodePool[NeighborIndex].State == EOctreeNodeState::Empty)
+			if (StaticNodePoolPtr->IsValidIndex(NeighborIndex) &&
+				(*StaticNodePoolPtr)[NeighborIndex].State == EOctreeNodeState::Empty)
 			{
 				OutNeighbors.Add(NeighborIndex);
 			}
 		}
 	}
-	
+	bool IsPathDynamicallyBlocked_Sweep(const FVector& Start, const FVector& End, float AgentRadius) const
+	{
+		// 경로의 방향과 총 길이 계산
+		const FVector PathVector = End - Start;
+		const float TotalDistance = PathVector.Size();
+		if (TotalDistance < KINDA_SMALL_NUMBER)
+		{
+			return IsRegionDynamicallyBlocked(FBox::BuildAABB(Start, FVector(AgentRadius)));
+		}
+    
+		const FVector Direction = PathVector / TotalDistance;
+    
+		const float StepSize = AgentRadius; 
+    
+		for (float Distance = 0; Distance < TotalDistance; Distance += StepSize)
+		{
+			const FVector CurrentPosition = Start + Direction * Distance;
+        
+			const FBox QueryBox = FBox::BuildAABB(CurrentPosition, FVector(AgentRadius));
+        
+			if (IsRegionDynamicallyBlocked(QueryBox))
+			{
+				return true;
+			}
+		}
+    
+		const FBox EndQueryBox = FBox::BuildAABB(End, FVector(AgentRadius));
+		if (IsRegionDynamicallyBlocked(EndQueryBox))
+		{
+			return true;
+		}
+
+		return false;
+	}
 	bool IsRegionDynamicallyBlocked(const FBox& QueryBox) const
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(Octree_IsRegionDynamicallyBlocked);
@@ -287,5 +331,4 @@ public:
 		}
 		return false;
 	}
-
 };

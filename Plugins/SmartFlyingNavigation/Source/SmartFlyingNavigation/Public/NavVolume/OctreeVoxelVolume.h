@@ -272,7 +272,7 @@ private:
 	//~======================================================================
 	// Runtime Data Members
 	//~======================================================================
-
+	
 	/** The runtime pool of nodes for the static octree, loaded from BakedOctreeData. */
 	TArray<FOctreeNode>* StaticNodePoolPtr = nullptr; 
 	TArray<FOctreeNode> StaticNodePool; 

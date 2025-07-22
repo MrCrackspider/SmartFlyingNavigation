@@ -16,9 +16,10 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	const int32 StartNodeIndex = OctreeData.FindLeafNodeAt(InRequest.StartLocation);
 	int32 GoalNodeIndex = OctreeData.FindLeafNodeAt(InRequest.EndLocation);
 
+	const TArray<FOctreeNode>& PoolRef = *(OctreeData.StaticNodePoolPtr);
 	bool bIsGoalNodeInvalid = (GoalNodeIndex == -1) ||
-		(OctreeData.StaticNodePool[GoalNodeIndex].State != EOctreeNodeState::Empty) ||
-		(OctreeData.StaticNodePool[GoalNodeIndex].MaxAllowedRadius < InRequest.AgentRadius);
+		(PoolRef[GoalNodeIndex].State != EOctreeNodeState::Empty) ||
+		(PoolRef[GoalNodeIndex].MaxAllowedRadius < InRequest.AgentRadius);
 
 
 	if (bIsGoalNodeInvalid)
@@ -108,8 +109,10 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 	FAstarPathNode* StartNode = MemoryPool.NewNode();
 	if (!StartNode) return EPathfindingResult::Failed_OutOfMemory;
 
+	const TArray<FOctreeNode>& PoolRef = *(OctreeData.StaticNodePoolPtr);
+	
 	StartNode->NodeIndex = StartNodeIndex;
-	StartNode->WorldPosition = OctreeData.StaticNodePool[StartNodeIndex].Bounds.GetCenter();
+	StartNode->WorldPosition = PoolRef[StartNodeIndex].Bounds.GetCenter();
 	StartNode->HCost = CalculateBoundHeuristic(StartNode->NodeIndex);
 	StartNode->CalculateAndSetFCost();
 
@@ -292,10 +295,10 @@ void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPat
 
 	TArray<int32> AdjacentNodeIndices;
 	OctreeData.FindAdjacentEmptyLeaves(Node->NodeIndex, AdjacentNodeIndices);
-	
+	const TArray<FOctreeNode>& PoolRef = *(OctreeData.StaticNodePoolPtr);
 	for (const int32 NeighborIndex : AdjacentNodeIndices)
 	{
-		const auto& NeighborNode = OctreeData.StaticNodePool[NeighborIndex];
+		const auto& NeighborNode = PoolRef[NeighborIndex];
 		const FBox NeighborBounds = NeighborNode.Bounds;
 		FVector NeighborCenter = NeighborBounds.GetCenter();
 
@@ -325,7 +328,8 @@ int64 FAstarPathfinder::GetMoveCost(const FVector& A, const FVector& B) const
 
 int64 FAstarPathfinder::CalculateBoundHeuristic(int32 NodeIndex) const
 {
-	const FBox& Bounds = OctreeData.StaticNodePool[NodeIndex].Bounds;
+	const TArray<FOctreeNode>& PoolRef = *(OctreeData.StaticNodePoolPtr);
+	const FBox& Bounds = PoolRef[NodeIndex].Bounds;
 	const FVector ClosestPoint = Bounds.GetClosestPointTo(ActualGoalLocation);
 	const float RawDist = (ClosestPoint - ActualGoalLocation).Size();
 	const float EffectiveDist = FMath::Max(0.0f, RawDist - AgentRadius);

@@ -188,17 +188,9 @@ void UPathfindingComponent::CreateOctreeDataSnapshot(const AOctreeVoxelVolume* O
 	const TArray<FOctreeNode>* SourceNodePoolPtr  = OctreeVolume->GetNodePoolPtr();
 	if (SourceNodePoolPtr && !SourceNodePoolPtr->IsEmpty())
 	{
-		const int32 NodeCount = SourceNodePoolPtr->Num();
+		//const int32 NodeCount = SourceNodePoolPtr->Num();
 
-		SnapshotData.StaticNodePool.SetNumUninitialized(NodeCount);
-
-		FMemory::Memcpy(SnapshotData.StaticNodePool.GetData(), SourceNodePoolPtr->GetData(),
-						NodeCount * sizeof(FOctreeNode));
-	}
-	else
-	{
-		// If the source is invalid, ensure the snapshot is also empty.
-		SnapshotData.StaticNodePool.Empty();
+		SnapshotData.StaticNodePoolPtr = SourceNodePoolPtr;
 	}
 	
 	// --- Step 3: Perform a high-speed bulk memory copy for the dynamic obstacle bitmask. ---
