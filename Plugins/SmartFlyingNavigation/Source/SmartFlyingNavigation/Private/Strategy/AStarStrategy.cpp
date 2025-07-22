@@ -14,6 +14,13 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	const FOctreePathfindingData& OctreeData = InRequest.NavigationData;
 
 	const int32 StartNodeIndex = OctreeData.FindLeafNodeAt(InRequest.StartLocation);
+
+	if (StartNodeIndex == -1)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("A* Pathfinding failed: Start node is invalid."));
+		return false;;
+	}
+
 	int32 GoalNodeIndex = OctreeData.FindLeafNodeAt(InRequest.EndLocation);
 
 	const TArray<FOctreeNode>& PoolRef = *(OctreeData.StaticNodePoolPtr);
@@ -110,7 +117,7 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 	if (!StartNode) return EPathfindingResult::Failed_OutOfMemory;
 
 	const TArray<FOctreeNode>& PoolRef = *(OctreeData.StaticNodePoolPtr);
-	
+
 	StartNode->NodeIndex = StartNodeIndex;
 	StartNode->WorldPosition = PoolRef[StartNodeIndex].Bounds.GetCenter();
 	StartNode->HCost = CalculateBoundHeuristic(StartNode->NodeIndex);
@@ -285,7 +292,7 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 
 bool FAstarPathfinder::HasGuaranteedLineOfSight(const FVector& Start, const FVector& End) const
 {
-	return !OctreeData.CheckForSolidNodesInCapsule(Start, End, AgentRadius);
+	return !OctreeData.CheckForSolidNodesInCapsule(Start, End, AgentRadius * 0.98f);
 }
 
 void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPathNode*>& OutSuccessors)
@@ -301,21 +308,17 @@ void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPat
 		const auto& NeighborNode = PoolRef[NeighborIndex];
 		const FBox NeighborBounds = NeighborNode.Bounds;
 		FVector NeighborCenter = NeighborBounds.GetCenter();
-
-		// // 1) If the cell itself is already big enough, we have instant clearance.
-		if (NeighborNode.MaxAllowedRadius <= AgentRadius)
-		{
-			continue;
-		}
 		
-		FBox NeighborQueryBox = AStarStrategyUtils::MakeAgentQueryBox(NeighborCenter, AgentRadius);
-
-		if (!OctreeData.IsRegionDynamicallyBlocked(NeighborQueryBox))
+		if (HasGuaranteedLineOfSight(Node->WorldPosition, NeighborCenter))
 		{
-			FAstarPathNode* Successor = MemoryPool.NewNode();
-			Successor->NodeIndex = NeighborIndex;
-			Successor->WorldPosition = NeighborCenter;
-			OutSuccessors.Add(Successor);
+			FBox NeighborQueryBox = AStarStrategyUtils::MakeAgentQueryBox(NeighborCenter, AgentRadius);
+			if (!OctreeData.IsRegionDynamicallyBlocked(NeighborQueryBox))
+			{
+				FAstarPathNode* Successor = MemoryPool.NewNode();
+				Successor->NodeIndex = NeighborIndex;
+				Successor->WorldPosition = NeighborCenter;
+				OutSuccessors.Add(Successor);
+			}
 		}
 	}
 }
@@ -339,12 +342,12 @@ int64 FAstarPathfinder::CalculateBoundHeuristic(int32 NodeIndex) const
 bool FAstarPathfinder::TryToRepairPartialPath(FAstarPathNode* PartialEndNode, TArray<FVector>& OutPath)
 {
 	FVector PartialPos = PartialEndNode->WorldPosition;
-	float   Radius     = AgentRadius * 2;
+	float Radius = AgentRadius * 2;
 	FVector BestPoint;
 
 	for (int32 i = 0; i < 16; ++i)
 	{
-		FVector Dir       = FMath::VRand();
+		FVector Dir = FMath::VRand();
 		FVector Candidate = PartialPos + Dir * FMath::FRandRange(0, Radius);
 		if (!OctreeData.CheckForSolidNodesInCapsule(Candidate, Candidate, AgentRadius)
 			&& HasGuaranteedLineOfSight(PartialPos, Candidate)
