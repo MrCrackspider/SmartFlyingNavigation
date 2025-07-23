@@ -261,7 +261,7 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 	const FVector CurrentLocation = Owner->GetActorLocation();
 	CurrentVelocity = FinalVelocity;
 	const FVector AdjustedVelocity = FinalVelocity * DeltaTime;
-	SetAppliedVelocity(AdjustedVelocity);
+	SetAppliedVelocity(CurrentVelocity );
 	//Owner->SetActorLocation(CurrentLocation + AdjustedVelocity);
 
 	// --- Modified Rotation Logic ---
