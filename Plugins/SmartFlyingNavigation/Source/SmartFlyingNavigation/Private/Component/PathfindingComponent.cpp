@@ -312,7 +312,7 @@ void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 		const FVector CurrentLocation = GetOwner()->GetActorLocation();
 
 		FVector TargetPoint;
-		if (FoundPath.Num() >CurrentPathDestinationIndex)
+		if(FoundPath.IsValidIndex(CurrentPathDestinationIndex))
 		{
 			TargetPoint = FoundPath[CurrentPathDestinationIndex];
 		}

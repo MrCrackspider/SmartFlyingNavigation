@@ -213,7 +213,6 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 		{
 			return EPathfindingResult::Success; // Repair was successful!
 		}
-		UE_LOG(LogTemp, Warning, TEXT("Partial Success"));
 		ReconstructAndSmoothPath(BestPartialNode, OutPath);
 		return EPathfindingResult::Success_Partial;
 	}
