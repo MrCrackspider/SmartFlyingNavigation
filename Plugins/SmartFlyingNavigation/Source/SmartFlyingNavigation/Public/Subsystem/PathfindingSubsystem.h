@@ -118,6 +118,7 @@ public:
 	 */
 	void ReturnPool(FPathNodeMemoryPoolBase* PoolToReturn);
 
+	bool GetIsLevelChanging() {return bIsLevelChanging.load();}
 protected:
 	//~=============================================================================
 	// Subsystem Lifecycle
@@ -167,4 +168,25 @@ private:
 
 	/** A collection of idle memory pools for octree-based pathfinding nodes. */
 	TArray<FPathNodeMemoryPoolBase*> IdleOctreePools;
+
+private:
+	//~=============================================================================
+	// Level Transition Handling
+	//~=============================================================================
+
+	/** Called just before a new map is loaded. */
+	void OnPreLoadMap(const FString& MapName);
+
+	/** Called after a new map has been successfully loaded. */
+	void OnPostLoadMap(UWorld* LoadedWorld);
+
+	void OnWorldBeingInitialized(UWorld* World, const UWorld::InitializationValues IVS);
+	void OnWorldInitialized(UWorld* World, const UWorld::InitializationValues IVS);
+
+	/** Handles to the registered delegates so we can unregister them later. */
+	FDelegateHandle OnPreWorldInitializationHandle;
+	FDelegateHandle OnPostWorldInitializationHandle;
+
+	/** Flag to indicate if we are currently in the process of changing levels. */
+	std::atomic<bool> bIsLevelChanging; // std::atomic for thread-safety
 };

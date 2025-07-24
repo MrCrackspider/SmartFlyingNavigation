@@ -27,7 +27,6 @@ public class SmartFlyingNavigationEditor : ModuleRules
 				"EditorStyle",
 				"WorkspaceMenuStructure",
 				"EditorSubsystem",
-				"LevelEditor",
 				"PropertyEditor", 
 				"DesktopWidgets",
 				"DesktopPlatform",

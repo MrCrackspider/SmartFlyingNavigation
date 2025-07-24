@@ -6,6 +6,7 @@
 #include "Widgets/SCompoundWidget.h"
 
 class UPathfindingSubsystem;
+class UAvoidanceSubsystem;
 class UPathfindingTunerSettings;
 class AActor;
 struct FAssetData; 
@@ -102,8 +103,10 @@ private:
     TOptional<float> GetDebugLineWidth() const;
     void OnDebugLineWidthCommitted(float NewValue, ETextCommit::Type CommitType);
    TOptional<ECheckBoxState> GetDrawDebugPathState() const;
-    void OnDrawDebugPathChanged(ECheckBoxState NewState);   
- 
+    void OnDrawDebugPathChanged(ECheckBoxState NewState);
+    TOptional<bool> GetbUseAgentAvoidance() const;
+    void OnbAvoidanceComitted(ECheckBoxState NewState);
+
     // --- Agent Settings ---
     bool AreOnlyAgentsSelected() const;
     FText GetSelectedAgentName() const;
@@ -134,6 +137,7 @@ private:
     //=================================================================================================
   
     TWeakObjectPtr<UPathfindingSubsystem> PathfindingSubsystem;
+    TWeakObjectPtr<UAvoidanceSubsystem> AvoidanceSubsystem;
     
     FTSTicker::FDelegateHandle ActorSelectionTickerHandle;
     

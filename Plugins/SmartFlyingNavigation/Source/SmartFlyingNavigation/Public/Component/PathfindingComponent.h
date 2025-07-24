@@ -29,7 +29,7 @@ enum class EPathMovementMode : uint8
 	Linear,
 	Spline 
 };
-
+ 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDestinationReached);
 
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
@@ -224,7 +224,7 @@ public:
 	
 	UPROPERTY(Category = "Pathfinding|Dynamic Repath", EditAnywhere,BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
-	int32 PartialPointSplineNum = 4;
+	int32 PartialPointSplineNum = 5;
 	
 	UPROPERTY()
 	float LastKnownBaseRadius;

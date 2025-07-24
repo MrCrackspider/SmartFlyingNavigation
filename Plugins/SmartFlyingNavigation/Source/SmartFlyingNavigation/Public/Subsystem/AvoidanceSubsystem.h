@@ -30,7 +30,7 @@ struct FThreadAvoidanceResult
 class UPathfindingComponent;
 class FParallelAvoidanceTask;
 
-UCLASS()
+UCLASS(Config=Game) 
 class SMARTFLYINGNAVIGATION_API UAvoidanceSubsystem : public UTickableWorldSubsystem
 {
     GENERATED_BODY()
@@ -47,6 +47,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Avoidance Subsystem")
     void UnregisterAgent(UPathfindingComponent* AgentComponent);
 
+    bool GetbUseAvoidance() {return bUseAvoidance;}
+    void SetbUseAvoidance(bool IsUse) {bUseAvoidance = IsUse;};
+    
     static void RunAvoidanceCalculation(
         const UWorld* World,
         const TArray<FAgentThreadData>& AgentData,
@@ -99,6 +102,7 @@ private:
 
     bool bShowVelocityDebugLine;
     void DebugVisualizeVelocities(const UPathfindingComponent* Agent, const FThreadAvoidanceResult& Result, const FVector& FinalOptimalVelocity) const;
-
-    bool bUseAvoidance;
+    
+    UPROPERTY(Config)
+    bool bUseAvoidance; 
 };

@@ -30,6 +30,7 @@
 #include "NavData/VoxelObstacleProfile.h"
 #include "NavVolume/OctreeVoxelVolume.h"
 #include "Subsystem/PathfindingSubsystem.h"
+#include "Subsystem/AvoidanceSubsystem.h"
 #include "Component/PathfindingComponent.h"
 #include "SPathfindingTunerSettings.h"
 
@@ -43,7 +44,8 @@ void SPathfindingTuner::Construct(const FArguments& InArgs)
 {
     TunerSettings = GetMutableDefault<UPathfindingTunerSettings>();
     PathfindingSubsystem = GEngine->GetEngineSubsystem<UPathfindingSubsystem>();
-
+    AvoidanceSubsystem = GEditor->GetEditorWorldContext().World()->GetSubsystem<UAvoidanceSubsystem>();
+    
     // Initialize ComboBox options
     MapSizeOptions.Add(MakeShared<int32>(128));
     MapSizeOptions.Add(MakeShared<int32>(256));
@@ -146,7 +148,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
         .BodyContent()
         [
             SNew(SVerticalBox)
-            + SVerticalBox::Slot()
+            + SVerticalBox::Slot() 
             .AutoHeight()
             .Padding(8.0f, 5.0f)
             [
@@ -175,8 +177,41 @@ TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
                     .MinSliderValue(1)
                     .MaxSliderValue(16)
                 ]
-            ]
-        ]
+            ] 
+            
+            + SVerticalBox::Slot() 
+            .AutoHeight()
+            .Padding(8.0f, 5.0f)
+            [
+                SNew(SHorizontalBox)
+                .ToolTipText(LOCTEXT("UseAvoidanceTooltip", "Enables or disables agent avoidance behavior globally."))
+                
+                + SHorizontalBox::Slot()
+                .FillWidth(0.4f)
+                .VAlign(VAlign_Center)
+                .Padding(0, 0, 10, 0)
+                [
+                    SNew(STextBlock)
+                    .Text(LOCTEXT("UseAvoidanceLabel", "Use Agent Avoidance"))
+                    .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                ]
+                
+                + SHorizontalBox::Slot()
+                .FillWidth(0.6f)
+                .VAlign(VAlign_Center)
+                [
+                    SNew(SCheckBox)
+                    .IsChecked_Lambda([this]() -> ECheckBoxState {
+                        if (AvoidanceSubsystem.IsValid())
+                        {
+                            return AvoidanceSubsystem->GetbUseAvoidance() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+                        }
+                        return ECheckBoxState::Undetermined;
+                    })
+                    .OnCheckStateChanged(this, &SPathfindingTuner::OnbAvoidanceComitted)
+                ]
+            ] 
+        ] 
        .InitiallyCollapsed(!TunerSettings->bIsPerformanceCategoryExpanded)
         .OnAreaExpansionChanged(this, &SPathfindingTuner::OnPerformanceCategoryExpansionChanged);
 }
@@ -873,8 +908,15 @@ FText SPathfindingTuner::GetSelectedVolumeDisplayText() const
     const auto SelectedVolumes = GetSelectedActorsOfType<AOctreeVoxelVolume>();
     const int32 NumSelected = SelectedVolumes.Num();
 
-    if (NumSelected == 0) return LOCTEXT("NoVolumeSelected", "None");
-    if (NumSelected == 1) return FText::FromString(SelectedVolumes[0]->GetActorLabel());
+    if (NumSelected == 0)
+    {
+        return LOCTEXT("NoVolumeSelected", "None");
+    }
+    
+    if (NumSelected == 1)
+    {
+        return FText::FromString(SelectedVolumes[0]->GetActorLabel());
+    }
     
     return FText::Format(LOCTEXT("MultipleVolumesSelected", "{0} Volumes Selected"), FText::AsNumber(NumSelected));
 }
@@ -1205,6 +1247,24 @@ void SPathfindingTuner::OnDrawDebugPathChanged(ECheckBoxState NewState)
 //=================================================================================================
 // Agent Settings
 //=================================================================================================
+
+TOptional<bool> SPathfindingTuner::GetbUseAgentAvoidance() const
+{
+    return AvoidanceSubsystem.IsValid() ? TOptional(AvoidanceSubsystem->GetbUseAvoidance()) : TOptional<bool>();
+}
+
+void SPathfindingTuner::OnbAvoidanceComitted(ECheckBoxState NewState)
+{
+    if (AvoidanceSubsystem.IsValid()) // <-- 이 부분도 확인
+    {
+        // ECheckBoxState를 bool로 변환
+        bool bUseAvoidance = (NewState == ECheckBoxState::Checked);
+
+        AvoidanceSubsystem->SetbUseAvoidance(bUseAvoidance);
+        AvoidanceSubsystem->SaveConfig(); // SaveConfig() 대신 SaveSubsystemConfig() 사용
+        Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+    }
+}
 
 bool SPathfindingTuner::AreOnlyAgentsSelected() const
 {

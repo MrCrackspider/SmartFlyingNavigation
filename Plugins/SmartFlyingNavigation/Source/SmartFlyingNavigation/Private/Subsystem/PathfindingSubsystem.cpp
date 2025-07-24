@@ -8,6 +8,17 @@
 
 void FPathfindingAsyncTasks::DoThreadedWork()
 {
+	if (!OwnerSubsystem.IsValid() || OwnerSubsystem->GetIsLevelChanging()) // .load() for std::atomic
+	{
+		UE_LOG(LogTemp, Error, TEXT("Pathfinding Task [%d] is aborting due to level change."), Request.RequestID);
+		if (OwnerSubsystem.IsValid() && Request.MemoryPool)
+		{
+			OwnerSubsystem->ReturnPool(Request.MemoryPool);
+		}
+		delete this;
+		return;
+	}
+	
 	FPathfindingResult Result;
 	Result.Request = Request;
 	Result.bSuccess = false;
@@ -58,6 +69,7 @@ void FPathfindingAsyncTasks::Abandon()
 void UPathfindingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+	bIsLevelChanging = false;
 
 	if (PathfindingThreadPool)
 	{
@@ -299,3 +311,68 @@ void UPathfindingSubsystem::OnPathfindingCompleted(const FPathfindingRequest& Re
 	}
 }
 
+void UPathfindingSubsystem::OnPreLoadMap(const FString& MapName)
+{
+	UE_LOG(LogTemp, Warning, TEXT("UPathfindingSubsystem::OnPreLoadMap: Tearing down pathfinding system for level change."));
+
+	// 1. Set the level changing flag to true to prevent new requests.
+	bIsLevelChanging = true;
+
+	// 2. Destroy the thread pool to forcibly stop all ongoing and queued tasks.
+	//    This is the safest and most reliable method.
+	if (PathfindingThreadPool)
+	{
+		PathfindingThreadPool->Destroy();
+		PathfindingThreadPool = nullptr;
+	}
+
+	// 3. Empty the completed tasks queue to discard any stale results from the old level.
+	CompletedTasksQueue.Empty();
+
+	// 4. Clean up all idle memory pools as well.
+	{
+		FScopeLock Lock(&PoolLock);
+		for (FPathNodeMemoryPoolBase* Pool : IdleGridPools) { delete Pool; }
+		IdleGridPools.Empty();
+		for (FPathNodeMemoryPoolBase* Pool : IdleOctreePools) { delete Pool; }
+		IdleOctreePools.Empty();
+	}
+}
+
+void UPathfindingSubsystem::OnPostLoadMap(UWorld* LoadedWorld)
+{
+	UE_LOG(LogTemp, Warning, TEXT("UPathfindingSubsystem::OnPostLoadMap: Re-initializing pathfinding system."));
+
+	// 1. Since the new level is loaded, re-create the thread pool.
+	//    (This is the same thread pool creation logic from the Initialize function).
+	const int32 RequestedNumThreads = this->CurrentNumWorkerThreads;
+	const int32 NumPhysicalCores = FPlatformMisc::NumberOfCores();
+	const int32 IdealMaxThreads = FMath::Max(1, NumPhysicalCores - 2); // Leave cores for game and render threads
+	const int32 FinalNumThreads = FMath::Clamp(RequestedNumThreads, 1, IdealMaxThreads);
+
+	PathfindingThreadPool = FQueuedThreadPool::Allocate();
+	if (PathfindingThreadPool)
+	{
+		PathfindingThreadPool->Create(FinalNumThreads, 32 * 1024, TPri_Normal, TEXT("PathfindingThreadPool"));
+		this->CurrentNumWorkerThreads = FinalNumThreads;
+	}
+	else
+	{
+		this->CurrentNumWorkerThreads = 0;
+	}
+
+	// 2. Set the level changing flag back to false, allowing the system to accept new requests.
+	bIsLevelChanging = false;
+}
+
+void UPathfindingSubsystem::OnWorldBeingInitialized(UWorld* World,
+	const UWorld::InitializationValues IVS)
+{
+	OnPreLoadMap(World->GetMapName()); 
+}
+
+void UPathfindingSubsystem::OnWorldInitialized(UWorld* World,
+	const UWorld::InitializationValues IVS)
+{
+	OnPostLoadMap(World);
+}

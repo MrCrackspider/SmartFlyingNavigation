@@ -33,7 +33,6 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     InterpSpeed = 10.f;
 
     bShowVelocityDebugLine = true;
-    bUseAvoidance = true;
 }
 
 void UAvoidanceSubsystem::PostInitialize()

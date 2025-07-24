@@ -251,7 +251,7 @@ FVector UPathfindingComponent::GetPreferredVelocity() const
 
 	return PreferredVelocity;
 }
-
+ 
 void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float DeltaTime)
 {
 	AActor* Owner = GetOwner();
