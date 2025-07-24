@@ -840,6 +840,39 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
                   .MinValue(1.0f).MaxValue(1000.0f).MinSliderValue(100.0f).MaxSliderValue(500.0f)
               ]
           ]
+            + SVerticalBox::Slot()
+         .AutoHeight()
+         .Padding(8.0f, 5.0f)
+         [
+             SNew(SHorizontalBox)
+             .ToolTipText(LOCTEXT("PeriodicRepathTooltip", "Enables or disables periodic repathing for the agent."))
+                
+             + SHorizontalBox::Slot()
+             .FillWidth(0.4f)
+             .VAlign(VAlign_Center)
+             .Padding(0, 0, 10, 0)
+             [
+                 SNew(STextBlock)
+                 .Text(LOCTEXT("PeriodicRepathLabel", "Periodic Repath"))
+                 .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+             ]
+                
+             + SHorizontalBox::Slot()
+             .FillWidth(0.6f)
+             .VAlign(VAlign_Center)
+             [
+                 SNew(SCheckBox)
+                 .IsChecked_Lambda([this]() -> ECheckBoxState {
+                          TOptional<ECheckBoxState> State = this->GetbPeriodicRepathState();
+                          if (State.IsSet())
+                          {
+                              return State.GetValue();
+                          }
+                          return ECheckBoxState::Undetermined;
+                      })
+                 .OnCheckStateChanged(this, &SPathfindingTuner::OnbPeriodicRepathChanged) 
+             ]
+         ]
         ]
         
         .InitiallyCollapsed(!TunerSettings->bIsAgentSettingsCategoryExpanded)
@@ -1454,6 +1487,58 @@ void SPathfindingTuner::OnDrawDebugPathChanged(ECheckBoxState NewState)
 //=================================================================================================
 // Agent Settings
 //=================================================================================================
+
+TOptional<ECheckBoxState> SPathfindingTuner::GetbPeriodicRepathState() const
+{
+    TArray<UPathfindingComponent*> SelectedPathfindingComponents;
+    const auto SelectedActors = GetSelectedActorsOfType<AActor>();
+    
+    for (AActor* Actor : SelectedActors)
+    {
+        if (Actor)
+        {
+            if (UPathfindingComponent* PathComp = Actor->FindComponentByClass<UPathfindingComponent>())
+            {
+                SelectedPathfindingComponents.Add(PathComp);
+            }
+        }
+    }
+    
+    TOptional<bool> CommonValue = GetCommonPropertyValue<UPathfindingComponent, bool>(SelectedPathfindingComponents,
+        [](const UPathfindingComponent* Comp) { return Comp->bPeriodicRepath; }); // 
+
+    if (CommonValue.IsSet())
+    {
+        return CommonValue.GetValue() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+    }
+   
+    return ECheckBoxState::Undetermined; 
+}
+
+void SPathfindingTuner::OnbPeriodicRepathChanged(ECheckBoxState NewState)
+{
+    bool bNewValue = (NewState == ECheckBoxState::Checked);
+    
+    if (NewState != ECheckBoxState::Undetermined)
+    {
+        TArray<UPathfindingComponent*> SelectedPathfindingComponents;
+        const auto SelectedActors = GetSelectedActorsOfType<AActor>(); 
+        for (AActor* Actor : SelectedActors)
+        {
+            if (Actor)
+            {
+                if (UPathfindingComponent* PathComp = Actor->FindComponentByClass<UPathfindingComponent>())
+                {
+                    SelectedPathfindingComponents.Add(PathComp);
+                }
+            }
+        }
+        SetCommonPropertyValue<UPathfindingComponent, bool>(SelectedPathfindingComponents, bNewValue, LOCTEXT("SetPeriodicRepathTransaction", "Set Periodic Repath"),
+            [](UPathfindingComponent* Comp, bool Value) {
+                Comp->SetbPeriodicRepath(Value); 
+            });
+    }
+}
 
 TOptional<bool> SPathfindingTuner::GetbUseAgentAvoidance() const
 {

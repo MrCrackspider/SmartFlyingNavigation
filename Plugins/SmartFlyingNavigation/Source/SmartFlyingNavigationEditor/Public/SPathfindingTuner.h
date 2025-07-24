@@ -32,7 +32,6 @@ private:
     TSharedRef<SWidget> BuildAgentSettingsSection();
     TSharedRef<SWidget> BuildVoxelDebugSettingsSection();
     TSharedRef<SWidget> BuildAgentDebugSection();
-
     TSharedRef<SWidget> BuildWorldBakeSection();
     //=================================================================================================
     // Actor Selection Handling
@@ -65,7 +64,6 @@ private:
     void OnAgentSettingsCategoryExpansionChanged(bool bIsExpanded);
     void OnDebugSettingsCategoryExpansionChanged(bool bIsExpanded);
     void OnAgentDebugCategoryExpansionChanged(bool bIsExpanded);
-
     void OnWorldBakeCategoryExpansionChanged(bool bIsExpanded);
     //=================================================================================================
     // UI Callbacks & Value Accessors
@@ -107,6 +105,8 @@ private:
     void OnDebugLineWidthCommitted(float NewValue, ETextCommit::Type CommitType);
    TOptional<ECheckBoxState> GetDrawDebugPathState() const;
     void OnDrawDebugPathChanged(ECheckBoxState NewState);
+    TOptional<ECheckBoxState> GetbPeriodicRepathState() const;
+    void OnbPeriodicRepathChanged(ECheckBoxState NewState);
     TOptional<bool> GetbUseAgentAvoidance() const;
     void OnbAvoidanceComitted(ECheckBoxState NewState);
 

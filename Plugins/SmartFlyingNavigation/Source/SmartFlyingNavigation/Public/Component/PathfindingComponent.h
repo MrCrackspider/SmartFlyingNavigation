@@ -87,7 +87,9 @@ public:
 	
 	UPROPERTY(BlueprintAssignable, Category = "Pathfinding|Event")
 	FOnDestinationReached OnDestinationReached;
-
+	
+	void SetbPeriodicRepath(bool NewValue) { bPeriodicRepath = NewValue; }
+	
 #if WITH_EDITOR
 	// A function called when a property is changed in the editor.
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;

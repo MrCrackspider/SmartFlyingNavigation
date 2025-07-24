@@ -84,16 +84,6 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 
 	// Called to update pathfinding in response to a scale change at runtime.
 	UpdateAgentRadiusFromScale();
-
-	if (CurrentState == EPathfindingState::FollowPath)
-	{
-		if (!IsPathAheadValid())
-		{
-			InvalidatePathAndRequestRepath();
-			return;
-		}
-	}
-	
 }
 
 void UPathfindingComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -174,7 +164,7 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	return false;
 }
 
-void UPathfindingComponent::CreateOctreeDataSnapshot(const AOctreeVoxelVolume* OctreeVolume,
+void UPathfindingComponent:: CreateOctreeDataSnapshot(const AOctreeVoxelVolume* OctreeVolume,
                                                      FOctreePathfindingData& SnapshotData) const
 {
 	// --- Step 1: Copy small, trivial member variables directly. ---
@@ -688,15 +678,4 @@ bool UPathfindingComponent::IsSplinePathSafe() const
 	}
 
 	return true;
-}
-
-bool UPathfindingComponent::IsPathAheadValid() const
-{
-	AOctreeVoxelVolume* OctreeVoxelVolume = Cast<AOctreeVoxelVolume>(TargetVolume);
-	if (!OctreeVoxelVolume || CurrentPathDestinationIndex < 0 || CurrentPathDestinationIndex)
-	{
-		return true;
-	}
-
-	return true;
-}
+} 
