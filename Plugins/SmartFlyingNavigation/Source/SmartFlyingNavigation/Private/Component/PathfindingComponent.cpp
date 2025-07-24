@@ -152,7 +152,6 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	if (bRequestDataValid)
 	{
 		CurrentTargetLocation = TargetLocation;
-		FoundPath.Empty();
 
 		CurrentRequestID = PathSubsystem->RequestPath(Request);
 		if (CurrentRequestID != -1)
@@ -164,7 +163,7 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	return false;
 }
 
-void UPathfindingComponent:: CreateOctreeDataSnapshot(const AOctreeVoxelVolume* OctreeVolume,
+void UPathfindingComponent::CreateOctreeDataSnapshot(const AOctreeVoxelVolume* OctreeVolume,
                                                      FOctreePathfindingData& SnapshotData) const
 {
 	// --- Step 1: Copy small, trivial member variables directly. ---
@@ -452,6 +451,12 @@ void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 
 void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess)
 {
+	if (!IsValid(PathSplinePtr))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("PathSplinePtr is not valid. Cannot set up spline path."));
+		return;
+	}
+	
 	if (bSuccess && Path.Num() > 1)
 	{
 		FoundPath = Path;
@@ -462,7 +467,28 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 		}
 
 		CurrentState = EPathfindingState::FollowPath;
+		
+		PathSplinePtr->ClearSplinePoints();
 
+		for (int i = 0; i < PartialPointSplineNum; i++)
+		{
+			if (i >= FoundPath.Num())
+			{
+				break;
+			}
+			
+			PathSplinePtr->AddSplinePoint(FoundPath[i], ESplineCoordinateSpace::World, false);
+		}
+
+		PathSplinePtr->UpdateSpline();
+
+		const FVector CurrentLocation = GetOwner()->GetActorLocation();
+		const float ClosestInputKey = PathSplinePtr->FindInputKeyClosestToWorldLocation(CurrentLocation);
+		DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplineInputKey(ClosestInputKey);
+
+		int32 ClosestPointIndex = FMath::RoundToInt(ClosestInputKey);
+		CurrentPathDestinationIndex = FMath::Clamp(ClosestPointIndex + 1, 0, PartialPointSplineNum - 1);
+		
 		UWorld* World = GetWorld();
 		if (World && bDrawDebugPath) 
 		{
@@ -493,41 +519,10 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 				);
 			}
 		}
-		
-		if (IsValid(PathSplinePtr))
-		{
-			PathSplinePtr->ClearSplinePoints();
-
-			for (int i = 0; i < PartialPointSplineNum; i++)
-			{
-				if (i >= FoundPath.Num())
-				{
-					break;
-				}
-				
-				PathSplinePtr->AddSplinePoint(FoundPath[i], ESplineCoordinateSpace::World, false);
-			}
-
-			PathSplinePtr->UpdateSpline();
-
-			const FVector CurrentLocation = GetOwner()->GetActorLocation();
-			const float ClosestInputKey = PathSplinePtr->FindInputKeyClosestToWorldLocation(CurrentLocation);
-			DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplineInputKey(ClosestInputKey);
-
-			int32 ClosestPointIndex = FMath::RoundToInt(ClosestInputKey);
-			CurrentPathDestinationIndex = FMath::Clamp(ClosestPointIndex + 1, 0, PartialPointSplineNum - 1);
-		}
-		else
-		{
-			UE_LOG(LogTemp, Warning, TEXT("PathSplinePtr is not valid. Cannot set up spline path."));
-		}
 	}
 	else
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed or path is too short."));
-		FoundPath.Empty();
-		CurrentPathDestinationIndex = -1;
-		CurrentState = EPathfindingState::Idle;
 	}
 
 	if (bPeriodicRepath && !bIsReachDestination)
