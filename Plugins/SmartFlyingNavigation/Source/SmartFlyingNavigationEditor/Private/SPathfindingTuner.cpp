@@ -34,6 +34,21 @@
 #include "Component/PathfindingComponent.h"
 #include "SPathfindingTunerSettings.h"
 
+// LevelStreaming
+#include "EngineUtils.h"
+#include "FileHelpers.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Misc/ScopedSlowTask.h"
+#include "EditorAssetLibrary.h"
+#include "ObjectTools.h"
+#include "Components/BoxComponent.h"
+#include "Engine/StaticMeshActor.h"
+#include "Containers/UnrealString.h"
+#include "Landscape.h"
+#include "LandscapeStreamingProxy.h"
+#include "LandscapeSubsystem.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
+
 #define LOCTEXT_NAMESPACE "PathfindingTuner"
 
 //=================================================================================================
@@ -86,6 +101,13 @@ void SPathfindingTuner::Construct(const FArguments& InArgs)
             .Padding(2)
             [
                 BuildOctreeVolumeSettingsSection()
+            ]
+                
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(2)
+            [
+                BuildWorldBakeSection() 
             ]
 
             // Baked Data Settings Section
@@ -310,6 +332,191 @@ TSharedRef<SWidget> SPathfindingTuner::BuildOctreeVolumeSettingsSection()
         ]
         .InitiallyCollapsed(!TunerSettings->bIsOctreeSettingsCategoryExpanded)
         .OnAreaExpansionChanged(this, &SPathfindingTuner::OnOctreeSettingsCategoryExpansionChanged);
+}
+
+TSharedRef<SWidget> SPathfindingTuner::BuildWorldBakeSection()
+{
+    return SNew(SExpandableArea)
+        .HeaderContent()
+        [
+            SNew(STextBlock)
+                .Text(LOCTEXT("WorldBakeCategory", "World Bake Settings"))
+                .Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
+                .ShadowOffset(FVector2D(1.0f, 1.0f))
+        ]
+        .BodyContent()
+        [
+            SNew(SVerticalBox)
+
+                // Chunk Size
+                + SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+                [
+                    SNew(SHorizontalBox)
+                        + SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
+                        [
+                            SNew(STextBlock).Text(LOCTEXT("WorldBakeChunkSizeLabel", "Chunk Size:"))
+                        ]
+                        + SHorizontalBox::Slot().FillWidth(0.6f)
+                        [
+                            SNew(SNumericEntryBox<float>)
+                                .Value(this, &SPathfindingTuner::GetWorldBakeChunkSize)
+                                .OnValueCommitted(this, &SPathfindingTuner::OnWorldBakeChunkSizeCommitted)
+                        ]
+                ]
+
+            // Voxel Extent
+            + SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+                [
+                    SNew(SHorizontalBox)
+                        + SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
+                        [
+                            SNew(STextBlock).Text(LOCTEXT("WorldBakeVoxelExtentLabel", "Voxel Extent:"))
+                        ]
+                        + SHorizontalBox::Slot().FillWidth(0.6f)
+                        [
+                            SNew(SNumericEntryBox<float>)
+                                .Value(this, &SPathfindingTuner::GetWorldBakeVoxelExtent)
+                                .OnValueCommitted(this, &SPathfindingTuner::OnWorldBakeVoxelExtentCommitted)
+                        ]
+                ]
+
+            // Max Octree Depth
+            + SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+                [
+                    SNew(SHorizontalBox)
+                        + SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
+                        [
+                            SNew(STextBlock).Text(LOCTEXT("WorldBakeMaxDepthLabel", "Max Octree Depth:"))
+                        ]
+                        + SHorizontalBox::Slot().FillWidth(0.6f)
+                        [
+                            SNew(SNumericEntryBox<int32>)
+                                .Value(this, &SPathfindingTuner::GetWorldBakeMaxDepth)
+                                .OnValueCommitted(this, &SPathfindingTuner::OnWorldBakeMaxDepthCommitted)
+                        ]
+                ]
+
+            // Save Directory
+            + SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+                [
+                    SNew(SHorizontalBox)
+                        + SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
+                        [
+                            SNew(STextBlock).Text(LOCTEXT("WorldBakeSaveDirLabel", "Save Directory:"))
+                        ]
+                        + SHorizontalBox::Slot().FillWidth(0.6f)
+                        [
+                            SNew(SHorizontalBox)
+                                + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+                                [
+                                    SNew(SEditableTextBox)
+                                        .Text(this, &SPathfindingTuner::GetWorldBakeSaveDirectory)
+                                        .OnTextCommitted(this, &SPathfindingTuner::OnWorldBakeSaveDirectoryCommitted)
+                                        .HintText(LOCTEXT("WorldBakeSaveDirHint", "/Game/Path/For/Generated/Chunks"))
+                                ]
+                                + SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f).VAlign(VAlign_Center)
+                                [
+                                    SNew(SButton)
+                                        .Text(FText::FromString(TEXT("...")))
+                                        .OnClicked(this, &SPathfindingTuner::OnWorldBakeBrowseButtonClicked)
+                                ]
+                        ]
+                ]
+
+            // Obstacle Profile
+            + SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+                [
+                    SNew(SHorizontalBox)
+                        + SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
+                        [
+                            SNew(STextBlock).Text(LOCTEXT("WorldBakeProfileLabel", "Obstacle Profile:"))
+                        ]
+                        + SHorizontalBox::Slot().FillWidth(0.6f)
+                        [
+                            SNew(SObjectPropertyEntryBox)
+                                .AllowedClass(UVoxelObstacleProfile::StaticClass())
+                                .ObjectPath(this, &SPathfindingTuner::GetWorldBakeObstacleProfilePath)
+                                .OnObjectChanged(this, &SPathfindingTuner::OnWorldBakeObstacleProfileChanged)
+                        ]
+                ]
+
+            // Estimated Chunk Calculation
+            + SVerticalBox::Slot()
+            .AutoHeight()
+                .Padding(8.0f, 15.0f, 8.0f, 8.0f)
+                [
+                    SNew(SHorizontalBox)
+                        + SHorizontalBox::Slot()
+                        .FillWidth(0.4f)
+                        .VAlign(VAlign_Center)
+                        .Padding(0, 0, 8.0f, 0)
+                        [
+                            SNew(STextBlock)
+                                .Text(LOCTEXT("CalculateChunksDescription", "Estimate the number of chunks"))
+                                .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                                .ColorAndOpacity(FSlateColor(FLinearColor(0.8f, 0.8f, 0.8f)))
+                                .AutoWrapText(true)
+                        ]
+
+                    + SHorizontalBox::Slot()
+                        .FillWidth(0.6f)
+                        .VAlign(VAlign_Center)
+                        .Padding(0.0f, 0.0f, 15.0f, 0.0f)
+                        [
+                            SNew(SButton)
+                                .ButtonStyle(FAppStyle::Get(), "PrimaryButton")
+                                .TextStyle(FAppStyle::Get(), "PrimaryButtonText")
+                                .Text(LOCTEXT("CalculateChunksButton", "Calculate Estimated Chunks"))
+                                .ToolTipText(LOCTEXT("CalculateChunksTooltip", "Scans the world geometry to estimate how many chunks will be generated with the current settings."))
+                                .OnClicked(this, &SPathfindingTuner::OnCalculateChunksClicked)
+                        ]
+                ]
+
+            + SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(8.0f, 0.0f, 8.0f, 8.0f)
+                .HAlign(HAlign_Right)
+                [
+                    SNew(STextBlock)
+                        .Text(this, &SPathfindingTuner::GetEstimatedChunksText)
+                        .Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont"))
+                ]
+
+                // Bake World Button
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(8.0f, 15.0f, 8.0f, 8.0f)
+                [
+                    SNew(SHorizontalBox)
+
+                        + SHorizontalBox::Slot()
+                        .FillWidth(0.4f)
+                        .VAlign(VAlign_Center)
+                        .Padding(0, 0, 8.0f, 0)
+                        [
+                            SNew(STextBlock)
+                                .Text(LOCTEXT("BakeWorldDescription", "Bake the entire world"))
+                                .Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+                                .ColorAndOpacity(FSlateColor(FLinearColor(0.8f, 0.8f, 0.8f)))
+                                .AutoWrapText(true)
+                        ]
+
+                    + SHorizontalBox::Slot()
+                        .FillWidth(0.6f)
+                        .VAlign(VAlign_Center)
+                        .Padding(0.0f, 0.0f, 15.0f, 0.0f)
+                        [
+                            SNew(SButton)
+                                .ButtonStyle(FAppStyle::Get(), "PrimaryButton") // 스타일 통일
+                                .TextStyle(FAppStyle::Get(), "PrimaryButtonText")
+                                .Text(LOCTEXT("BakeWorldButtonText", "Bake Entire World"))
+                                .ToolTipText(LOCTEXT("BakeWorldButtonTooltip", "Scans the entire world, generates navigation chunks, and bakes them. This is a very long and destructive process."))
+                                .OnClicked(this, &SPathfindingTuner::OnBakeWorldButtonClicked)
+                        ]
+                ]
+        ]
+    .InitiallyCollapsed(!TunerSettings->bIsWorldBakeCategoryExpanded)
+        .OnAreaExpansionChanged(this, &SPathfindingTuner::OnWorldBakeCategoryExpansionChanged);
 }
 
 TSharedRef<SWidget> SPathfindingTuner::BuildBakedDataSettingsSection()
@@ -1119,7 +1326,7 @@ FString SPathfindingTuner::GetBakedOctreeDataPath() const
 {
     const auto SelectedVolumes = GetSelectedActorsOfType<AOctreeVoxelVolume>();
     TOptional<UOctreeDataAsset*> CommonAsset = GetCommonPropertyValue<AOctreeVoxelVolume, UOctreeDataAsset*>(SelectedVolumes,
-        [](const AOctreeVoxelVolume* V) { return V->GetBakedOctreeData(); });
+        [](const AOctreeVoxelVolume* V) { return V->GetBakedOctreeData().Get(); });
 
     return (CommonAsset.IsSet() && CommonAsset.GetValue()) ? CommonAsset.GetValue()->GetPathName() : FString();
 }
@@ -1140,7 +1347,7 @@ FText SPathfindingTuner::GetBakedDataFullPathAsText() const
 {
     const auto SelectedVolumes = GetSelectedActorsOfType<AOctreeVoxelVolume>();
     TOptional<UOctreeDataAsset*> CommonAsset = GetCommonPropertyValue<AOctreeVoxelVolume, UOctreeDataAsset*>
-    (SelectedVolumes,[](const AOctreeVoxelVolume* V) { return V->GetBakedOctreeData(); });
+    (SelectedVolumes,[](const AOctreeVoxelVolume* V) { return V->GetBakedOctreeData().Get(); });
 
     // Case 0: Non Selected
     if (SelectedVolumes.Num() == 0)
@@ -1436,6 +1643,294 @@ FReply SPathfindingTuner::OnBakeButtonClicked()
     return FReply::Handled();
 }
 
+FReply SPathfindingTuner::OnBakeWorldButtonClicked()
+{
+    if (!TunerSettings)
+    {
+        ShowWarningMessage(LOCTEXT("NoTunerSettings", "Internal Error: TunerSettings is not valid."));
+        return FReply::Handled();
+    }
+    if (TunerSettings->WorldBake_SaveDirectory.Path.IsEmpty())
+    {
+        ShowWarningMessage(LOCTEXT("WorldBakeSaveDirNotSet", "World Bake failed. Please set the 'Save Directory' in the World Bake Settings first."));
+        return FReply::Handled();
+    }
+    if (!TunerSettings->WorldBake_ObstacleProfile.IsValid())
+    {
+        ShowWarningMessage(LOCTEXT("WorldBakeProfileNotSet", "World Bake failed. Please set the 'Obstacle Profile' in the World Bake Settings first."));
+        return FReply::Handled();
+    }
+
+    const FText DialogTitle = LOCTEXT("ConfirmWorldBakeTitle", "Confirm World Bake");
+    const FText DialogText = LOCTEXT("ConfirmWorldBakeText", "This will DELETE all previously baked navigation chunks in the target directory and regenerate everything from scratch.\nThis process can take a very long time and cannot be undone.\n\nAre you sure you want to continue?");
+    if (FMessageDialog::Open(EAppMsgType::YesNo, DialogText, &DialogTitle) == EAppReturnType::No)
+    {
+        return FReply::Handled();
+    }
+
+    UWorld* World = GEditor->GetEditorWorldContext().World();
+    if (!World)
+    {
+        ShowWarningMessage(LOCTEXT("NoWorld", "Could not get a valid editor world."));
+        return FReply::Handled();
+    }
+
+    TArray<TObjectPtr<UPackage>> PackagesToSave;
+    TArray<TObjectPtr<AActor>> CreatedActors;
+
+    TMap<ULandscapeComponent*, TEnumAsByte<ECollisionEnabled::Type>> OriginalCollisionStates;
+    for (TActorIterator<ALandscapeProxy> It(World); It; ++It)
+    {
+        ALandscapeProxy* Proxy = *It;
+        if (Proxy)
+        {
+            TArray<ULandscapeComponent*> LandscapeComponents;
+            Proxy->GetComponents<ULandscapeComponent>(LandscapeComponents);
+            for (ULandscapeComponent* Comp : LandscapeComponents)
+            {
+                if (Comp)
+                {
+                    OriginalCollisionStates.Add(Comp, Comp->GetCollisionEnabled());
+                    Comp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+                }
+            }
+        }
+    }
+
+    bool bBakeCancelled = false;
+
+    {
+        const FScopedTransaction Transaction(LOCTEXT("WorldBakeTransaction", "Bake Entire World Navigation"));
+
+        FString SavePath = TunerSettings->WorldBake_SaveDirectory.Path;
+        if (!SavePath.StartsWith(TEXT("/")))
+        {
+            SavePath = FPaths::Combine(TEXT("/Game"), SavePath);
+        }
+        SavePath.RemoveFromEnd(TEXT("/"));
+
+        TArray<FString> AssetPathStrings = UEditorAssetLibrary::ListAssets(SavePath, true, false);
+        if (AssetPathStrings.Num() > 0)
+        {
+            TArray<FAssetData> AssetsToDelete;
+            FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+            for (const FString& Path : AssetPathStrings)
+            {
+                FAssetData AssetData = AssetRegistryModule.Get().GetAssetByObjectPath(FSoftObjectPath(Path));
+                if (AssetData.IsValid()) AssetsToDelete.Add(AssetData);
+            }
+            if (AssetsToDelete.Num() > 0) ObjectTools::DeleteAssets(AssetsToDelete, true);
+        }
+
+        TArray<AActor*> ActorsToDelete;
+        for (TActorIterator<AOctreeVoxelVolume> It(World); It; ++It)
+        {
+            ActorsToDelete.Add(*It);
+        }
+        for (AActor* Actor : ActorsToDelete)
+        {
+            World->DestroyActor(Actor);
+        }
+
+        FBox WorldBounds(ForceInit);
+        for (TActorIterator<AActor> It(World); It; ++It)
+        {
+            AActor* Actor = *It;
+            if (!Actor || Actor->ActorHasTag(FName("NoNavBake"))) continue;
+            TArray<UStaticMeshComponent*> StaticMeshComponents;
+            Actor->GetComponents<UStaticMeshComponent>(StaticMeshComponents);
+            for (UStaticMeshComponent* Component : StaticMeshComponents)
+            {
+                if (Component && Component->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
+                {
+                    WorldBounds += Component->Bounds.GetBox();
+                }
+            }
+        }
+        for (TActorIterator<ALandscapeStreamingProxy> It(World); It; ++It)
+        {
+            ALandscapeStreamingProxy* LandscapeProxy = *It;
+            if (LandscapeProxy && !LandscapeProxy->ActorHasTag(FName("NoNavBake")))
+            {
+                WorldBounds += LandscapeProxy->GetComponentsBoundingBox(true);
+            }
+        }
+
+        for (TActorIterator<ALandscape> It(World); It; ++It)
+        {
+            ALandscape* Landscape = *It;
+            if (Landscape && !Landscape->ActorHasTag(FName("NoNavBake")))
+            {
+                WorldBounds += Landscape->GetComponentsBoundingBox(true);
+            }
+        }
+
+        const float ChunkSize = TunerSettings->WorldBake_ChunkSize;
+        if (ChunkSize <= 0)
+        {
+            ShowWarningMessage(LOCTEXT("InvalidChunkSize", "Chunk Size must be greater than 0."));
+            goto Cleanup;
+        }
+
+        const int32 GridMinX = FMath::FloorToInt(WorldBounds.Min.X / ChunkSize);
+        const int32 GridMaxX = FMath::CeilToInt(WorldBounds.Max.X / ChunkSize);
+        const int32 GridMinY = FMath::FloorToInt(WorldBounds.Min.Y / ChunkSize);
+        const int32 GridMaxY = FMath::CeilToInt(WorldBounds.Max.Y / ChunkSize);
+        const int32 GridMinZ = FMath::FloorToInt(WorldBounds.Min.Z / ChunkSize);
+        const int32 GridMaxZ = FMath::CeilToInt(WorldBounds.Max.Z / ChunkSize);
+
+        const int32 TotalChunks = (GridMaxX - GridMinX) * (GridMaxY - GridMinY) * (GridMaxZ - GridMinZ);
+        if (TotalChunks <= 0)
+        {
+            ShowWarningMessage(FText::Format(LOCTEXT("NoChunksToBake", "No chunks to bake. TotalChunks calculated as {0}. Check WorldBounds and ChunkSize."), FText::AsNumber(TotalChunks)));
+            goto Cleanup;
+        }
+
+        FScopedSlowTask BakeTask(TotalChunks, LOCTEXT("BakingWorldTask", "Baking World Navigation Chunks..."));
+        BakeTask.MakeDialog(true);
+
+        UVoxelObstacleProfile* ObstacleProfile = TunerSettings->WorldBake_ObstacleProfile.LoadSynchronous();
+        if (!ObstacleProfile)
+        {
+            ShowWarningMessage(LOCTEXT("ProfileLoadFailed", "Failed to load the specified Obstacle Profile. Aborting."));
+            goto Cleanup;
+        }
+
+        for (int32 GZ = GridMinZ; GZ < GridMaxZ; ++GZ)
+        {
+            for (int32 GY = GridMinY; GY < GridMaxY; ++GY)
+            {
+                for (int32 GX = GridMinX; GX < GridMaxX; ++GX)
+                {
+                    if (BakeTask.ShouldCancel())
+                    {
+                        ShowWarningMessage(LOCTEXT("BakeCancelled", "World Bake process was cancelled by the user."));
+                        bBakeCancelled = true;
+                        goto EndBakeLoop;
+                    }
+                    BakeTask.EnterProgressFrame(1.f, FText::Format(LOCTEXT("BakingChunkProgress", "Baking Chunk ({0}, {1}, {2})"), FText::AsNumber(GX), FText::AsNumber(GY), FText::AsNumber(GZ)));
+
+                    const FBox ChunkBounds(FVector(GX, GY, GZ) * ChunkSize, FVector(GX + 1, GY + 1, GZ + 1) * ChunkSize);
+
+                    AOctreeVoxelVolume* TempBakeVolume = World->SpawnActor<AOctreeVoxelVolume>();
+                    if (!TempBakeVolume) continue;
+
+                    TempBakeVolume->VoxelExtent = TunerSettings->WorldBake_VoxelExtent;
+                    TempBakeVolume->MapSize = FIntVector(FMath::RoundToInt(ChunkSize / TempBakeVolume->VoxelExtent));
+                    TempBakeVolume->GetRootComponent()->SetWorldLocationAndRotation(ChunkBounds.GetCenter(), FRotator::ZeroRotator);
+                    TempBakeVolume->VolumeBox->SetBoxExtent(ChunkBounds.GetExtent());
+                    TempBakeVolume->MaxOctreeDepth = TunerSettings->WorldBake_MaxOctreeDepth;
+                    TempBakeVolume->StaticObjectProfile = ObstacleProfile;
+
+                    TSet<FIntVector> Obstacles;
+                    TempBakeVolume->ScanForAllStaticObstacles(Obstacles, World, ChunkBounds);
+
+                    if (Obstacles.IsEmpty())
+                    {
+                        TempBakeVolume->Destroy();
+                        continue;
+                    }
+
+                    TArray<FOctreeNode> NodePool;
+                    const int32 RootIndex = NodePool.AddDefaulted();
+                    NodePool[RootIndex].Bounds = ChunkBounds;
+                    for (const FIntVector& Voxel : Obstacles)
+                    {
+                        TempBakeVolume->InsertObstacleRecursive_Bake(NodePool, RootIndex, Voxel, 0, TempBakeVolume->MaxOctreeDepth);
+                    }
+                    TempBakeVolume->OptimizeAndCollapse_Bake(NodePool, RootIndex);
+                    TempBakeVolume->PrecomputeNeighbors_Bake(NodePool, ChunkBounds, TempBakeVolume->MaxOctreeDepth);
+
+                    TempBakeVolume->Destroy();
+                    const FString ActorLabelName = FString::Printf(TEXT("NavChunk_%d_%d_%d"), GX, GY, GZ);
+                    //const FString DataAssetName = FString::Printf(TEXT("DA_NavChunk_%d_%d_%d"), GX, GY, GZ);
+                    const FString DataAssetName = TEXT("DA_") + ActorLabelName;
+                    const FString PackagePath = FPaths::Combine(SavePath, DataAssetName);
+                    UPackage* Package = CreatePackage(*PackagePath);
+                    if (!Package) continue;
+
+                    Package->FullyLoad();
+                    UOctreeDataAsset* NewDataAsset = NewObject<UOctreeDataAsset>(Package, FName(*DataAssetName), RF_Public | RF_Standalone);
+                    NewDataAsset->Modify();
+                    NewDataAsset->SetAndCompressBakedData(NodePool, TempBakeVolume->MapSize, TempBakeVolume->MaxOctreeDepth);
+                    FAssetRegistryModule::AssetCreated(NewDataAsset);
+                    Package->MarkPackageDirty();
+
+                    PackagesToSave.Add(Package);
+
+                    AOctreeVoxelVolume* ChunkActor = World->SpawnActor<AOctreeVoxelVolume>(ChunkBounds.GetCenter(), FRotator::ZeroRotator);
+                    if (ChunkActor)
+                    {
+                        ChunkActor->Modify();
+                        CreatedActors.Add(ChunkActor);
+                        ChunkActor->SetActorLabel(ActorLabelName);
+                        ChunkActor->SetFolderPath(FName("/BakedNavChunks"));
+                        ChunkActor->VolumeBox->SetBoxExtent(ChunkBounds.GetExtent(), true);
+                        ChunkActor->SetBakedOctreeData(NewDataAsset);
+                        // Begin Test
+//                        ChunkActor->SetbDrawDebugBox(true);
+//
+//#if WITH_EDITOR
+//                        ChunkActor->GetDebugSolidNodesComponent()->SetVisibility(false);
+//                        ChunkActor->GetDebugMixedNodesComponent()->SetVisibility(false);
+//#endif
+                        // End Test
+                        ChunkActor->GetLevel()->MarkPackageDirty();
+                    }
+                }
+            }
+        }
+    EndBakeLoop:;
+    } // Bake 스코프 끝. FScopedSlowTask와 FScopedTransaction이 여기서 파괴됩니다.
+
+Cleanup:
+    for (auto const& [Component, OriginalState] : OriginalCollisionStates)
+    {
+        if (Component)
+        {
+            Component->SetCollisionEnabled(OriginalState);
+        }
+    }
+
+    if (bBakeCancelled)
+    {
+        // Bake가 취소되었더라도, 이미 생성된 객체들이 있을 수 있으므로
+        // 저장할지 물어보거나, 아니면 여기서 삭제 처리를 해주는 것이 더 좋습니다.
+        // 여기서는 단순화를 위해 그냥 종료합니다.
+        return FReply::Handled();
+    }
+
+
+    if (PackagesToSave.Num() > 0 || CreatedActors.Num() > 0)
+    {
+        TSet<UPackage*> LevelPackagesToSave;
+        for (AActor* Actor : CreatedActors)
+        {
+            if (Actor)
+            {
+                LevelPackagesToSave.Add(Actor->GetLevel()->GetPackage());
+            }
+        }
+        PackagesToSave.Append(LevelPackagesToSave.Array());
+
+        const bool bWasSuccess = UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, true);
+
+        if (bWasSuccess)
+        {
+            ShowWarningMessage(LOCTEXT("WorldBakeComplete", "World Bake process completed successfully!"));
+        }
+        else
+        {
+            ShowWarningMessage(LOCTEXT("WorldBakeSaveFailed", "World Bake completed, but assets were not saved. Please check the Output Log and save manually."));
+        }
+    }
+    else
+    {
+        ShowWarningMessage(LOCTEXT("WorldBakeNoObstacles", "World Bake completed, but no obstacles were found to generate navigation data."));
+    }
+    return FReply::Handled();
+}
+
 void SPathfindingTuner::ShowWarningMessage(const FText& Message) const
 {
     FMessageDialog::Open(EAppMsgType::Ok, Message);
@@ -1513,7 +2008,7 @@ FReply SPathfindingTuner::OnRequestPathButtonClicked()
         }
 
         // 3. Validate the baked data asset within the OctreeVoxelVolume.
-        if (!IsValid(OctreeVoxelVolume->GetBakedOctreeData()))
+        if (!IsValid(OctreeVoxelVolume->GetBakedOctreeData().Get()))
         {
             if (!bBakedDataNotSetWarningShown) // Show this warning only once
             {
@@ -1605,4 +2100,194 @@ bool SPathfindingTuner::IsPIEActive() const
     return GEditor && GEditor->PlayWorld && GEditor->PlayWorld->IsGameWorld();
 }
 
+// Begin Test
+
+void SPathfindingTuner::OnWorldBakeCategoryExpansionChanged(bool bIsExpanded)
+{
+    if (TunerSettings)
+    {
+        TunerSettings->bIsWorldBakeCategoryExpanded = bIsExpanded;
+        TunerSettings->SaveConfig();
+    }
+}
+
+TOptional<float> SPathfindingTuner::GetWorldBakeChunkSize() const
+{
+    return TunerSettings ? TunerSettings->WorldBake_ChunkSize : 0.0f;
+}
+
+void SPathfindingTuner::OnWorldBakeChunkSizeCommitted(float NewValue, ETextCommit::Type CommitType)
+{
+    if (TunerSettings)
+    {
+        TunerSettings->WorldBake_ChunkSize = NewValue;
+        TunerSettings->SaveConfig();
+    }
+}
+
+TOptional<float> SPathfindingTuner::GetWorldBakeVoxelExtent() const
+{
+    return TunerSettings ? TunerSettings->WorldBake_VoxelExtent : 0.0f;
+}
+
+void SPathfindingTuner::OnWorldBakeVoxelExtentCommitted(float NewValue, ETextCommit::Type CommitType)
+{
+    if (TunerSettings)
+    {
+        TunerSettings->WorldBake_VoxelExtent = NewValue;
+        TunerSettings->SaveConfig();
+    }
+}
+
+TOptional<int32> SPathfindingTuner::GetWorldBakeMaxDepth() const
+{
+    return TunerSettings ? TunerSettings->WorldBake_MaxOctreeDepth : 0;
+}
+
+void SPathfindingTuner::OnWorldBakeMaxDepthCommitted(int32 NewValue, ETextCommit::Type CommitType)
+{
+    if (TunerSettings)
+    {
+        TunerSettings->WorldBake_MaxOctreeDepth = NewValue;
+        TunerSettings->SaveConfig();
+    }
+}
+
+FText SPathfindingTuner::GetWorldBakeSaveDirectory() const
+{
+    return TunerSettings ? FText::FromString(TunerSettings->WorldBake_SaveDirectory.Path) : FText();
+}
+
+void SPathfindingTuner::OnWorldBakeSaveDirectoryCommitted(const FText& InText, ETextCommit::Type CommitInfo)
+{
+    if (TunerSettings)
+    {
+        TunerSettings->WorldBake_SaveDirectory.Path = InText.ToString();
+        TunerSettings->SaveConfig();
+    }
+}
+
+FReply SPathfindingTuner::OnWorldBakeBrowseButtonClicked()
+{
+    // 이 함수는 기존 OnBrowseButtonClicked와 거의 동일한 로직을 사용하되,
+    // 결과를 WorldBake_SaveDirectory에 저장
+    IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
+    if (DesktopPlatform && TunerSettings)
+    {
+        FString SelectedDirectory;
+        if (DesktopPlatform->OpenDirectoryDialog(nullptr, "Select World Bake Save Directory", FPaths::ProjectContentDir(), SelectedDirectory))
+        {
+            FString RelativePath = SelectedDirectory;
+            FPaths::MakePathRelativeTo(RelativePath, *FPaths::ProjectContentDir());
+            TunerSettings->WorldBake_SaveDirectory.Path = RelativePath;
+            TunerSettings->SaveConfig();
+        }
+    }
+    return FReply::Handled();
+}
+
+FString SPathfindingTuner::GetWorldBakeObstacleProfilePath() const
+{
+    return TunerSettings ? TunerSettings->WorldBake_ObstacleProfile.ToString() : FString();
+}
+
+void SPathfindingTuner::OnWorldBakeObstacleProfileChanged(const FAssetData& AssetData)
+{
+    if (TunerSettings)
+    {
+        TunerSettings->WorldBake_ObstacleProfile = AssetData.GetAsset();
+        TunerSettings->SaveConfig();
+    }
+}
+
+FText SPathfindingTuner::GetEstimatedChunksText() const
+{
+    if (EstimatedTotalChunks.IsSet())
+    {
+        return FText::Format(LOCTEXT("EstimatedChunksResult", "Estimated: {0} Chunks"), FText::AsNumber(EstimatedTotalChunks.GetValue()));
+    }
+    return LOCTEXT("EstimatedChunksPending", "Press 'Calculate' to estimate.");
+}
+
+FReply SPathfindingTuner::OnCalculateChunksClicked()
+{
+    UWorld* World = GEditor->GetEditorWorldContext().World();
+    if (!World)
+    {
+        ShowWarningMessage(LOCTEXT("NoWorld", "Could not get a valid editor world."));
+        EstimatedTotalChunks.Reset();
+        return FReply::Handled();
+    }
+
+    if (!TunerSettings || TunerSettings->WorldBake_ChunkSize <= 0)
+    {
+        ShowWarningMessage(LOCTEXT("ChunkSizeNotSetForCalc", "Cannot calculate. Please set a valid 'Chunk Size' first."));
+        EstimatedTotalChunks.Reset();
+        return FReply::Handled();
+    }
+
+    FBox WorldBounds(ForceInit);
+    UE_LOG(LogTemp, Warning, TEXT("--- Calculating World Bounds (Safe Mode) ---"));
+
+    for (TActorIterator<AActor> It(World); It; ++It)
+    {
+        AActor* Actor = *It;
+        if (!Actor || Actor->ActorHasTag(FName("NoNavBake")))
+        {
+            continue;
+        }
+
+        TArray<UStaticMeshComponent*> StaticMeshComponents;
+        Actor->GetComponents<UStaticMeshComponent>(StaticMeshComponents);
+
+        for (UStaticMeshComponent* Component : StaticMeshComponents)
+        {
+            if (Component && Component->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
+            {
+                WorldBounds += Component->Bounds.GetBox();
+            }
+        }
+    }
+
+    // TActorIterator<ALandscape> -> TActorIterator<ALandscapeStreamingProxy> 로 변경
+    for (TActorIterator<ALandscapeStreamingProxy> It(World); It; ++It)
+    {
+        ALandscapeStreamingProxy* LandscapeProxy = *It;
+        if (LandscapeProxy && !LandscapeProxy->ActorHasTag(FName("NoNavBake")))
+        {
+            //UE_LOG(LogTemp, Log, TEXT("Including Landscape Proxy: %s"), *LandscapeProxy->GetName());
+            WorldBounds += LandscapeProxy->GetComponentsBoundingBox(true);
+        }
+    }
+    for (TActorIterator<ALandscape> It(World); It; ++It)
+    {
+        ALandscape* Landscape = *It;
+        if (Landscape && !Landscape->ActorHasTag(FName("NoNavBake")))
+        {
+            WorldBounds += Landscape->GetComponentsBoundingBox(true);
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Final WorldBounds: Min=%s, Max=%s, Size=%s"),
+        *WorldBounds.Min.ToString(),
+        *WorldBounds.Max.ToString(),
+        *WorldBounds.GetSize().ToString());
+    // ====================================================================
+
+    const float ChunkSize = TunerSettings->WorldBake_ChunkSize;
+    const int32 GridMinX = FMath::FloorToInt(WorldBounds.Min.X / ChunkSize);
+    const int32 GridMaxX = FMath::CeilToInt(WorldBounds.Max.X / ChunkSize);
+    const int32 GridMinY = FMath::FloorToInt(WorldBounds.Min.Y / ChunkSize);
+    const int32 GridMaxY = FMath::CeilToInt(WorldBounds.Max.Y / ChunkSize);
+    const int32 GridMinZ = FMath::FloorToInt(WorldBounds.Min.Z / ChunkSize);
+    const int32 GridMaxZ = FMath::CeilToInt(WorldBounds.Max.Z / ChunkSize);
+
+    const int32 TotalChunks = (GridMaxX - GridMinX) * (GridMaxY - GridMinY) * (GridMaxZ - GridMinZ);
+    EstimatedTotalChunks = TotalChunks;
+
+    Invalidate(EInvalidateWidgetReason::Layout);
+
+    return FReply::Handled();
+}
+// End Test
 #undef LOCTEXT_NAMESPACE

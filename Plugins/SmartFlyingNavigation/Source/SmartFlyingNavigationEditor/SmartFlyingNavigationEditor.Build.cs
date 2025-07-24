@@ -12,8 +12,8 @@ public class SmartFlyingNavigationEditor : ModuleRules
 			{
 				"Core",
 			}
-		);  
-		
+		);
+
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
@@ -31,10 +31,11 @@ public class SmartFlyingNavigationEditor : ModuleRules
 				"DesktopWidgets",
 				"DesktopPlatform",
 				"EditorScriptingUtilities",
-				"Projects", "SmartFlyingNavigation", 
+				"Projects", 
 				"SmartFlyingNavigation",
-				"InputCore"    
+				"InputCore",
+				"Landscape",
 			}
 		);
-	}
+    }
 }

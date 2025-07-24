@@ -15,15 +15,13 @@ AVoxelVolumeBase::AVoxelVolumeBase()
 	// Allow this actor to be ticked every frame.
 	PrimaryActorTick.bCanEverTick = true;
 
-	// Create and set the root component.
-	PivotComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-	SetRootComponent(PivotComponent);
+	bIsSpatiallyLoaded = true;
 
 	// Create the volume box component for editor visualization.
 	VolumeBox = CreateDefaultSubobject<UBoxComponent>(TEXT("SelectionVolume"));
-	VolumeBox->SetupAttachment(PivotComponent);
+	RootComponent = VolumeBox;
 	VolumeBox->SetHiddenInGame(true);
-	VolumeBox->bIsEditorOnly = true;
+	//VolumeBox->bIsEditorOnly = true;
 	VolumeBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	VolumeBox->SetCollisionResponseToAllChannels(ECR_Ignore);
 	VolumeBox->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
@@ -31,10 +29,10 @@ AVoxelVolumeBase::AVoxelVolumeBase()
 #if WITH_EDITOR
 	// Create HISM components for debug visualization.
 	DebugSolidNodesComponent = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("DebugSolidNodesComponent"));
-	DebugSolidNodesComponent->SetupAttachment(PivotComponent);
+	DebugSolidNodesComponent->SetupAttachment(VolumeBox);
 	
 	DebugMixedNodesComponent = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("DebugMixedNodesComponent"));
-	DebugMixedNodesComponent->SetupAttachment(PivotComponent);
+	DebugMixedNodesComponent->SetupAttachment(VolumeBox);
 
 	// Set default paths for debug materials.
 	DebugSolidNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/SmartFlyingNavigation/Debug/Material/MI_NavDebugSolidVoxel.MI_NavDebugSolidVoxel'");
@@ -43,7 +41,7 @@ AVoxelVolumeBase::AVoxelVolumeBase()
 #endif
 	
 	// Set default volume properties.
-	MapSize = FIntVector(128, 128, 128);
+	MapSize = FIntVector(256, 256, 256);
 	VoxelExtent = 100.f;
 	bDrawDebugBox = true;
 }
@@ -55,6 +53,8 @@ AVoxelVolumeBase::AVoxelVolumeBase()
 void AVoxelVolumeBase::BeginPlay()
 {
 	Super::BeginPlay();
+	
+	UE_LOG(LogTemp, Warning, TEXT("CHUNK LOADED: %s at %s"), *GetActorLabel(), *GetActorLocation().ToString());
 
 	// If debug drawing is enabled, set a timer to update the visualization.
 	if (bDrawDebugBox)
@@ -119,7 +119,7 @@ void AVoxelVolumeBase::OnConstruction(const FTransform& Transform)
 	// Since the RootComponent is now the pivot, the box's relative location should be HalfExtent
 	// to position the entire volume in positive coordinate space.
 	VolumeBox->SetBoxExtent(HalfExtent);
-	VolumeBox->SetRelativeLocation(HalfExtent);
+	//VolumeBox->SetRelativeLocation(HalfExtent);
 	
 }
 
@@ -130,6 +130,17 @@ void AVoxelVolumeBase::Tick(float DeltaTime)
 
 void AVoxelVolumeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	FString ReasonString;
+	switch (EndPlayReason)
+	{
+	case EEndPlayReason::Destroyed: ReasonString = TEXT("Destroyed"); break;
+	case EEndPlayReason::LevelTransition: ReasonString = TEXT("Level Transition"); break;
+	case EEndPlayReason::RemovedFromWorld: ReasonString = TEXT("Removed from World (Streaming Out)"); break; // 우리가 원하는 이유
+	case EEndPlayReason::Quit: ReasonString = TEXT("Quit"); break;
+	default: ReasonString = TEXT("Unknown"); break;
+	}
+	UE_LOG(LogTemp, Error, TEXT("CHUNK UNLOADED: %s (Reason: %s)"), *GetActorLabel(), *ReasonString);
+
 	// Clear the debug update timer.
 	GetWorldTimerManager().ClearTimer(DebugUpdateTimer);
 #if WITH_EDITOR 
@@ -152,21 +163,26 @@ void AVoxelVolumeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 FVector AVoxelVolumeBase::VoxelIndexToWorld(const FIntVector& VoxelIndex) const
 {
-	// Calculate the local center of the voxel and transform it to world space.
-	const FVector LocalCenter = FVector(VoxelIndex) * VoxelExtent + (VoxelExtent * 0.5f);
-	return GetActorTransform().TransformPosition(LocalCenter);
+	const FIntVector HalfMapSize = MapSize / 2;
+	const FVector VoxelLocalPosition = (FVector(VoxelIndex - HalfMapSize) * VoxelExtent) + FVector(VoxelExtent * 0.5f);
+
+	// 2. 이 로컬 좌표를 월드 좌표로 변환합니다.
+	return GetActorTransform().TransformPosition(VoxelLocalPosition);
 }
 
 FIntVector AVoxelVolumeBase::WorldToVoxelIndex(const FVector& WorldPosition) const
 {
 	if (VoxelExtent <= 0.f) return FIntVector::ZeroValue;
 
-	// Transform the world position to local space and calculate the corresponding voxel index.
+	// 1. 월드 좌표를 볼륨의 로컬 좌표로 변환합니다.
 	const FVector LocalPosition = GetActorTransform().InverseTransformPosition(WorldPosition);
+
+	// 2. 로컬 좌표를 복셀 인덱스로 변환하고, HalfMapSize를 더해 배열 인덱스로 만듭니다.
+	const FIntVector HalfMapSize = MapSize / 2;
 	return FIntVector(
-		FMath::FloorToInt(LocalPosition.X / VoxelExtent),
-		FMath::FloorToInt(LocalPosition.Y / VoxelExtent),
-		FMath::FloorToInt(LocalPosition.Z / VoxelExtent)
+		FMath::FloorToInt(LocalPosition.X / VoxelExtent) + HalfMapSize.X,
+		FMath::FloorToInt(LocalPosition.Y / VoxelExtent) + HalfMapSize.Y,
+		FMath::FloorToInt(LocalPosition.Z / VoxelExtent) + HalfMapSize.Z
 	);
 }
 
@@ -234,31 +250,22 @@ bool AVoxelVolumeBase::GetOverlappingComponentsInVolume(const FCollisionObjectQu
 		CollisionQueryParams);
 }
 
-bool AVoxelVolumeBase::IsVoxelOverlapping(const FIntVector& VoxelIndex, UPrimitiveComponent* ComponentToTest) const
+bool AVoxelVolumeBase::IsVoxelOverlapping(const FIntVector& VoxelIndex, const FCollisionObjectQueryParams& ObjectQueryParams) const
 {
-	if (ComponentToTest == nullptr)
-	{
-		return false;
-	}
-	if (ComponentToTest->IsQueryCollisionEnabled() == false)
-	{
-		return false;
-	}
-	if (IsIndexValid(VoxelIndex) == false)
+	UWorld* World = GetWorld();
+	if (!World)
 	{
 		return false;
 	}
 
-	const FVector VoxelCenter = VoxelIndexToWorld(VoxelIndex);
+	const FVector VoxelWorldCenter = VoxelIndexToWorld(VoxelIndex);
 	const FVector VoxelHalfExtent = FVector(VoxelExtent * 0.5f);
+	const FCollisionShape VoxelShape = FCollisionShape::MakeBox(VoxelHalfExtent);
 
-	// Check for overlap between the component and the voxel's bounding box.
-	return ComponentToTest->OverlapComponent(VoxelCenter,
-		GetActorQuat(),
-		FCollisionShape::MakeBox(VoxelHalfExtent));
+	return World->OverlapAnyTestByObjectType(VoxelWorldCenter, FQuat::Identity, ObjectQueryParams, VoxelShape);
 }
 
-//~======================================================================
+// ======================================================================
 // Debug Visualization
 //~======================================================================
 

@@ -27,6 +27,16 @@
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #endif
 
+#include "Subsystem/OctreeNavSubsystem.h"
+#include "Engine/StreamableManager.h"
+#include "Engine/AssetManager.h"
+#include "LandscapeComponent.h" 
+#include "Landscape.h"
+#include "LandscapeStreamingProxy.h"
+#include "LandscapeSubsystem.h"
+#include "EngineUtils.h"
+#include "LandscapeInfo.h"
+
 AOctreeVoxelVolume::AOctreeVoxelVolume()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -43,41 +53,42 @@ void AOctreeVoxelVolume::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// 1. Load the pre-baked static octree data from the assigned data asset.
-	if (BakedOctreeData)
+	if (UWorld* World = GetWorld())
 	{
-		UE_LOG(LogTemp, Log, TEXT("Step 1: BakedOctreeData is VALID. Asset Name: %s"), *BakedOctreeData->GetName());
-
-		BakedOctreeData->DecompressAndInitialize();
-		if (BakedOctreeData->NodePool.Num() > 0)
+		if (UOctreeNavSubsystem* NavSubsystem = World->GetSubsystem<UOctreeNavSubsystem>())
 		{
-			UE_LOG(LogTemp, Log, TEXT("Step 2: Decompression SUCCESS. NodePool has %d nodes."), BakedOctreeData->NodePool.Num());
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("Step 2: Decompression FAILED or data is empty. NodePool is EMPTY."));
-		}
-
-		StaticNodePoolPtr = &BakedOctreeData->NodePool;
-
-		if (!StaticNodePoolPtr->IsEmpty())
-		{
-			// The root node is always assumed to be at the first index.
-			RootNodeIndex = 0;
-		}
-		if (StaticNodePoolPtr)
-		{
-			UE_LOG(LogTemp, Error, TEXT("Step 3. Complete"));
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("Step 3: Decompression FAILED or StaticNodePoolPtr is empty. StaticNodePoolPtr is EMPTY."));
+			NavSubsystem->RegisterVolumeChunk(this);
 		}
 	}
 
-	// 2. Initialize the dynamic obstacle layer and start a timer for periodic updates.
+	RequestAsyncLoad();
+
 	InitializeDynamicLayer();
 	GetWorldTimerManager().SetTimer(DynamicObstacleTimer, this, &AOctreeVoxelVolume::UpdateDynamicObstacles, 0.1f, true, 0.1f);
+}
+
+void AOctreeVoxelVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UOctreeNavSubsystem* NavSubsystem = World->GetSubsystem<UOctreeNavSubsystem>())
+		{
+			NavSubsystem->UnregisterVolumeChunk(this);
+		}
+	}
+
+	if (AsyncLoadHandle.IsValid())
+	{
+		AsyncLoadHandle->CancelHandle();
+		AsyncLoadHandle.Reset();
+	}
+
+	StaticNodePoolPtr = nullptr;
+	LoadedDataAsset = nullptr;
+	LoadState = EChunkLoadState::Unloaded;
+
+	Super::EndPlay(EndPlayReason);
+
 }
 
 void AOctreeVoxelVolume::Tick(float DeltaTime)
@@ -260,13 +271,13 @@ void AOctreeVoxelVolume::UpdateDynamicVoxelState(const FIntVector& Index, bool b
 
 bool AOctreeVoxelVolume::IsRegionEmpty(const FBox& QueryBox) const
 {
-	// If there's no octree data, the region is considered empty.
-	if (RootNodeIndex == -1 || !StaticNodePoolPtr || StaticNodePoolPtr->IsEmpty())
+	// If data is not ready, assume the region is empty to avoid false positives.
+	if (LoadState != EChunkLoadState::Loaded || RootNodeIndex == -1 || !StaticNodePoolPtr)
 	{
 		return true;
 	}
-	
-	const FBox VolumeBounds = GetComponentsBoundingBox(true, true);
+
+	const FBox VolumeBounds = GetVolumeBounds();
 	return IsRegionEmpty_Internal(RootNodeIndex, VolumeBounds, QueryBox);
 }
 
@@ -317,318 +328,126 @@ bool AOctreeVoxelVolume::IsRegionEmpty_Internal(int32 NodeIndex, const FBox& Nod
 
 //~======================================================================
 // Editor & Baking
+// 
+// NOTE: The baking process should ideally be moved to a separate Editor Utility class/widget
+// that orchestrates baking for the entire world, not just one volume.
+// The functions here are modified to use a temporary, local node pool for baking.
 //~======================================================================
 
 void AOctreeVoxelVolume::BakeStaticData()
 {
-	const FBox VolumeBounds = VolumeBox->Bounds.GetBox();
-	if (!VolumeBounds.IsValid)
-	{
-		return;
-	}
+	const FBox VolumeBounds = GetVolumeBounds();
+	if (!VolumeBounds.IsValid) return;
 
-	// --- 1. Scan for all static obstacles within the volume ---
 	TSet<FIntVector> AllStaticObstacles;
-	ScanForAllStaticObstacles(AllStaticObstacles);
+	ScanForAllStaticObstacles(AllStaticObstacles, GetWorld(), VolumeBounds);
 
-	// --- 2. Set up a progress dialog for the editor UI ---
 	const double TotalWorkAmount = static_cast<double>(AllStaticObstacles.Num()) + 3.0;
 	FScopedSlowTask BakeTask(TotalWorkAmount, FText::FromString(TEXT("Baking Octree Data...")));
 	BakeTask.MakeDialog();
 
-	
-	// --- 3. Build the initial octree structure ---
+	TArray<FOctreeNode> BakeTimeNodePool;
+
 	BakeTask.EnterProgressFrame(0.f, FText::FromString(TEXT("Building Octree... (1/4)")));
 
-	StaticNodePool.Empty();
+	const int32 BakeRootIndex = BakeTimeNodePool.AddDefaulted();
+	BakeTimeNodePool[BakeRootIndex].Bounds = VolumeBounds;
 
-	RootNodeIndex = StaticNodePool.AddDefaulted();
-	
-	if (StaticNodePool.IsValidIndex(RootNodeIndex))
-	{
-		StaticNodePool[RootNodeIndex].Bounds = VolumeBounds;
-	}
-	else
-	{
-		UE_LOG(LogTemp, Fatal, TEXT("Failed to create root node for Octree."));
-		return;
-	}
-	
 	for (const FIntVector& ObstacleVoxel : AllStaticObstacles)
 	{
 		BakeTask.EnterProgressFrame(1.f);
 		if (BakeTask.ShouldCancel()) return;
-		InsertObstacleRecursive(RootNodeIndex, ObstacleVoxel, 0);
+		InsertObstacleRecursive_Bake(BakeTimeNodePool, BakeRootIndex, ObstacleVoxel, 0, MaxOctreeDepth);
 	}
 
-	// --- 4. Optimize the tree by collapsing uniform nodes ---
 	BakeTask.EnterProgressFrame(1.f, FText::FromString(TEXT("Optimizing Octree... (2/4)")));
 	if (BakeTask.ShouldCancel()) return;
-	OptimizeAndCollapse(RootNodeIndex, VolumeBounds);
+	OptimizeAndCollapse_Bake(BakeTimeNodePool, BakeRootIndex);
 
-	// --- 5. Precompute neighbors for leaf nodes to accelerate pathfinding ---
 	BakeTask.EnterProgressFrame(1.f, FText::FromString(TEXT("Precomputing Neighbors... (3/4)")));
 	if (BakeTask.ShouldCancel()) return;
-	PrecomputeNeighbors();
+	PrecomputeNeighbors_Bake(BakeTimeNodePool, VolumeBounds, MaxOctreeDepth);
 
-	// --- 6. Save the generated octree data to a UOctreeDataAsset ---
 	BakeTask.EnterProgressFrame(1.f, FText::FromString(TEXT("Saving Data Asset... (4/4)")));
 	if (BakeTask.ShouldCancel()) return;
-	SaveOctreeToAsset();
-
+	SaveOctreeToAsset(BakeTimeNodePool);
 }
 
-void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticObstacles) const
+void AOctreeVoxelVolume::VoxelizeComponent(const FBox& ComponentBounds, const FCollisionObjectQueryParams& ObjectQueryParams, TSet<FIntVector>& OutStaticObstacles) const
 {
-	OutStaticObstacles.Empty();
+	if (!ComponentBounds.IsValid) return;
 
-	// 1. Determine which object types to scan based on the filter settings.
-	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypesToQuery;
-	if (StaticObjectProfile)
-	{
-		for (const TEnumAsByte<ECollisionChannel>& Channel : StaticObjectProfile->CollisionChannels)
-		{
-			ObjectTypesToQuery.Add(UEngineTypes::ConvertToObjectType(Channel));
-		}
-		if (ObjectTypesToQuery.IsEmpty())
-		{
-			return;
-		}
-	}
-	else
-	{
-		ObjectTypesToQuery.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_WorldStatic));
-	}
+	const FIntVector MinVoxel = WorldToVoxelIndex(ComponentBounds.Min);
+	const FIntVector MaxVoxel = WorldToVoxelIndex(ComponentBounds.Max);
 
-	// 2. Perform a broad-phase overlap check to find all potentially relevant actors.
-	const FBox VolumeWorldBounds = GetComponentsBoundingBox(true, true);
-	TArray<AActor*> OverlappingActors;
-	UKismetSystemLibrary::BoxOverlapActors(GetWorld(), VolumeWorldBounds.GetCenter(), VolumeWorldBounds.GetExtent(),
-		ObjectTypesToQuery, AActor::StaticClass(), BakeExcludeActors, OverlappingActors);
-
-	if (OverlappingActors.IsEmpty())
+	FIntVector ClampedMin, ClampedMax;
+	if (!ClampVoxelIndicesToVolume(MinVoxel, MaxVoxel, ClampedMin, ClampedMax))
 	{
 		return;
 	}
 
-	// 3. Perform a narrow-phase check: iterate through components, apply the filter, and voxelize.
-	for (AActor* Actor : OverlappingActors)
+	for (int32 z = ClampedMin.Z; z <= ClampedMax.Z; ++z)
 	{
-		if (!IsValid(Actor)) continue;
-
-		TArray<UPrimitiveComponent*> PrimitiveComponents;
-		Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-
-		for (UPrimitiveComponent* Comp : PrimitiveComponents)
+		for (int32 y = ClampedMin.Y; y <= ClampedMax.Y; ++y)
 		{
-			if (!IsValid(Comp) || !Comp->IsQueryCollisionEnabled()) continue;
-
-			// Use the filter to decide if this specific component should be baked.
-			const bool bShouldBake = StaticObjectProfile ? StaticObjectProfile->DoesActorMatch(Actor, Comp) : true;
-
-			if (bShouldBake)
+			for (int32 x = ClampedMin.X; x <= ClampedMax.X; ++x)
 			{
-				const FBox ComponentBounds = Comp->Bounds.GetBox();
-				FIntVector MinVoxel, MaxVoxel;
-				if (!ClampVoxelIndicesToVolume(WorldToVoxelIndex(ComponentBounds.Min), WorldToVoxelIndex(ComponentBounds.Max), MinVoxel, MaxVoxel)) continue;
+				const FIntVector VoxelIndex(x, y, z);
+				if (OutStaticObstacles.Contains(VoxelIndex)) continue;
 
-				// Voxelize the component's bounding box.
-				for (int32 z = MinVoxel.Z; z <= MaxVoxel.Z; ++z)
+				if (IsVoxelOverlapping(VoxelIndex, ObjectQueryParams))
 				{
-					for (int32 y = MinVoxel.Y; y <= MaxVoxel.Y; ++y)
-					{
-						for (int32 x = MinVoxel.X; x <= MaxVoxel.X; ++x)
-						{
-							const FIntVector VoxelIndex(x, y, z);
-							if (OutStaticObstacles.Contains(VoxelIndex)) continue;
-
-							// Final check to ensure the voxel actually overlaps the component geometry.
-							if (IsVoxelOverlapping(VoxelIndex, Comp))
-							{
-								OutStaticObstacles.Add(VoxelIndex);
-							}
-						}
-					}
+					OutStaticObstacles.Add(VoxelIndex);
 				}
 			}
 		}
 	}
 }
 
-void AOctreeVoxelVolume::InsertObstacleRecursive(int32 NodeIndex, const FIntVector& ObstacleVoxel, int32 CurrentDepth)
+// TO-DO: Check
+void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticObstacles, UObject* WorldContextObject, const FBox& ScanWorldBounds) const
 {
-	if (!StaticNodePool.IsValidIndex(NodeIndex))
-	{
-		return;
-	}
+	OutStaticObstacles.Empty();
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+	if (!World) return;
 
-	// If the node is already solid, this obstacle is already accounted for.
-	if (StaticNodePool[NodeIndex].State == EOctreeNodeState::Solid)
+	FCollisionObjectQueryParams ObjectQueryParams;
+	if (StaticObjectProfile && StaticObjectProfile->CollisionChannels.Num() > 0)
 	{
-		return;
-	}
-
-	// If we've reached the maximum depth, this leaf node must become solid.
-	if (CurrentDepth == MaxOctreeDepth)
-	{
-		StaticNodePool[NodeIndex].State = EOctreeNodeState::Solid;
-		return;
-	}
-
-	// If this node is currently empty, it must be subdivided to contain the obstacle.
-	// It becomes a 'Mixed' node, and its children are created.
-	if (StaticNodePool[NodeIndex].State == EOctreeNodeState::Empty)
-	{
-		StaticNodePool[NodeIndex].State = EOctreeNodeState::Mixed;
-		const FBox CurrentNodeBounds = StaticNodePool[NodeIndex].Bounds;
-
-		for (int i = 0; i < 8; ++i)
+		for (const TEnumAsByte<ECollisionChannel>& Channel : StaticObjectProfile->CollisionChannels)
 		{
-			const int32 NewChildIndex = StaticNodePool.Emplace(FOctreeNode());
-			// It's crucial to re-acquire the node reference after Emplace, as the array might have been reallocated.
-			StaticNodePool[NewChildIndex].Bounds = CalculateChildBounds(CurrentNodeBounds, i);
-			StaticNodePool[NodeIndex].ChildrenIndices[i] = NewChildIndex;
+			ObjectQueryParams.AddObjectTypesToQuery(Channel);
 		}
 	}
-
-	// Recurse into the correct child octant.
-	const FVector VoxelWorldPos = VoxelIndexToWorld(ObstacleVoxel);
-	const int32 ChildOctant = GetOctantContainingVoxel(StaticNodePool[NodeIndex].Bounds, VoxelWorldPos);
-	const int32 ChildNodeIndex = StaticNodePool[NodeIndex].ChildrenIndices[ChildOctant];
-
-	if (ChildNodeIndex != -1)
+	else
 	{
-		InsertObstacleRecursive(ChildNodeIndex, ObstacleVoxel, CurrentDepth + 1);
-	}
-}
-
-int32 AOctreeVoxelVolume::FindLeafNodeAt_BakeTime(const FVector& WorldPos) const
-{
-	if (!VolumeBox->Bounds.GetBox().IsInside(WorldPos) || RootNodeIndex == -1)
-	{
-		return -1;
+		ObjectQueryParams.AddObjectTypesToQuery(ECollisionChannel::ECC_WorldStatic);
 	}
 
-	int32 CurrentNodeIndex = RootNodeIndex;
-	int32 CurrentDepth = 0;
+	FCollisionQueryParams CollisionQueryParams(SCENE_QUERY_STAT(VoxelBakeOverlap), false);
+	CollisionQueryParams.AddIgnoredActor(this);
 
-	while (StaticNodePool.IsValidIndex(CurrentNodeIndex))
+	TArray<FOverlapResult> OverlapResults;
+	World->OverlapMultiByObjectType(
+		OverlapResults,
+		ScanWorldBounds.GetCenter(),
+		FQuat::Identity,
+		ObjectQueryParams,
+		FCollisionShape::MakeBox(ScanWorldBounds.GetExtent()),
+		CollisionQueryParams
+	);
+	
+	for (const FOverlapResult& Result : OverlapResults)
 	{
-		const FOctreeNode& Node = StaticNodePool[CurrentNodeIndex];
+		UPrimitiveComponent* PrimitiveComp = Result.GetComponent();
 
-		// A leaf node is found if it's not mixed or if max depth is reached.
-		if (Node.State != EOctreeNodeState::Mixed || CurrentDepth >= MaxOctreeDepth)
+		if (IsValid(PrimitiveComp) && PrimitiveComp->IsQueryCollisionEnabled())
 		{
-			return CurrentNodeIndex;
-		}
-
-		// Descend to the appropriate child.
-		const int32 ChildOctant = GetOctantContainingVoxel(Node.Bounds, WorldPos);
-		CurrentNodeIndex = Node.ChildrenIndices[ChildOctant];
-		CurrentDepth++;
-	}
-	return -1; // Should not be reached if logic is correct.
-}
-
-void AOctreeVoxelVolume::PrecomputeNeighbors()
-{
-	FScopedSlowTask NeighborTask(StaticNodePool.Num(), FText::FromString(TEXT("Precomputing Neighbors...")));
-	NeighborTask.MakeDialog();
-
-	const FBox TotalVolumeBounds = VolumeBox->Bounds.GetBox();
-	constexpr float Epsilon = 1.0f; // Small offset to push test point into the neighboring space.
-
-	for (int32 i = 0; i < StaticNodePool.Num(); ++i)
-	{
-		NeighborTask.EnterProgressFrame(1);
-		if (NeighborTask.ShouldCancel()) return;
-
-		// Neighbors are only relevant for leaf nodes (Solid or Empty).
-		if (StaticNodePool[i].State == EOctreeNodeState::Mixed)
-		{
-			continue;
-		}
-
-		// Also pre-calculate the max agent radius this node can accommodate.
-		StaticNodePool[i].MaxAllowedRadius = StaticNodePool[i].Bounds.GetExtent().GetMin();
-
-		const FBox NodeBounds = StaticNodePool[i].Bounds;
-		for (int32 DirIndex = 0; DirIndex < static_cast<int32>(ENeighborDirection::MAX); ++DirIndex)
-		{
-			FVector TestPoint = NodeBounds.GetCenter();
-			const ENeighborDirection Dir = static_cast<ENeighborDirection>(DirIndex);
-
-			// Position the test point just outside the current node's face in the desired direction.
-			switch (Dir)
+			const bool bShouldBake = StaticObjectProfile ? StaticObjectProfile->DoesActorMatch(PrimitiveComp->GetOwner(), PrimitiveComp) : true;
+			if (bShouldBake)
 			{
-			case ENeighborDirection::Right: TestPoint.X = NodeBounds.Max.X + Epsilon; break;
-			case ENeighborDirection::Left:  TestPoint.X = NodeBounds.Min.X - Epsilon; break;
-			case ENeighborDirection::Front: TestPoint.Y = NodeBounds.Max.Y + Epsilon; break;
-			case ENeighborDirection::Back:  TestPoint.Y = NodeBounds.Min.Y - Epsilon; break;
-			case ENeighborDirection::Up:    TestPoint.Z = NodeBounds.Max.Z + Epsilon; break;
-			case ENeighborDirection::Down:  TestPoint.Z = NodeBounds.Min.Z - Epsilon; break;
-			default: break;
+				VoxelizeComponent(PrimitiveComp->Bounds.GetBox(), ObjectQueryParams, OutStaticObstacles);
 			}
-
-			// Find the leaf node at the test point and store it as the neighbor.
-			if (TotalVolumeBounds.IsInside(TestPoint))
-			{
-				const int32 NeighborNodeIndex = FindLeafNodeAt_BakeTime(TestPoint);
-				StaticNodePool[i].Neighbors[DirIndex] = NeighborNodeIndex;
-			}
-			else
-			{
-				StaticNodePool[i].Neighbors[DirIndex] = -1; // Neighbor is outside the volume.
-			}
-		}
-	}
-}
-
-void AOctreeVoxelVolume::OptimizeAndCollapse(int32 NodeIndex, const FBox& NodeBounds)
-{
-	if (!StaticNodePool.IsValidIndex(NodeIndex)) return;
-
-	FOctreeNode& Node = StaticNodePool[NodeIndex];
-	if (Node.State != EOctreeNodeState::Mixed)
-	{
-		return; // This is a leaf node, nothing to collapse below it.
-	}
-
-	// Recursively collapse children first (bottom-up approach).
-	for (int i = 0; i < 8; ++i)
-	{
-		if (Node.ChildrenIndices[i] != -1)
-		{
-			OptimizeAndCollapse(Node.ChildrenIndices[i], CalculateChildBounds(NodeBounds, i));
-		}
-	}
-
-	// Check if all children are now leaf nodes of the same state.
-	const int32 FirstChildIndex = Node.ChildrenIndices[0];
-	if (FirstChildIndex == -1) return; // Should not happen in a mixed node.
-
-	const EOctreeNodeState FirstChildState = StaticNodePool[FirstChildIndex].State;
-	if (FirstChildState == EOctreeNodeState::Mixed) return; // Cannot collapse if a child is still mixed.
-
-	bool bAllChildrenAreSame = true;
-	for (int i = 1; i < 8; ++i)
-	{
-		const int32 ChildNodeIndex = Node.ChildrenIndices[i];
-		if (ChildNodeIndex == -1 || StaticNodePool[ChildNodeIndex].State != FirstChildState)
-		{
-			bAllChildrenAreSame = false;
-			break;
-		}
-	}
-
-	// If all children are identical leaves, collapse them by making the parent a leaf of that state.
-	if (bAllChildrenAreSame)
-	{
-		Node.State = FirstChildState;
-		// The children nodes are now orphaned but remain in the pool. A final compaction step could remove them.
-		for (int i = 0; i < 8; ++i)
-		{
-			Node.ChildrenIndices[i] = -1;
 		}
 	}
 }
@@ -690,7 +509,7 @@ bool AOctreeVoxelVolume::GetBakedAssetPath(FString& OutPackagePath, FString& Out
 	return true;
 }
 
-void AOctreeVoxelVolume::SaveOctreeToAsset()
+void AOctreeVoxelVolume::SaveOctreeToAsset(const TArray<FOctreeNode>& NodePoolToSave)
 {
 	FString PackageName, AssetName;
 	if (!GetBakedAssetPath(PackageName, AssetName))
@@ -714,32 +533,21 @@ void AOctreeVoxelVolume::SaveOctreeToAsset()
 	// Create a new package and data asset object.
 	UPackage* Package = CreatePackage(*PackageName);
 	Package->FullyLoad();
-
 	UOctreeDataAsset* NewOctreeData = NewObject<UOctreeDataAsset>(Package, FName(*AssetName), RF_Public | RF_Standalone);
-	if (!NewOctreeData)
-	{
-		return;
-	}
+	if (!NewOctreeData) return;
 
-	// --- KEY ADDITIONS ---
-	// 1. Notify the engine that we are about to modify this object. This is important for the transaction buffer (Undo/Redo).
 	NewOctreeData->Modify();
-
-	// 2. Call your function to populate and compress the data.
-	NewOctreeData->SetAndCompressBakedData(StaticNodePool, this->MapSize, this->MaxOctreeDepth);
-  
-	// 3. Mark the package as dirty. This is the flag that tells the engine "this file needs to be saved".
+	// Pass the bake-time data to the asset.
+	NewOctreeData->SetAndCompressBakedData(NodePoolToSave, this->MapSize, this->MaxOctreeDepth);
 	Package->MarkPackageDirty();
-
-	// Notify the asset registry that a new asset has been created. This helps the Content Browser update immediately.
 	FAssetRegistryModule::AssetCreated(NewOctreeData);
-	
+
 	TArray<UPackage*> PackagesToSave;
 	PackagesToSave.Add(Package);
 
 	if (UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, true))
 	{
-		// Assign the newly created asset to the volume property for immediate use in the editor.
+		// Assign the newly created asset to this volume's soft pointer.
 		this->BakedOctreeData = NewOctreeData;
 		UE_LOG(LogTemp, Log, TEXT("Successfully baked and saved Octree data to: %s"), *PackageName);
 	}
@@ -847,3 +655,220 @@ void AOctreeVoxelVolume::GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNo
 }
 
 #endif // WITH_EDITOR
+
+void AOctreeVoxelVolume::OnDataAssetLoaded()
+{
+	if (AsyncLoadHandle.IsValid())
+	{
+		AsyncLoadHandle.Reset();
+	}
+
+	LoadedDataAsset = BakedOctreeData.Get();
+
+	if (IsValid(LoadedDataAsset))
+	{
+		LoadedDataAsset->DecompressAndInitialize();
+		if (LoadedDataAsset->NodePool.Num() > 0)
+		{
+			StaticNodePoolPtr = &LoadedDataAsset->NodePool;
+			RootNodeIndex = 0;
+			LoadState = EChunkLoadState::Loaded;
+		}
+		else
+		{
+			LoadState = EChunkLoadState::Failed;
+			UE_LOG(LogTemp, Error, TEXT("Octree Data Asset '%s' is empty or failed to decompress."), *LoadedDataAsset->GetName());
+		}
+	}
+	else
+	{
+		LoadState = EChunkLoadState::Failed;
+		UE_LOG(LogTemp, Error, TEXT("Failed to load Octree Data Asset from path: %s"), *BakedOctreeData.ToString());
+	}
+}
+
+void AOctreeVoxelVolume::RequestAsyncLoad()
+{
+	// Request loading only if a valid asset path is set and it's not already loaded/loading.
+	if (BakedOctreeData.IsPending() && LoadState == EChunkLoadState::Unloaded)
+	{
+		LoadState = EChunkLoadState::Loading;
+
+		FStreamableManager& StreamableManager = UAssetManager::Get().GetStreamableManager();
+		AsyncLoadHandle = StreamableManager.RequestAsyncLoad(
+			BakedOctreeData.ToSoftObjectPath(),
+			FStreamableDelegate::CreateUObject(this, &AOctreeVoxelVolume::OnDataAssetLoaded)
+		);
+	}
+	else if (BakedOctreeData.Get()) // Or if the asset is already loaded synchronously (e.g., in PIE)
+	{
+		OnDataAssetLoaded();
+	}
+}
+
+FBox AOctreeVoxelVolume::GetVolumeBounds() const
+{
+	return VolumeBox ? VolumeBox->Bounds.GetBox() : FBox(ForceInit);
+}
+
+void AOctreeVoxelVolume::InsertObstacleRecursive_Bake(TArray<FOctreeNode>& InOutNodePool, int32 NodeIndex, const FIntVector& ObstacleVoxel, int32 CurrentDepth, int32 MaxDepth)
+{
+	if (!InOutNodePool.IsValidIndex(NodeIndex))
+	{
+		return;
+	}
+
+	if (InOutNodePool[NodeIndex].State == EOctreeNodeState::Solid)
+	{
+		return;
+	}
+
+	if (CurrentDepth == MaxDepth)
+	{
+		InOutNodePool[NodeIndex].State = EOctreeNodeState::Solid;
+		return;
+	}
+
+	if (InOutNodePool[NodeIndex].State == EOctreeNodeState::Empty)
+	{
+		InOutNodePool[NodeIndex].State = EOctreeNodeState::Mixed;
+		const FBox CurrentNodeBounds = InOutNodePool[NodeIndex].Bounds;
+
+		for (int i = 0; i < 8; ++i)
+		{
+			const int32 NewChildIndex = InOutNodePool.Emplace(FOctreeNode());
+			// 배열이 재할당될 수 있으므로, InOutNodePool[NodeIndex]를 다시 참조하지 않도록 주의해야 합니다.
+			// 여기서는 괜찮지만 복잡한 로직에서는 포인터/참조를 다시 얻어야 할 수 있습니다.
+			InOutNodePool[NewChildIndex].Bounds = CalculateChildBounds(CurrentNodeBounds, i);
+			InOutNodePool[NodeIndex].ChildrenIndices[i] = NewChildIndex;
+		}
+	}
+
+	const FVector VoxelWorldPos = VoxelIndexToWorld(ObstacleVoxel);
+	const int32 ChildOctant = GetOctantContainingVoxel(InOutNodePool[NodeIndex].Bounds, VoxelWorldPos);
+	const int32 ChildNodeIndex = InOutNodePool[NodeIndex].ChildrenIndices[ChildOctant];
+
+	if (ChildNodeIndex != -1)
+	{
+		InsertObstacleRecursive_Bake(InOutNodePool, ChildNodeIndex, ObstacleVoxel, CurrentDepth + 1, MaxDepth);
+	}
+}
+
+int32 AOctreeVoxelVolume::FindLeafNodeAt_BakeTime(const TArray<FOctreeNode>& InNodePool, int32 CurrentNodeIndex, const FVector& WorldPos, int32 MaxDepth, int32 CurrentDepth)
+{
+	while (InNodePool.IsValidIndex(CurrentNodeIndex))
+	{
+		const FOctreeNode& Node = InNodePool[CurrentNodeIndex];
+
+		if (Node.State != EOctreeNodeState::Mixed || CurrentDepth >= MaxDepth)
+		{
+			return CurrentNodeIndex;
+		}
+
+		const int32 ChildOctant = GetOctantContainingVoxel(Node.Bounds, WorldPos);
+		CurrentNodeIndex = Node.ChildrenIndices[ChildOctant];
+		CurrentDepth++;
+	}
+	return -1;
+}
+
+void AOctreeVoxelVolume::OptimizeAndCollapse_Bake(TArray<FOctreeNode>& InOutNodePool, int32 NodeIndex)
+{
+	if (!InOutNodePool.IsValidIndex(NodeIndex)) return;
+
+	FOctreeNode& Node = InOutNodePool[NodeIndex];
+	if (Node.State != EOctreeNodeState::Mixed)
+	{
+		return;
+	}
+
+	for (int i = 0; i < 8; ++i)
+	{
+		if (Node.ChildrenIndices[i] != -1)
+		{
+			OptimizeAndCollapse_Bake(InOutNodePool, Node.ChildrenIndices[i]);
+		}
+	}
+
+	const int32 FirstChildIndex = Node.ChildrenIndices[0];
+	if (FirstChildIndex == -1 || !InOutNodePool.IsValidIndex(FirstChildIndex)) return;
+
+	const EOctreeNodeState FirstChildState = InOutNodePool[FirstChildIndex].State;
+	if (FirstChildState == EOctreeNodeState::Mixed)
+	{
+		return;
+	}
+
+	bool bAllChildrenAreSame = true;
+	for (int i = 1; i < 8; ++i)
+	{
+		const int32 ChildNodeIndex = Node.ChildrenIndices[i];
+		if (ChildNodeIndex == -1 || !InOutNodePool.IsValidIndex(ChildNodeIndex) || InOutNodePool[ChildNodeIndex].State != FirstChildState)
+		{
+			bAllChildrenAreSame = false;
+			break;
+		}
+	}
+
+	if (bAllChildrenAreSame)
+	{
+		FOctreeNode& ParentNodeToCollapse = InOutNodePool[NodeIndex];
+		ParentNodeToCollapse.State = FirstChildState;
+
+		for (int i = 0; i < 8; ++i)
+		{
+			ParentNodeToCollapse.ChildrenIndices[i] = -1;
+		}
+	}
+}
+
+void AOctreeVoxelVolume::PrecomputeNeighbors_Bake(TArray<FOctreeNode>& InOutNodePool, const FBox& TotalVolumeBounds, int32 MaxDepth)
+{
+	FScopedSlowTask NeighborTask(InOutNodePool.Num(), FText::FromString(TEXT("Precomputing Neighbors...")));
+	NeighborTask.MakeDialog();
+
+	constexpr float Epsilon = 1.0f;
+
+	const int32 NumNodes = InOutNodePool.Num();
+	for (int32 i = 0; i < NumNodes; ++i)
+	{
+		NeighborTask.EnterProgressFrame(1);
+		if (NeighborTask.ShouldCancel()) return;
+
+		if (InOutNodePool[i].State == EOctreeNodeState::Mixed)
+		{
+			continue;
+		}
+
+		InOutNodePool[i].MaxAllowedRadius = InOutNodePool[i].Bounds.GetExtent().GetMin();
+
+		const FBox NodeBounds = InOutNodePool[i].Bounds;
+		for (int32 DirIndex = 0; DirIndex < static_cast<int32>(ENeighborDirection::MAX); ++DirIndex)
+		{
+			FVector TestPoint = NodeBounds.GetCenter();
+			const ENeighborDirection Dir = static_cast<ENeighborDirection>(DirIndex);
+
+			switch (Dir)
+			{
+			case ENeighborDirection::Right: TestPoint.X = NodeBounds.Max.X + Epsilon; break;
+			case ENeighborDirection::Left:  TestPoint.X = NodeBounds.Min.X - Epsilon; break;
+			case ENeighborDirection::Front: TestPoint.Y = NodeBounds.Max.Y + Epsilon; break;
+			case ENeighborDirection::Back:  TestPoint.Y = NodeBounds.Min.Y - Epsilon; break;
+			case ENeighborDirection::Up:    TestPoint.Z = NodeBounds.Max.Z + Epsilon; break;
+			case ENeighborDirection::Down:  TestPoint.Z = NodeBounds.Min.Z - Epsilon; break;
+			default: break;
+			}
+
+			if (TotalVolumeBounds.IsInside(TestPoint))
+			{
+				const int32 NeighborNodeIndex = FindLeafNodeAt_BakeTime(InOutNodePool, 0, TestPoint, MaxDepth);
+				InOutNodePool[i].Neighbors[DirIndex] = NeighborNodeIndex;
+			}
+			else
+			{
+				// TO-DO: Hierarchical Pathfinding should be implemented.
+				InOutNodePool[i].Neighbors[DirIndex] = -1;
+			}
+		}
+	}
+}

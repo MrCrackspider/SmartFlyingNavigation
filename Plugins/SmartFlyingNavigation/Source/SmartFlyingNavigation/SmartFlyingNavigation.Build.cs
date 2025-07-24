@@ -36,7 +36,8 @@ public class SmartFlyingNavigation : ModuleRules
 			{
 				"InputCore",
 				"Projects",
-			}
+                "Landscape",
+            }
 		);
 		
 		if (Target.bBuildEditor)

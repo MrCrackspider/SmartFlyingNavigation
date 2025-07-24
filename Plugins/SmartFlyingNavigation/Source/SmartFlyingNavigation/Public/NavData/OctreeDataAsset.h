@@ -6,6 +6,26 @@
 #include "Engine/DataAsset.h"
 #include "OctreeDataAsset.generated.h"
 
+USTRUCT()
+struct FChunkPortalLink
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TSoftObjectPtr<UOctreeDataAsset> TargetChunk;
+
+	UPROPERTY()
+	int32 TargetNodeIndex;
+};
+
+USTRUCT()
+struct FChunkPortalInfo
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TArray<FChunkPortalLink> Links;
+};
 
 UENUM(BlueprintType)
 enum class EOctreeNodeState : uint8
@@ -105,6 +125,9 @@ public:
 
 	UPROPERTY()
 	int32 UncompressedSize;
+
+	UPROPERTY()
+	TMap<int32, FChunkPortalInfo> PortalNodes;
 public:
 	void DecompressAndInitialize();
 #if WITH_EDITOR

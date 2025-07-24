@@ -87,11 +87,11 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Voxel|VolumeSettings")
 	FIntVector MapSize;
 
-	/**
-	 * @brief The component that acts as the pivot for this volume.
-	 */
-	UPROPERTY()
-	TObjectPtr<USceneComponent> PivotComponent;
+	///**
+	// * @brief The component that acts as the pivot for this volume.
+	// */
+	//UPROPERTY()
+	//TObjectPtr<USceneComponent> PivotComponent;
 
 	/**
 	 * @brief The bounding box component for the volume.
@@ -156,7 +156,8 @@ public:
 	 * @param ComponentToTest The component to check for overlap.
 	 * @return True if the voxel and component overlap, false otherwise.
 	 */
-	bool IsVoxelOverlapping(const FIntVector& VoxelIndex, UPrimitiveComponent* ComponentToTest) const;
+	//bool IsVoxelOverlapping(const FIntVector& VoxelIndex, UPrimitiveComponent* ComponentToTest) const;
+	bool IsVoxelOverlapping(const FIntVector & VoxelIndex, const FCollisionObjectQueryParams & ObjectQueryParams) const;
 
 	/**
 	 * @brief Gets the volume's bounding box component.
@@ -180,6 +181,9 @@ public:
 #if WITH_EDITOR
 	float GetDebugLineWidth() const { return DebugLineWidth; }
 	void SetDebugLineWidth(float Value) { DebugLineWidth = Value; }
+
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> GetDebugSolidNodesComponent() const { return DebugSolidNodesComponent; }
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> GetDebugMixedNodesComponent() const { return DebugMixedNodesComponent; }
 #endif
 	/**
 	 * @brief The thickness of the debug lines.

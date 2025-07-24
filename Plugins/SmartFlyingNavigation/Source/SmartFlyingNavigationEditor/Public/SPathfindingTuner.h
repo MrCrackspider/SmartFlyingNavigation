@@ -32,6 +32,8 @@ private:
     TSharedRef<SWidget> BuildAgentSettingsSection();
     TSharedRef<SWidget> BuildVoxelDebugSettingsSection();
     TSharedRef<SWidget> BuildAgentDebugSection();
+
+    TSharedRef<SWidget> BuildWorldBakeSection();
     //=================================================================================================
     // Actor Selection Handling
     //=================================================================================================
@@ -63,7 +65,8 @@ private:
     void OnAgentSettingsCategoryExpansionChanged(bool bIsExpanded);
     void OnDebugSettingsCategoryExpansionChanged(bool bIsExpanded);
     void OnAgentDebugCategoryExpansionChanged(bool bIsExpanded);
-   
+
+    void OnWorldBakeCategoryExpansionChanged(bool bIsExpanded);
     //=================================================================================================
     // UI Callbacks & Value Accessors
     //=================================================================================================
@@ -125,12 +128,30 @@ private:
 
     TOptional<float> GetAvoidanceRadius() const;
     void OnAvoidanceRadiusCommitted(float NewValue, ETextCommit::Type CommitType);
-    
+
+    // --- World Bake Settings ---
+    TOptional<float> GetWorldBakeChunkSize() const;
+    void OnWorldBakeChunkSizeCommitted(float NewValue, ETextCommit::Type CommitType);
+    TOptional<float> GetWorldBakeVoxelExtent() const;
+    void OnWorldBakeVoxelExtentCommitted(float NewValue, ETextCommit::Type CommitType);
+    TOptional<int32> GetWorldBakeMaxDepth() const;
+    void OnWorldBakeMaxDepthCommitted(int32 NewValue, ETextCommit::Type CommitType);
+    FText GetWorldBakeSaveDirectory() const;
+    void OnWorldBakeSaveDirectoryCommitted(const FText& InText, ETextCommit::Type CommitInfo);
+    FReply OnWorldBakeBrowseButtonClicked();
+    FString GetWorldBakeObstacleProfilePath() const;
+    void OnWorldBakeObstacleProfileChanged(const FAssetData& AssetData);
+
     // --- Actions ---
     FReply OnBakeButtonClicked();
+    FReply OnBakeWorldButtonClicked();
+    FReply OnCalculateChunksClicked();
+
+    FText GetEstimatedChunksText() const;
     void ShowWarningMessage(const FText& Message) const;
     FReply OnRequestPathButtonClicked();
     bool IsPIEActive() const;
+
 private:
     //=================================================================================================
     // Member Variables
@@ -146,6 +167,8 @@ private:
     TArray<TSharedPtr<int32>> MapSizeOptions;
     
     TObjectPtr<UPathfindingTunerSettings> TunerSettings;
+    
+    TOptional<int32> EstimatedTotalChunks;
 };
  
 //=================================================================================================

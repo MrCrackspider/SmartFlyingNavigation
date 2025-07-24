@@ -10,6 +10,17 @@
 
 class UDynamicObstacleComponent;
 class UVoxelObstacleProfile;
+struct FStreamableHandle;
+
+UENUM(BlueprintType)
+enum class EChunkLoadState : uint8
+{
+	//Unloading,
+	Unloaded,
+	Loading,
+	Loaded,
+	Failed
+};
 
 /**
  * @class AOctreeVoxelVolume
@@ -69,13 +80,16 @@ public:
 	TObjectPtr<UVoxelObstacleProfile> GetStaticObstacleProfile() const { return StaticObjectProfile; }
 
 	/** Returns the data asset where the baked octree data is stored. */
-	TObjectPtr<UOctreeDataAsset> GetBakedOctreeData() const { return BakedOctreeData; }
+	TSoftObjectPtr<UOctreeDataAsset> GetBakedOctreeData() const { return BakedOctreeData; }
 
 	/** 
 	 * Sets the data asset to use for the baked octree.
 	 * @param NewData The new data asset to assign.
 	 */
-	void SetBakedOctreeData(TObjectPtr<UOctreeDataAsset> NewData) { BakedOctreeData = NewData; }
+
+	// RAWPOINTER로 해도 괜찮을지 검토 필요
+	// void SetBakedOctreeData(TObjectPtr<UOctreeDataAsset> NewData) { BakedOctreeData = NewData; }
+	void SetBakedOctreeData(UOctreeDataAsset* NewData) { BakedOctreeData = NewData; }
 
 	/**
 	 * Sets the maximum depth for the octree.
@@ -111,6 +125,7 @@ protected:
 	 * Initializes the volume, loads baked octree data, and sets up the dynamic obstacle update timer.
 	 */
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	/** Called every frame. */
 	virtual void Tick(float DeltaTime) override;
@@ -127,13 +142,15 @@ public:
 	 */
 	void BakeStaticData();
 
+	// 컴포넌트를 복셀화하여 장애물 목록에 추가하는 헬퍼
+	void VoxelizeComponent(const FBox& ComponentBounds, const FCollisionObjectQueryParams& ObjectQueryParams, TSet<FIntVector>& OutStaticObstacles) const;
 	/**
 	 * Scans the volume to identify all static actors that should be treated as obstacles,
 	 * based on the assigned StaticObjectFilter.
 	 *
 	 * @param OutStaticObstacles A set to be populated with the voxel coordinates of detected static obstacles.
 	 */
-	void ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticObstacles) const;
+	void ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticObstacles, UObject* WorldContextObject, const FBox& ScanWorldBounds) const;
 #endif
 
 #if WITH_EDITORONLY_DATA
@@ -210,29 +227,40 @@ private:
 		FBox Bounds;
 		EOctreeNodeState State; 
 	};
-	/** Recursively inserts a single obstacle voxel into the octree during the baking process. */
-	void InsertObstacleRecursive(int32 NodeIndex, const FIntVector& ObstacleVoxel, int32 CurrentDepth);
-
-	/** Traverses the octree to find the leaf node containing a specific world position. For bake-time use only. */
-	int32 FindLeafNodeAt_BakeTime(const FVector& WorldPos) const;
-
-	/** After building the tree, this pre-calculates and stores neighbors for each leaf node to accelerate pathfinding. */
-	void PrecomputeNeighbors();
-
-	/** Traverses the octree bottom-up to merge child nodes that have the same state, optimizing memory usage. */
-	void OptimizeAndCollapse(int32 NodeIndex, const FBox& NodeBounds);
-	
 	/** Determines which of the 8 octants a given voxel belongs to within a node's bounds. */
 	int32 GetOctantContainingVoxel(const FBox& NodeBounds, const FVector& VoxelWorldPos) const;
 
 	/** Constructs the full package path and asset name for the baked data asset. */
 	bool GetBakedAssetPath(FString& OutPackagePath, FString& OutAssetName) const;
-
+	
 	/** Handles the creation, saving, and assignment of the UOctreeDataAsset. */
-	void SaveOctreeToAsset();
+	void SaveOctreeToAsset(const TArray<FOctreeNode>& NodePoolToSave);
 
 	/** Recursively gathers information about octree nodes for debug visualization. */
 	void GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex, const FBox& NodeBounds, int32 CurrentDepth) const;
+
+public:
+		/** Recursively inserts a single obstacle voxel into the octree during the baking process. */
+		void InsertObstacleRecursive_Bake(
+			TArray<FOctreeNode>& InOutNodePool,
+			int32 NodeIndex,
+			const FIntVector& ObstacleVoxel,
+			int32 CurrentDepth,
+			int32 MaxDepth
+		);
+		/** Traverses the octree to find the leaf node containing a specific world position. For bake-time use only. */
+		int32 FindLeafNodeAt_BakeTime(
+			const TArray<FOctreeNode>& InNodePool,
+			int32 CurrentNodeIndex,
+			const FVector& WorldPos,
+			int32 MaxDepth,
+			int32 CurrentDepth = 0
+		);
+		/** Traverses the octree bottom-up to merge child nodes that have the same state, optimizing memory usage. */
+		void OptimizeAndCollapse_Bake(TArray<FOctreeNode>& InOutNodePool, int32 NodeIndex);
+		/** After building the tree, this pre-calculates and stores neighbors for each leaf node to accelerate pathfinding. */
+		void PrecomputeNeighbors_Bake(TArray<FOctreeNode>& InOutNodePool, const FBox& TotalVolumeBounds, int32 MaxDepth);
+
 #endif
 
 public:
@@ -252,7 +280,7 @@ public:
 	 * This asset is loaded at runtime to initialize the static collision data.
 	 */
 	UPROPERTY()
-	TObjectPtr<UOctreeDataAsset> BakedOctreeData;
+	TSoftObjectPtr<UOctreeDataAsset> BakedOctreeData;
 
 	/**
 	 * A filter that defines which actors and components should be considered static obstacles
@@ -272,10 +300,11 @@ private:
 	//~======================================================================
 	// Runtime Data Members
 	//~======================================================================
-	
+
 	/** The runtime pool of nodes for the static octree, loaded from BakedOctreeData. */
+	/** 로드된 데이터 에셋의 노드 풀을 가리키는 포인터. LoadedDataAsset이 소유권을 가짐. */
 	TArray<FOctreeNode>* StaticNodePoolPtr = nullptr; 
-	TArray<FOctreeNode> StaticNodePool; 
+	//TArray<FOctreeNode> StaticNodePool; 
 
 	/** The index of the root node in the StaticNodePool array. Initialized to -1. */
 	int32 RootNodeIndex = -1;
@@ -285,4 +314,31 @@ private:
 
 	/** A timer handle for the periodic update of dynamic obstacles. */
 	FTimerHandle DynamicObstacleTimer;
+	
+	// Begin Test
+
+	// 비동기 로딩이 완료되었을 때 호출될 콜백 함수
+	void OnDataAssetLoaded();
+
+	// 현재 청크 데이터의 로딩 상태
+	EChunkLoadState LoadState = EChunkLoadState::Unloaded;
+
+	// 비동기 로딩 핸들
+	TSharedPtr<FStreamableHandle> AsyncLoadHandle;
+
+	// 로드된 데이터 에셋의 소유권을 관리하기 위한 포인터
+	UPROPERTY()
+	TObjectPtr<UOctreeDataAsset> LoadedDataAsset;
+
+public:
+	// 비동기 데이터 로딩을 요청하는 함수
+	void RequestAsyncLoad();
+
+	// 데이터가 로드되어 길찾기에 사용될 준비가 되었는지 확인하는 함수
+	FORCEINLINE bool IsReadyForNavigation() const { return LoadState == EChunkLoadState::Loaded; }
+
+	// 볼륨의 월드 바운드를 가져오는 편의 함수
+	FBox GetVolumeBounds() const;
+
+	// End Test
 };
