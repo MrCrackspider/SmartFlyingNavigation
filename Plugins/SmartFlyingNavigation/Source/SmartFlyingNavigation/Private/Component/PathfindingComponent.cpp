@@ -48,7 +48,7 @@ void UPathfindingComponent::BeginPlay()
 	if (!ensure(World)) return;
 
 	PathSubsystem = GEngine->GetEngineSubsystem<UPathfindingSubsystem>();
-	AvoidanceSubsystem = World->GetSubsystem<UAvoidanceSubsystem>();
+	AvoidanceSubsystem = GEngine->GetEngineSubsystem<UAvoidanceSubsystem>();
 	
 	if (!ensure(PathSubsystem))
 	{

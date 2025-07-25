@@ -37,7 +37,7 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UAvoidanceSubsystem::PostInitialize()
 {
-    Super::PostInitialize();
+    //Super::PostInitialize();
 }
 
 void UAvoidanceSubsystem::Deinitialize()
@@ -76,7 +76,7 @@ TStatId UAvoidanceSubsystem::GetStatId() const
 
 void UAvoidanceSubsystem::Tick(float DeltaTime)
 {
-    Super::Tick(DeltaTime);
+    //Super::Tick(DeltaTime);
     SCOPE_CYCLE_COUNTER(STAT_AvoidanceSubsystem_Tick);
 
     if (bIsTaskRunning && AsyncTask && AsyncTask->IsWorkDone())

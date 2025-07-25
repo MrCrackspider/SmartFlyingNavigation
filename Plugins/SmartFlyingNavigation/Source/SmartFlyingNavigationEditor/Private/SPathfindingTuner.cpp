@@ -55,7 +55,7 @@
 void SPathfindingTuner::Construct(const FArguments& InArgs)
 {
 	PathfindingSubsystem = GEngine->GetEngineSubsystem<UPathfindingSubsystem>();
-	AvoidanceSubsystem = GEditor->GetEditorWorldContext().World()->GetSubsystem<UAvoidanceSubsystem>();
+	AvoidanceSubsystem = GEngine->GetEngineSubsystem<UAvoidanceSubsystem>();
 
 	// Initialize ComboBox options
 	MapSizeOptions.Add(MakeShared<int32>(128));
