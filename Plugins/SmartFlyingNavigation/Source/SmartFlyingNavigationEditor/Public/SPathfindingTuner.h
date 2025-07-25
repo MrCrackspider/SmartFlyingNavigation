@@ -166,7 +166,7 @@ private:
     
     TArray<TSharedPtr<int32>> MapSizeOptions;
     
-    TObjectPtr<UPathfindingTunerSettings> TunerSettings;
+    //TObjectPtr<UPathfindingTunerSettings> TunerSettings;
     
     TOptional<int32> EstimatedTotalChunks;
 };
