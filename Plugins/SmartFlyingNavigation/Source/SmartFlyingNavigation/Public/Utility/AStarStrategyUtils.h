@@ -20,7 +20,15 @@ struct FAstarPathNode
 	int64 FCost = 0;
 	FAstarPathNode* Parent = nullptr;
 
-	FAstarPathNode() = default;
+	FAstarPathNode()
+		: NodeIndex(-1)
+		, WorldPosition(FVector::ZeroVector)
+		, GCost(0)
+		, HCost(0)
+		, FCost(0)
+		, Parent(nullptr)
+	{
+	}
 
 	void CalculateAndSetFCost()
 	{

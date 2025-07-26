@@ -173,6 +173,62 @@ void AOctreeVoxelVolume::GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObs
 	}
 }
 
+bool AOctreeVoxelVolume::IsLocationInBlockedVoxel(const FVector& WorldLocation) const
+{
+	// --- 1. 사전 검사: 데이터가 준비되었고, 위치가 유효한 범위 내에 있는지 확인 ---
+	if (LoadState != EChunkLoadState::Loaded)
+	{
+		return true; // 데이터가 없으면 안전을 위해 막혔다고 처리
+	}
+	if (!GetVolumeBounds().IsInsideOrOn(WorldLocation))
+	{
+		return true; // 볼륨 범위를 벗어남
+	}
+
+	// --- 2. 동적 장애물 레이어 확인 (빠른 비트마스크 검사) ---
+	const FIntVector VoxelIndex = WorldToVoxelIndex(WorldLocation);
+	if (!IsIndexValid(VoxelIndex))
+	{
+		return true; // 변환된 인덱스가 유효하지 않음
+	}
+
+	const int32 FlatIndex = VoxelIndex.Z * (MapSize.X * MapSize.Y) + VoxelIndex.Y * MapSize.X + VoxelIndex.X;
+	const int32 ChunkIndex = FlatIndex / 128;
+	const int32 BitIndex = FlatIndex % 128;
+
+	if (DynamicObstacleBitmask.IsValidIndex(ChunkIndex))
+	{
+		const F128BitChunk& TargetChunk = DynamicObstacleBitmask[ChunkIndex];
+		const int32 WordIndex = BitIndex / 64;
+		const uint64 BitMask = 1ULL << (BitIndex % 64);
+
+		if ((TargetChunk.Words[WordIndex] & BitMask) != 0)
+		{
+			// 동적 장애물에 의해 막힘
+			return true;
+		}
+	}
+
+	// --- 3. 정적 장애물 레이어 확인 (옥트리 순회) ---
+	const int32 LeafNodeIndex = FindLeafNodeAt(WorldLocation);
+	
+	if (StaticNodePoolPtr && StaticNodePoolPtr->IsValidIndex(LeafNodeIndex))
+	{
+		// 찾은 리프 노드의 상태가 'Solid'이면 막힌 것입니다.
+		if ((*StaticNodePoolPtr)[LeafNodeIndex].State == EOctreeNodeState::Solid)
+		{
+			return true;
+		}
+	}
+	else
+	{
+		// 유효한 리프 노드를 찾지 못했다면, 경로 계산에 문제가 생길 수 있으므로 막혔다고 처리
+		return true;
+	}
+	
+	// --- 4. 모든 검사 통과: 이 위치는 안전함 ---
+	return false;
+}
 //~======================================================================
 // Dynamic Obstacle Internals
 //~======================================================================
@@ -625,6 +681,80 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 				});
 		});
 #endif
+}
+
+// ======================================================================
+// Query Helpers - Implementation
+// ======================================================================
+
+FIntVector AOctreeVoxelVolume::WorldToVoxelIndex(const FVector& WorldLocation) const
+{
+	// VoxelExtent가 0이거나 음수일 경우의 방어 코드
+	if (VoxelExtent <= 0.f) return FIntVector::ZeroValue;
+
+	// 볼륨의 최소 경계점을 (0,0,0) 원점으로 간주하고 계산합니다.
+	const FVector LocalPosition = WorldLocation - GetVolumeBounds().Min;
+	return FIntVector(
+		FMath::FloorToInt(LocalPosition.X / VoxelExtent),
+		FMath::FloorToInt(LocalPosition.Y / VoxelExtent),
+		FMath::FloorToInt(LocalPosition.Z / VoxelExtent)
+	);
+}
+
+FVector AOctreeVoxelVolume::VoxelIndexToWorld(const FIntVector& VoxelIndex) const
+{
+	const FVector VoxelSize(VoxelExtent);
+	// 복셀의 월드 좌표는 (볼륨 시작점) + (인덱스 * 복셀 크기) + (중심점 보정) 입니다.
+	return GetVolumeBounds().Min + (FVector(VoxelIndex) * VoxelExtent) + (VoxelSize * 0.5f);
+}
+
+bool AOctreeVoxelVolume::IsIndexValid(const FIntVector& Index) const
+{
+	return Index.X >= 0 && Index.X < MapSize.X &&
+		   Index.Y >= 0 && Index.Y < MapSize.Y &&
+		   Index.Z >= 0 && Index.Z < MapSize.Z;
+}
+
+bool AOctreeVoxelVolume::ClampVoxelIndicesToVolume(const FIntVector& InMin, const FIntVector& InMax, FIntVector& OutClampedMin, FIntVector& OutClampedMax) const
+{
+	OutClampedMin.X = FMath::Max(InMin.X, 0);
+	OutClampedMin.Y = FMath::Max(InMin.Y, 0);
+	OutClampedMin.Z = FMath::Max(InMin.Z, 0);
+
+	OutClampedMax.X = FMath::Min(InMax.X, MapSize.X - 1);
+	OutClampedMax.Y = FMath::Min(InMax.Y, MapSize.Y - 1);
+	OutClampedMax.Z = FMath::Min(InMax.Z, MapSize.Z - 1);
+
+	return OutClampedMin.X <= OutClampedMax.X &&
+		   OutClampedMin.Y <= OutClampedMax.Y &&
+		   OutClampedMin.Z <= OutClampedMax.Z;
+}
+
+int32 AOctreeVoxelVolume::FindLeafNodeAt(const FVector& WorldPos) const
+{
+	if (LoadState != EChunkLoadState::Loaded || RootNodeIndex == -1 || !StaticNodePoolPtr)
+	{
+		return -1;
+	}
+	
+	int32 CurrentNodeIndex = RootNodeIndex;
+	int32 CurrentDepth = 0;
+
+	while (StaticNodePoolPtr->IsValidIndex(CurrentNodeIndex))
+	{
+		const FOctreeNode& Node = (*StaticNodePoolPtr)[CurrentNodeIndex];
+
+		if (Node.State != EOctreeNodeState::Mixed || CurrentDepth >= MaxOctreeDepth)
+		{
+			return CurrentNodeIndex;
+		}
+
+		const int32 ChildOctant = GetOctantContainingVoxel(Node.Bounds, WorldPos);
+		CurrentNodeIndex = Node.ChildrenIndices[ChildOctant];
+		CurrentDepth++;
+	}
+
+	return -1;
 }
 
 void AOctreeVoxelVolume::GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex, const FBox& NodeBounds, int32 CurrentDepth) const

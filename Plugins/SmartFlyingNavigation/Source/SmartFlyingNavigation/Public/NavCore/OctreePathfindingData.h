@@ -37,7 +37,7 @@ struct FOctreePathfindingData
 			{
 				const FOctreeNode& LeafNode = (*StaticNodePoolPtr)[LeafIndex];
 
-				if (LeafNode.State == EOctreeNodeState::Empty && LeafNode.MaxAllowedRadius > AgentRadius)
+				if (LeafNode.State == EOctreeNodeState::Empty)
 				{
 					const float DistSq = FVector::DistSquared(Origin, LeafNode.Bounds.GetCenter());
 					if (DistSq < MinDistSq)
@@ -79,14 +79,70 @@ private:
 		);
 	}
 
+	float SegmentBoxDistanceSquared(const FVector& SegStart, const FVector& SegEnd, const FBox& Box) const
+	{
+		// --- 1. 사전 검사: 빠른 예외 처리 ---
+
+		// 선분이 박스 내부에 완전히 포함되거나, 일부라도 교차하는지 빠르게 확인합니다.
+		// 이 검사는 가장 흔한 경우(충돌)를 매우 빠르게 처리해줍니다.
+		if (Box.IsInside(SegStart) || Box.IsInside(SegEnd) || FMath::LineBoxIntersection(
+			Box, SegStart, SegEnd, SegEnd - SegStart))
+		{
+			return 0.0f;
+		}
+
+		// 선분이 사실상 점인 경우(degenerate case), 점에서 박스까지의 거리로 처리합니다.
+		if (FVector::PointsAreSame(SegStart, SegEnd))
+		{
+			const FVector PointOnBox = Box.GetClosestPointTo(SegStart);
+			return FVector::DistSquared(SegStart, PointOnBox);
+		}
+
+		// --- 2. 반복 최적화: 가장 가까운 점 찾기 ---
+		// 핵심 원리:
+		// 1. 선분 위의 한 점(P_seg)을 잡습니다.
+		// 2. 박스에서 P_seg와 가장 가까운 점(P_box)을 찾습니다. (Box.GetClosestPointTo)
+		// 3. 다시 선분에서 P_box와 가장 가까운 점(P_seg)을 찾습니다. (FMath::ClosestPointOnSegment)
+		// 4. 이 과정을 반복하면 P_seg와 P_box는 서로에게 가장 가까운 지점으로 빠르게 수렴합니다.
+
+		FVector PointOnSegment = (SegStart + SegEnd) * 0.5f; // 시작점으로 선분의 중앙을 사용
+		FVector PointOnBox;
+
+		// 보통 5~10회 반복으로 충분히 수렴하지만, 넉넉하게 10회로 설정합니다.
+		const int32 MaxIterations = 10;
+		for (int32 i = 0; i < MaxIterations; ++i)
+		{
+			const FVector PrevPointOnSegment = PointOnSegment;
+
+			// 현재 선분 위의 점에서 가장 가까운 박스 위의 점을 찾습니다.
+			PointOnBox = Box.GetClosestPointTo(PointOnSegment);
+
+			// 위에서 찾은 박스 위의 점에서 가장 가까운 선분 위의 점을 다시 찾습니다.
+			PointOnSegment = FMath::ClosestPointOnSegment(PointOnBox, SegStart, SegEnd);
+
+			// 이전 단계와 거의 변화가 없다면 수렴한 것으로 보고 조기 종료합니다.
+			if (FVector::PointsAreSame(PointOnSegment, PrevPointOnSegment))
+			{
+				break;
+			}
+		}
+
+		// --- 3. 최종 계산 ---
+		// 최종적으로 수렴한 두 점 사이의 거리 제곱을 반환합니다.
+		PointOnBox = Box.GetClosestPointTo(PointOnSegment);
+		return FVector::DistSquared(PointOnSegment, PointOnBox);
+	}
+
 	bool IntersectsCapsule(const FBox& Box, const FVector& Start, const FVector& End, float Radius) const
 	{
-		const FVector PointOnSegment = FMath::ClosestPointOnSegment(Box.GetCenter(), Start, End);
-		const FVector ClosestPointOnBox = Box.GetClosestPointTo(PointOnSegment);
+		const FBox ShrunkBox = Box.ExpandBy(-Radius);
+		if (!ShrunkBox.IsValid)
+		{
+			return false;
+		}
+		// 이제 반지름 없이 선-박스 교차 검사
+		return FMath::LineBoxIntersection(ShrunkBox, Start, End, End - Start);
 
-		const float DistSq = FVector::DistSquared(ClosestPointOnBox, PointOnSegment);
-
-		return DistSq <= (Radius * Radius);
 	}
 
 	void FindLeavesInBoxRecursive(TArray<int32>& OutLeaves, int32 NodeIndex, const FBox& QueryBox) const
@@ -123,8 +179,15 @@ public:
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(Octree_CheckForSolidNodesInCapsule_Iterative);
 
-		if (RootNodeIndex == -1) return true;
+		if (RootNodeIndex == -1 || !StaticNodePoolPtr) return true;
 
+		const int32 StartLeaf = FindLeafNodeAt(Start);
+		if (StartLeaf != -1 && (*StaticNodePoolPtr)[StartLeaf].State == EOctreeNodeState::Solid) return true;
+
+
+		const int32 EndLeaf = FindLeafNodeAt(End);
+		if (EndLeaf != -1 && (*StaticNodePoolPtr)[EndLeaf].State == EOctreeNodeState::Solid) return true;
+		
 		TArray<int32> NodesToVisit;
 		NodesToVisit.Push(RootNodeIndex);
 
@@ -135,11 +198,11 @@ public:
 			if (!StaticNodePoolPtr->IsValidIndex(CurrentNodeIndex)) continue;
 
 			const FOctreeNode& Node = (*StaticNodePoolPtr)[CurrentNodeIndex];
-			if (!IntersectsCapsule(Node.Bounds, Start, End, Radius))
+			const float MinDistSq = SegmentBoxDistanceSquared(Start, End, Node.Bounds);
+			if (MinDistSq > (Radius * Radius))
 			{
 				continue;
 			}
-
 			if (Node.State == EOctreeNodeState::Mixed)
 			{
 				for (int32 i = 0; i < 8; ++i)
@@ -149,8 +212,10 @@ public:
 			}
 			else
 			{
-				if (Node.State == EOctreeNodeState::Solid) return true;
-				//if (IsRegionDynamicallyBlocked(Node.Bounds)) return true;
+				if (Node.State == EOctreeNodeState::Solid)
+				{
+					return true;
+				}
 			}
 		}
 
@@ -240,7 +305,7 @@ public:
 		{
 			const FVector CurrentPosition = Start + Direction * Distance;
 
-			const FBox QueryBox = FBox::BuildAABB(CurrentPosition, FVector(AgentRadius * 1.2f));
+			const FBox QueryBox = FBox::BuildAABB(CurrentPosition, FVector(AgentRadius));
 			if (IsRegionDynamicallyBlocked(QueryBox))
 			{
 				return true;
@@ -268,11 +333,11 @@ public:
 		if (VoxelDimensions.X == 0 || VoxelDimensions.Y == 0 || VoxelDimensions.Z == 0) return false;
 
 		const FIntVector MaxCorner(
-		   FMath::CeilToInt(LocalMax.X / VoxelDimensions.X),
-		   FMath::CeilToInt(LocalMax.Y / VoxelDimensions.Y),
-		   FMath::CeilToInt(LocalMax.Z / VoxelDimensions.Z)
-	   );
-		
+			FMath::CeilToInt(LocalMax.X / VoxelDimensions.X),
+			FMath::CeilToInt(LocalMax.Y / VoxelDimensions.Y),
+			FMath::CeilToInt(LocalMax.Z / VoxelDimensions.Z)
+		);
+
 		const FIntVector ClampedMin(FMath::Max(MinCorner.X, 0), FMath::Max(MinCorner.Y, 0), FMath::Max(MinCorner.Z, 0));
 		const FIntVector ClampedMax(FMath::Min(MaxCorner.X, MapSize.X - 1), FMath::Min(MaxCorner.Y, MapSize.Y - 1),
 		                            FMath::Min(MaxCorner.Z, MapSize.Z - 1));

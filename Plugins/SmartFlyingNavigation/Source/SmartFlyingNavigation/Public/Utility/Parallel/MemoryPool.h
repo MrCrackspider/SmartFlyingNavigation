@@ -96,6 +96,11 @@ public:
             Slabs[0].Memory = static_cast<uint8*>(FMemory::Malloc(BytesToAllocate, alignof(T)));
             Slabs[0].NumNodes = InitialSlabSize;
         }
+        if (Slabs.Num() > 0 && Slabs[0].Memory)
+        {
+            const int32 BytesInFirstSlab = Slabs[0].NumNodes * sizeof(T);
+            FMemory::Memset(Slabs[0].Memory, 0, BytesInFirstSlab);
+        }
         
         CurrentSlabSize = InitialSlabSize;
     }

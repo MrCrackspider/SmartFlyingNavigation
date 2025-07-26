@@ -115,6 +115,8 @@ public:
 	 */
 	void GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const;
 
+	UFUNCTION(BlueprintCallable, Category = "Octree")
+	bool IsLocationInBlockedVoxel(const FVector& WorldLocation) const;
 protected:
 	//~======================================================================
 	// AActor Overrides
@@ -167,6 +169,20 @@ protected:
 #endif
 
 private:
+
+	// --- Query Helpers ---
+	
+	FIntVector WorldToVoxelIndex(const FVector& WorldLocation) const;
+
+	FVector VoxelIndexToWorld(const FIntVector& VoxelIndex) const;
+
+	bool IsIndexValid(const FIntVector& Index) const;
+
+	bool ClampVoxelIndicesToVolume(const FIntVector& InMin, const FIntVector& InMax, FIntVector& OutClampedMin, FIntVector& OutClampedMax) const;
+
+	int32 FindLeafNodeAt(const FVector& WorldPos) const;
+
+	
 	//~======================================================================
 	// Dynamic Obstacle Internals
 	//~======================================================================

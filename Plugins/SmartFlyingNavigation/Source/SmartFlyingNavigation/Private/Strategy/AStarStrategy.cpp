@@ -12,21 +12,41 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_FindPathWithStrategy);
 
 	const FOctreePathfindingData& OctreeData = InRequest.NavigationData;
+	const TArray<FOctreeNode>& PoolRef = *(OctreeData.StaticNodePoolPtr);
 
-	const int32 StartNodeIndex = OctreeData.FindLeafNodeAt(InRequest.StartLocation);
+	int32 StartNodeIndex = OctreeData.FindLeafNodeAt(InRequest.StartLocation);
 
-	if (StartNodeIndex == -1)
+	bool bIsStartNodeInvalid = (StartNodeIndex == -1) || (PoolRef[StartNodeIndex].State != EOctreeNodeState::Empty);
+
+
+	if (bIsStartNodeInvalid)
 	{
-		UE_LOG(LogTemp, Error, TEXT("A* Pathfinding failed: Start node is invalid."));
-		return false;;
+		// If invalid, search for the nearest valid leaf node for the agent.
+		UE_LOG(LogTemp, Warning, TEXT("AStarStrategy: Start location is inside a blocked voxel. Searching for a nearby valid start node."));
+		const int32 NewStartNodeIndex = OctreeData.FindNearestValidLeafForAgent(
+			InRequest.StartLocation,
+			InRequest.AgentRadius,
+			NearbyGoalSearchRadius,
+			NearbyGoalSearchIterations);
+
+		if (NewStartNodeIndex == -1)
+		{
+			// If even the nearby search fails, then pathfinding is truly impossible from this area.
+			UE_LOG(LogTemp, Error, TEXT("AStarStrategy: Could not find any valid start node near the agent. Pathfinding failed."));
+			return false;
+		}
+		
+		// We found a valid nearby node, use it as our starting point.
+		StartNodeIndex = NewStartNodeIndex;
 	}
 
+	
+
+	
 	int32 GoalNodeIndex = OctreeData.FindLeafNodeAt(InRequest.EndLocation);
 
-	const TArray<FOctreeNode>& PoolRef = *(OctreeData.StaticNodePoolPtr);
 	bool bIsGoalNodeInvalid = (GoalNodeIndex == -1) ||
-		(PoolRef[GoalNodeIndex].State != EOctreeNodeState::Empty) ||
-		(PoolRef[GoalNodeIndex].MaxAllowedRadius < InRequest.AgentRadius);
+		(PoolRef[GoalNodeIndex].State != EOctreeNodeState::Empty);
 
 
 	if (bIsGoalNodeInvalid)
@@ -64,6 +84,7 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 
 	const EPathfindingResult Result = Pathfinder.FindPath(OutPath);
 
+	
 	return (Result == EPathfindingResult::Success || Result == EPathfindingResult::Success_Partial);
 }
 
@@ -200,12 +221,21 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 			}
 			else
 			{
-				Successor->SetParent(ParentNode, NewGCost, CalculateBoundHeuristic(SuccIdx));
+				const float HeuristicWeight = 2.f; // 1.0보다 큰 값 (예: 1.5 ~ 2.0)
+				Successor->SetParent(ParentNode, NewGCost, CalculateBoundHeuristic(SuccIdx) * HeuristicWeight);
 				OpenSet.HeapPush(Successor, Predicate);
 				OpenSetLookup.Add(Successor->NodeIndex, Successor);
+				
+				
 			}
 		}
 	}
+	// const bool bSolid = OctreeData.CheckForSolidNodesInCapsule(BestPartialNode->WorldPosition, ActualGoalLocation, AgentRadius);
+	// UE_LOG(LogTemp, Error, TEXT("Partial Path - Anchor=(%.2f,%.2f,%.2f) Goal=(%.2f,%.2f,%.2f) CapsuleBlocked=%d"),
+	// 	BestPartialNode->WorldPosition.X, BestPartialNode->WorldPosition.Y, BestPartialNode->WorldPosition.Z, 
+	// 	ActualGoalLocation.X, ActualGoalLocation.Y, ActualGoalLocation.Z, 
+	// 	bSolid ? 1 : 0
+	// );
 
 	if (BestPartialNode)
 	{
@@ -216,7 +246,6 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 		ReconstructAndSmoothPath(BestPartialNode, OutPath);
 		return EPathfindingResult::Success_Partial;
 	}
-
 	return EPathfindingResult::Failed_Unreachable;
 }
 
@@ -273,16 +302,20 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 	while (AnchorIndex < RawPath.Num() - 1)
 	{
 		int32 FurthestVisibleIndex = AnchorIndex + 1;
+		int32 Low = AnchorIndex + 2;
+		int32 High = RawPath.Num() - 1;
 
-		for (int32 LookAheadIndex = AnchorIndex + 2; LookAheadIndex < RawPath.Num(); ++LookAheadIndex)
+		while (Low <= High)
 		{
-			if (HasClearPath(RawPath[AnchorIndex], RawPath[LookAheadIndex]))
+			const int32 Mid = Low + (High - Low) / 2;
+			if (HasClearPath(RawPath[AnchorIndex], RawPath[Mid]))
 			{
-				FurthestVisibleIndex = LookAheadIndex;
+				FurthestVisibleIndex = Mid;
+				Low = Mid + 1;
 			}
 			else
 			{
-				break;
+				High = Mid - 1;
 			}
 		}
 		OutPath.Add(RawPath[FurthestVisibleIndex]);
@@ -290,25 +323,22 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 	}
 }
 
-bool FAstarPathfinder::HasGuaranteedLineOfSight(const FVector& Start, const FVector& End) const
-{
-	return !OctreeData.CheckForSolidNodesInCapsule(Start, End, AgentRadius * 0.98f);
-}
-
 bool FAstarPathfinder::HasClearPath(const FVector& Start, const FVector& End) const
 {
-	if (OctreeData.CheckForSolidNodesInCapsule(Start, End, AgentRadius * 0.98f))
+	if (OctreeData.CheckForSolidNodesInCapsule(Start, End, AgentRadius))
 	{
-		return false;
+		return false; // 고정 장애물과 충돌
 	}
 
+	// 2. 동적 장애물 검사는 그대로 수행
 	if (OctreeData.IsPathDynamicallyBlocked_Sweep(Start, End, AgentRadius))
 	{
 		return false;
 	}
-	
+
 	return true;
 }
+
 
 void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPathNode*>& OutSuccessors)
 {
@@ -337,17 +367,17 @@ void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPat
 int64 FAstarPathfinder::GetMoveCost(const FVector& A, const FVector& B) const
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_GetMoveCost);
-	return static_cast<int64>(FVector::DistSquared(A, B));
+	return static_cast<int64>(FVector::Distance(A, B) * 100.0f);
 }
 
 int64 FAstarPathfinder::CalculateBoundHeuristic(int32 NodeIndex) const
 {
 	const TArray<FOctreeNode>& PoolRef = *(OctreeData.StaticNodePoolPtr);
 	const FBox& Bounds = PoolRef[NodeIndex].Bounds;
-	const FVector ClosestPoint = Bounds.GetClosestPointTo(ActualGoalLocation);
-	const float RawDist = (ClosestPoint - ActualGoalLocation).Size();
+	const FVector NodeCenter = Bounds.GetCenter();
+	const float RawDist = (NodeCenter - ActualGoalLocation).Size();
 	const float EffectiveDist = FMath::Max(0.0f, RawDist - AgentRadius);
-	return static_cast<int64>(EffectiveDist * EffectiveDist);
+	return static_cast<int64>(EffectiveDist * 100.0f); 
 }
 
 bool FAstarPathfinder::TryToRepairPartialPath(FAstarPathNode* PartialEndNode, TArray<FVector>& OutPath)
