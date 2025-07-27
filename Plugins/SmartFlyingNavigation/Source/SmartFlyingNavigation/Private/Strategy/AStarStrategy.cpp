@@ -277,7 +277,6 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 		}
 		return;
 	}
-
 	// --- Step 3: Safely tether the actual start and end locations to the raw path. ---
 	if (HasClearPath(ActualStartLocation, RawPath[1]))
 	{
@@ -289,6 +288,8 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 	{
 		RawPath.Add(ActualGoalLocation);
 	}
+	OutPath = RawPath;
+	return;
 
 	// --- Step 4: Perform the "String Pulling" algorithm ---
 	// Now, perform the smoothing on the safely-modified path.
@@ -353,14 +354,12 @@ void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPat
 		const auto& NeighborNode = PoolRef[NeighborIndex];
 		const FBox NeighborBounds = NeighborNode.Bounds;
 		FVector NeighborCenter = NeighborBounds.GetCenter();
+
+		FAstarPathNode* Successor = MemoryPool.NewNode();
+		Successor->NodeIndex = NeighborIndex;
+		Successor->WorldPosition = NeighborCenter;
+		OutSuccessors.Add(Successor);
 		
-		if (HasClearPath(Node->WorldPosition, NeighborCenter))
-		{
-			FAstarPathNode* Successor = MemoryPool.NewNode();
-			Successor->NodeIndex = NeighborIndex;
-			Successor->WorldPosition = NeighborCenter;
-			OutSuccessors.Add(Successor);
-		}
 	}
 }
 

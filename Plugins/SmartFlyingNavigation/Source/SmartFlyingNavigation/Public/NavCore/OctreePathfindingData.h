@@ -187,6 +187,14 @@ public:
 
 		const int32 EndLeaf = FindLeafNodeAt(End);
 		if (EndLeaf != -1 && (*StaticNodePoolPtr)[EndLeaf].State == EOctreeNodeState::Solid) return true;
+
+
+		const FBox CapsuleAABB(FVector::Min(Start, End) - FVector(Radius), FVector::Max(Start, End) + FVector(Radius));
+
+		if (!(*StaticNodePoolPtr)[RootNodeIndex].Bounds.Intersect(CapsuleAABB))
+		{
+			return false;
+		}
 		
 		TArray<int32> NodesToVisit;
 		NodesToVisit.Push(RootNodeIndex);

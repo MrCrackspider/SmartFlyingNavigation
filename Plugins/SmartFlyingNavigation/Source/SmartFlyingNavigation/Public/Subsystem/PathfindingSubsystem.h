@@ -148,7 +148,7 @@ private:
 
 	/** The maximum number of completed pathfinding callbacks to fire per frame. */
 	UPROPERTY(Config)
-	int32 MaxCallbacksPerFrame = 5;
+	int32 MaxCallbacksPerFrame = 100;
 
 	/** A thread-safe counter for generating unique request IDs. */
 	FThreadSafeCounter NextRequestID;

@@ -48,6 +48,10 @@ protected:
 							   FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void OnRegister() override;
+
+	UFUNCTION(BlueprintCallable, Category = "Pathfinding|Debug")
+	void DEBUG_StartManualPathTest();
+	
 #pragma endregion
 
 #pragma region Public API
@@ -89,7 +93,11 @@ public:
 	FOnDestinationReached OnDestinationReached;
 	
 	void SetbPeriodicRepath(bool NewValue) { bPeriodicRepath = NewValue; }
-	
+
+	bool HasReachedDestination() const { return CurrentPathDestinationIndex >= FoundPath.Num(); }
+
+	void StopMovement();
+
 #if WITH_EDITOR
 	// A function called when a property is changed in the editor.
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
@@ -144,7 +152,7 @@ public:
 	bool IsSplinePathSafe() const;
 	bool IsOnSplineLine() const;
 	
-	void AdjustProgressToSpline();
+	void AdjustProgressToSpline(const FVector& FinalVelocity);
 	void ProgressNextPoint();
 	void DetermineMovementModeForNextPath();
 
@@ -162,9 +170,6 @@ protected:
 	void PeriodicRepath();
 	
 	UFUNCTION()
-	void HandleVoxelPathResult(const TArray<FIntVector>& PathIndices, bool bSuccess);
-	
-	UFUNCTION()
 	void HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess);
 
 	void PartialSplinePointUpdate(int32 StartIndex);
@@ -173,12 +178,11 @@ protected:
 
 	void UpdateAgentRadiusFromScale(bool bForceUpdate = false);
 	
-	/** Process the results when the asynchronous pathfinding task completes. */
-	void HandlePathfindingResult();
-
 	/** When the path is invalid, the current movement is stopped and a retracing timer is started. */
 	void InvalidatePathAndRequestRepath();
 
+	bool IsPathObstructed(const FVector& Start, const FVector& End) const;
+	
 	void DrawDebugPath();
 
 	

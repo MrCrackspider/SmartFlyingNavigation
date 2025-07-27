@@ -31,7 +31,7 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     SolverIterations = 5;
     SideBiasMagnitude = 4.f;
     InterpSpeed = 10.f;
-
+    bUseAvoidance = false;
     bShowVelocityDebugLine = true;
 }
 
@@ -78,7 +78,9 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
 {
     //Super::Tick(DeltaTime);
     SCOPE_CYCLE_COUNTER(STAT_AvoidanceSubsystem_Tick);
-
+    bUseAvoidance = false;
+    if (!bUseAvoidance) return;
+    
     if (bIsTaskRunning && AsyncTask && AsyncTask->IsWorkDone())
     {
         TMap<uint32, FThreadAvoidanceResult> LocalResults;
