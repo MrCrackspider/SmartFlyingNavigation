@@ -82,6 +82,11 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
+	// todo - avoidacne subsystem를 engine에서 world로 수정하면 제거. or avoidance사용하지 않을 경우에만 아래 호출하도록 수정해야함.
+	UpdateSteering(DeltaTime);
+	ApplyMovement(PreferredVelocity, DeltaTime);
+	//
+	
 	// Called to update pathfinding in response to a scale change at runtime.
 	UpdateAgentRadiusFromScale();
 }
@@ -251,7 +256,7 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 	CurrentVelocity = FinalVelocity;
 	const FVector AdjustedVelocity = FinalVelocity * DeltaTime;
 	SetAppliedVelocity(CurrentVelocity );
-	//Owner->SetActorLocation(CurrentLocation + AdjustedVelocity);
+	Owner->SetActorLocation(CurrentLocation + AdjustedVelocity);
 
 	// --- Modified Rotation Logic ---
 	if (!FinalVelocity.IsNearlyZero())
@@ -278,27 +283,32 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 	}
 	// --- End of Modified Rotation Logic ---
 
-	AdjustProgressToSpline(AdjustedVelocity);
+	AdjustProgressToSpline();
 }
 
-void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
+void UPathfindingComponent::AdjustProgressToSpline()
 {
-	if (!IsValid(PathSplinePtr))
+	if (!IsValid(PathSplinePtr) || !GetOwner())
 	{
 		return;
 	}
 
-	const FVector SplineDirection = PathSplinePtr->GetDirectionAtDistanceAlongSpline(
-		DistanceAlongSpline, ESplineCoordinateSpace::World);
+	// 1. 에이전트의 '실제 현재 월드 위치'를 가져옵니다.
+	const FVector CurrentLocation = GetOwner()->GetActorLocation();
 
-	const float ForwardDistance = FVector::DotProduct(FinalVelocity, SplineDirection);
-	DistanceAlongSpline += ForwardDistance;
+	// 2. 현재 위치에서 가장 가까운 스플라인 위의 지점을 찾습니다. (InputKey 형태로 반환)
+	const float ClosestInputKey = PathSplinePtr->FindInputKeyClosestToWorldLocation(CurrentLocation);
+
+	// 3. 찾은 지점(InputKey)을 기반으로 스플라인 시작점부터의 '정확한 거리'를 다시 계산합니다.
+	DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplineInputKey(ClosestInputKey);
+	
 	const float SplineLength = PathSplinePtr->GetSplineLength();
 	DistanceAlongSpline = FMath::Clamp(DistanceAlongSpline, 0.f, SplineLength);
 
+	// --- 도착 판정 로직은 기존과 동일하게 유지 ---
 	if (!bIsReachDestination)
 	{
-		const FVector CurrentLocation = GetOwner()->GetActorLocation();
+		const FVector CurrentActorLocation = GetOwner()->GetActorLocation();
 
 		FVector TargetPoint;
 		if(FoundPath.IsValidIndex(CurrentPathDestinationIndex))
@@ -312,9 +322,11 @@ void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 
 		if (GetMovementMode() == EPathMovementMode::Spline)
 		{
+			// 스플라인의 두 번째 점(인덱스 1)이 현재 부분 경로의 목표 지점입니다.
 			const float TargetPointDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(1);
 
-			if (DistanceAlongSpline >= TargetPointDistance)
+			// 정확한 거리 계산으로 인해, 목표 지점에 거의 도달했을 때 다음으로 넘어가도록 약간의 허용치를 줍니다.
+			if (DistanceAlongSpline >= TargetPointDistance - 1.0f) 
 			{
 				ProgressNextPoint();
 			}
@@ -322,7 +334,7 @@ void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 		else
 		{
 			const float ArrivalThresholdSq = FMath::Square(10.f);
-			if (FVector::DistSquared(CurrentLocation, TargetPoint) < ArrivalThresholdSq)
+			if (FVector::DistSquared(CurrentActorLocation, TargetPoint) < ArrivalThresholdSq)
 			{
 				ProgressNextPoint();
 			}
@@ -489,35 +501,9 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 		int32 ClosestPointIndex = FMath::RoundToInt(ClosestInputKey);
 		CurrentPathDestinationIndex = FMath::Clamp(ClosestPointIndex + 1, 0, PartialPointSplineNum - 1);
 		
-		UWorld* World = GetWorld();
-		if (World && bDrawDebugPath) 
+		if(bDrawDebugPath)
 		{
-			for (int32 i = 0; i < FoundPath.Num() - 1; ++i)
-			{
-				DrawDebugLine(
-					World,
-					FoundPath[i],    
-					FoundPath[i + 1],
-					FColor::Green,   
-					true,            
-					5.0f,            
-					0,               
-					5.0f             
-				);
-			}
-			
-			for (const FVector& Point : FoundPath)
-			{
-				DrawDebugSphere(
-					World,
-					Point,
-					15.0f,             
-					12,                
-					FColor::Cyan,      
-					true,
-					5.0f
-				);
-			}
+			DrawDebugPath();
 		}
 	}
 	else
@@ -586,6 +572,59 @@ void UPathfindingComponent::InvalidatePathAndRequestRepath()
 	// End Test
 }
 
+void UPathfindingComponent::DrawDebugPath()
+{
+	UWorld* World = GetWorld();
+	if (!World || FoundPath.Num() < 2)
+	{
+		return;
+	}
+
+	
+	const float Duration = 1.0f;
+	const float LineThickness = 40.0f;
+	const float BoxThickness = 120.f;
+	const FVector BoxHalfSize(21.0f, 21.0f, 21.0f);
+
+	const FLinearColor PathColor(0.5f, 0.0f, 1.0f);
+	const FLinearColor PathPointColor(.5f, 0.5f, 1.0f);
+
+	for (int32 i = 0; i < FoundPath.Num() - 1; ++i)
+	{
+		float T = static_cast<float>(i) / (FoundPath.Num() - 2);
+
+		DrawDebugLine(
+			World,
+			FoundPath[i],
+			FoundPath[i + 1],
+			PathColor.ToFColor(true),
+			false,
+			Duration,
+			0,
+			LineThickness
+		);
+	}
+
+	for (int32 i = 0; i < FoundPath.Num(); ++i)
+	{
+		float T = static_cast<float>(i) / (FoundPath.Num() - 1);
+
+		DrawDebugBox(
+			World,
+			FoundPath[i],
+			BoxHalfSize,
+			PathPointColor.ToFColor(true),
+			false,
+			Duration,
+			0,
+			BoxThickness
+		);
+	}
+
+}
+
+
+
 void UPathfindingComponent::UpdatePreferredVelocity(float DeltaTime)
 {
 	if (GetMovementMode() == EPathMovementMode::Spline)
@@ -629,48 +668,53 @@ void UPathfindingComponent::UpdateSplinePreferredVelocity(float DeltaTime)
 
 bool UPathfindingComponent::IsSplinePathSafe() const
 {
-	if (!IsValid(PathSplinePtr) || !GetWorld())
+	AOctreeVoxelVolume* VoxelVolume = Cast<AOctreeVoxelVolume>(TargetVolume.Get());
+	if (!IsValid(PathSplinePtr) || !IsValid(VoxelVolume))
 	{
 		return true;
 	}
 
 	const float SplineLength = PathSplinePtr->GetSplineLength();
+
 	if (SplineLength < SafetyCheckStepSize)
 	{
+		if (SplineLength > KINDA_SMALL_NUMBER && VoxelVolume->IsLocationInBlockedVoxel(
+			PathSplinePtr->GetLocationAtDistanceAlongSpline(SplineLength, ESplineCoordinateSpace::World)))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Spline path endpoint is inside a blocked voxel. Path is unsafe."));
+			return false;
+		}
 		return true;
 	}
 
-	FCollisionQueryParams CollisionParams(SCENE_QUERY_STAT(SplineSafetyCheck), false, GetOwner());
-
-	FCollisionObjectQueryParams ObjectQueryParams;
-	ObjectQueryParams.AddObjectTypesToQuery(ECollisionChannel::ECC_WorldStatic);
-	ObjectQueryParams.AddObjectTypesToQuery(ECollisionChannel::ECC_WorldDynamic);
-	ObjectQueryParams.AddObjectTypesToQuery(ECollisionChannel::ECC_PhysicsBody);
-
-	const float CurrentDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex - 1);
-	const float NextDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex);
-
-
-	for (float Distance = CurrentDistance; Distance < NextDistance; Distance += SafetyCheckStepSize)
+	for (float Distance = 0.f; Distance <= SplineLength; Distance += SafetyCheckStepSize)
 	{
-		FVector StartPoint = PathSplinePtr->GetLocationAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World);
-		FVector EndPoint = PathSplinePtr->GetLocationAtDistanceAlongSpline(
-			FMath::Min(Distance + SafetyCheckStepSize, SplineLength), ESplineCoordinateSpace::World);
+		const FVector CenterLocation = PathSplinePtr->GetLocationAtDistanceAlongSpline(
+			Distance, ESplineCoordinateSpace::World);
 
-		if (FVector::DistSquared(StartPoint, EndPoint) < KINDA_SMALL_NUMBER)
+		const TArray<FVector> TestOffsets = {
+			FVector::ZeroVector,
+			FVector(AgentRadius, 0.f, 0.f),
+			FVector(-AgentRadius, 0.f, 0.f),
+			FVector(0.f, AgentRadius, 0.f),
+			FVector(0.f, -AgentRadius, 0.f),
+			FVector(0.f, 0.f, AgentRadius),
+			FVector(0.f, 0.f, -AgentRadius)
+		};
+
+		for (const FVector& Offset : TestOffsets)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("Start End So Close"));
-			continue;
-		}
+			const FVector TestLocation = CenterLocation + Offset;
 
-
-		if (GetWorld()->SweepTestByObjectType(StartPoint, EndPoint, FQuat::Identity, ObjectQueryParams,
-		                                      FCollisionShape::MakeSphere(AgentRadius), CollisionParams))
-		{
-			UE_LOG(LogTemp, Warning, TEXT("Obstacle detected on spline path."));
-			return false;
+			if (VoxelVolume->IsLocationInBlockedVoxel(TestLocation))
+			{
+				UE_LOG(LogTemp, Warning,
+					   TEXT("Spline path unsafe: Test point %s (Center: %s, Offset: %s) is inside a blocked voxel."),
+					   *TestLocation.ToString(), *CenterLocation.ToString(), *Offset.ToString());
+				return false;
+			}
 		}
 	}
 
 	return true;
-} 
+}

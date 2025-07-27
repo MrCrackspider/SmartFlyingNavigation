@@ -144,7 +144,7 @@ public:
 	bool IsSplinePathSafe() const;
 	bool IsOnSplineLine() const;
 	
-	void AdjustProgressToSpline(FVector FinalVelocity);
+	void AdjustProgressToSpline();
 	void ProgressNextPoint();
 	void DetermineMovementModeForNextPath();
 
@@ -179,9 +179,9 @@ protected:
 	/** When the path is invalid, the current movement is stopped and a retracing timer is started. */
 	void InvalidatePathAndRequestRepath();
 
-	/** Checks whether a straight line path is safe on voxel data. */
-	bool IsPathAheadValid() const;
+	void DrawDebugPath();
 
+	
 #pragma endregion
 
 #pragma region Configuration Properties
