@@ -118,40 +118,6 @@ void UPathfindingComponent::OnRegister()
 	}
 }
 
-void UPathfindingComponent::DEBUG_StartManualPathTest()
-{
-	AActor* Owner = GetOwner();
-	if (!Owner)
-	{
-		UE_LOG(LogTemp, Error, TEXT("DEBUG_StartManualPathTest: Owner is NULL!"));
-		return;
-	}
-
-	FString AgentName = Owner->GetName();
-	UE_LOG(LogTemp, Error, TEXT("!!!!!!!!!! [%s] STARTING MANUAL PATH TEST !!!!!!!!!!"), *AgentName);
-
-	// 1. 모든 이전 경로와 상태를 깨끗하게 지웁니다.
-	StopMovement();
-
-	// 2. 현재 위치에서 정면으로 1000 유닛 떨어진 지점까지의 가짜 경로를 생성합니다.
-	FVector Start = Owner->GetActorLocation();
-	FVector End = Start + (Owner->GetActorForwardVector() * 1000.0f);
-	
-	FoundPath.Empty();
-	FoundPath.Add(Start); // 경로의 [0]번은 시작점
-	FoundPath.Add(End);   // 경로의 [1]번은 도착점
-
-	// 3. AI가 움직일 수 있도록 모든 상태 변수를 강제로 설정합니다.
-	bIsReachDestination = false;
-	CurrentState = EPathfindingState::FollowPath;
-	CurrentPathDestinationIndex = 1; // 1번 지점(End)을 향해 가도록 설정
-
-	// 4. 테스트 경로를 화면에 그립니다.
-	DrawDebugPath();
-
-	UE_LOG(LogTemp, Error, TEXT("!!!!!!!!!! [%s] Manual path created. AI should now move forward."), *AgentName);
-}
-
 bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 {
 	if (!PathfindingStrategy || !TargetVolume)
@@ -328,6 +294,7 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 		// --- Core Change: Actually move the actor and check for collision results ---
 		FHitResult HitResult;
 		Owner->SetActorLocation(CurrentLocation + MoveThisStep, true, &HitResult);
+
 		if (GetMovementMode() == EPathMovementMode::Spline)
 		{
 			AdjustProgressToSpline(CurrentVelocity); // 실제 적용된 속도(CurrentVelocity)를 기준으로 진행 상황을 기록합니다.
