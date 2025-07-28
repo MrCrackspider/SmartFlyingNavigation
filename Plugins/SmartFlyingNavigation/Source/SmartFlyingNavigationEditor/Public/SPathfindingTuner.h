@@ -129,6 +129,9 @@ private:
 
     TOptional<float> GetAvoidanceRadius() const;
     void OnAvoidanceRadiusCommitted(float NewValue, ETextCommit::Type CommitType);
+    TOptional<float> GetRepathCooldown() const;
+    void OnRepathCooldownCommitted(float NewCooldownValue,
+                                   ETextCommit::Type CommitType);
 
     // --- World Bake Settings ---
     TOptional<float> GetWorldBakeVolumeSize() const;
@@ -168,7 +171,7 @@ private:
     
     TOptional<int32> EstimatedTotalVolumes;
 
-
+    float MinCoolDown =0.5f;
     //=================================================================================================
     // Internal Functions
     //=================================================================================================

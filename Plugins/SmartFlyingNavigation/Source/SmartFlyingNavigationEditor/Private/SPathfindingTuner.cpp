@@ -202,7 +202,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
 						]
 				]
 
-			// --- Use Agent Avoidance (이 부분 수정) ---
+			// --- Use Agent Avoidance 
 			+ SVerticalBox::Slot()
 				.AutoHeight()
 				.Padding(8.0f, 5.0f)
@@ -883,6 +883,8 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
 					.MaxSliderValue(500.0f)
 				]
 			]
+
+			//Periodic Repath
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			.Padding(8.0f, 5.0f)
@@ -917,6 +919,29 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
 					.OnCheckStateChanged(this, &SPathfindingTuner::OnbPeriodicRepathChanged)
 				]
 			]
+
+			//Repath Cooldown
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
+				[
+					
+					SNew(STextBlock).Text(LOCTEXT("RepathCooldownLabel", "Repath Cooldown:")).Font(
+						FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+				]
+				+ SHorizontalBox::Slot().FillWidth(0.6f)
+				[
+					SNew(SNumericEntryBox<float>)
+					.Value(this, &SPathfindingTuner::GetRepathCooldown)
+					.OnValueCommitted(this, &SPathfindingTuner::OnRepathCooldownCommitted)
+					.MinValue(0.0f)      
+					.MaxValue(600.0f)     
+					.MinSliderValue(0.0f)  
+					.MaxSliderValue(10.0f) 
+				]
+			]
+			
 		]
 
 		.InitiallyCollapsed(!TunerSettings->bIsAgentSettingsCategoryExpanded)
@@ -1800,6 +1825,31 @@ void SPathfindingTuner::OnAvoidanceRadiusCommitted(float NewValue,
 	                                                     {
 		                                                     C->SetAvoidanceRadius(NewRadius);
 	                                                     });
+}
+
+
+TOptional<float> SPathfindingTuner::GetRepathCooldown() const
+{
+	const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
+	
+	return GetCommonPropertyValue<UPathfindingComponent, float>(SelectedComponents,
+																[](const UPathfindingComponent* C)
+																{
+																	return C->GetRepathCooldown();
+																});
+}
+
+void SPathfindingTuner::OnRepathCooldownCommitted(float NewCooldownValue, ETextCommit::Type CommitType)
+{
+	NewCooldownValue = FMath::Max(MinCoolDown, NewCooldownValue);
+	
+	const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
+	SetCommonPropertyValue<UPathfindingComponent, float>(SelectedComponents, NewCooldownValue,
+														 LOCTEXT("SetRepathCooldown", "Set Repath Cooldown"),
+														 [](UPathfindingComponent* C, float NewCooldown)
+														 {
+															 C->SetRepathCooldown(NewCooldown);
+														 });
 }
 
 

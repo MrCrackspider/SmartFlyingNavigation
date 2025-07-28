@@ -266,8 +266,11 @@ void AOctreeVoxelVolume::UpdateDynamicObstacles()
 
 	for (UDynamicObstacleComponent* Comp : RegisteredObstacles)
 	{
-		if (!IsValid(Comp)) continue;
-
+		if (!IsValid(Comp))
+		{
+			continue;
+		}
+		
 		// Only update if the component has moved (is "dirty").
 		if (Comp->IsDirty())
 		{

@@ -40,7 +40,7 @@ class SMARTFLYINGNAVIGATION_API UPathfindingComponent : public UActorComponent
  
 public:
 	UPathfindingComponent();
-	
+	 
 protected:
 #pragma region Engine Overrides
 
@@ -99,6 +99,9 @@ public:
 	bool HasReachedDestination() const { return CurrentPathDestinationIndex >= FoundPath.Num(); }
 
 	void StopMovement();
+
+	void SetRepathCooldown(float NewCoolDown) { RepathCooldown = NewCoolDown; }
+	float GetRepathCooldown() const { return RepathCooldown; }
 
 #if WITH_EDITOR
 	// A function called when a property is changed in the editor.
