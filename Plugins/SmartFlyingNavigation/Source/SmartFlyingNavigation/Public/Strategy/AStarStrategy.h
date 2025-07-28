@@ -57,7 +57,7 @@ public:
 
 public:
 	UPROPERTY(EditDefaultsOnly, Category = "A* | Fallback Search", meta=(ClampMin="50.0"))
-	float NearbyGoalSearchRadius = 50.f;
+	float NearbyGoalSearchRadius = 500.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "A* | Fallback Search", meta=(ClampMin="1"))
 	int32 NearbyGoalSearchIterations = 5;

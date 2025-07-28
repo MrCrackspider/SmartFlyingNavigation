@@ -96,6 +96,19 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 										  FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	if (CurrentState == EPathfindingState::FollowPath && !bIsReachDestination)
+	{
+		if (FoundPath.IsValidIndex(CurrentPathDestinationIndex))
+		{
+			if (IsPathObstructed(GetOwner()->GetActorLocation(), FoundPath[CurrentPathDestinationIndex]))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Immediate path segment is blocked. Invalidating."));
+				InvalidatePathAndRequestRepath();
+				return;
+			}
+		}
+	}
 	
 	if (!IsValid(AvoidanceSubsystem) || !AvoidanceSubsystem->GetbUseAvoidance())
 	{
@@ -372,65 +385,45 @@ FVector UPathfindingComponent::GetPreferredVelocity() const
 void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float DeltaTime)
 {
 	AActor* Owner = GetOwner();
-	if (!Owner || FoundPath.IsEmpty())
+	if (!Owner || FoundPath.IsEmpty() || bIsReachDestination)
 	{
 		return;
 	}
 
-	CurrentVelocity = FinalVelocity;
-	FVector RemainingMoveDelta = FinalVelocity * DeltaTime; // Total movement delta for this frame
+	// 1. 단순하게 이동: 예측이나 계산 없이, 주어진 속도로 그냥 움직입니다.
+	const FVector MoveDelta = FinalVelocity * DeltaTime;
+	FHitResult HitResult;
+	Owner->AddActorWorldOffset(MoveDelta, true, &HitResult);
 
-	// Loop as long as there is remaining movement delta and a valid path to follow
-	while (FoundPath.IsValidIndex(CurrentPathDestinationIndex) && !RemainingMoveDelta.IsNearlyZero())
+	// 2. 물리적 충돌 처리: 실제로 부딪혔을 때만 비상 상황을 선포합니다.
+	if (HitResult.bBlockingHit)
 	{
-		const FVector CurrentLocation = Owner->GetActorLocation();
-		const FVector TargetPoint = FoundPath[CurrentPathDestinationIndex];
-		FVector VectorToTarget = TargetPoint - CurrentLocation;
-		const float DistToTargetSq = VectorToTarget.SizeSquared();
+		UE_LOG(LogTemp, Warning, TEXT("Movement physically blocked by %s. Invalidating path."), *HitResult.GetActor()->GetName());
+		InvalidatePathAndRequestRepath(); // 이 함수는 상태를 명확히 바꾸는 최종 버전이어야 합니다.
+		return;
+	}
 
-		FVector MoveThisStep;
-		bool bReachedTargetThisStep = false;
+	// 3. [핵심] 도착 판단: 이동이 끝난 '현재' 위치를 기준으로, 목표에 충분히 가까워졌는지 확인합니다.
+	//    루프를 사용하여, 한 프레임에 여러 웨이포인트를 통과하는 경우도 완벽하게 처리합니다.
+	bool bAdvanced;
+	float AcceptanceRadius = 100.0f;
+	do
+	{
+		bAdvanced = false;
+		if (FoundPath.IsValidIndex(CurrentPathDestinationIndex))
+		{
+			const float DistToTargetSq = FVector::DistSquared(Owner->GetActorLocation(), FoundPath[CurrentPathDestinationIndex]);
 
-		if (RemainingMoveDelta.SizeSquared() > DistToTargetSq)
-		{
-			// If the movement for this step overshoots the next target point
-			MoveThisStep = VectorToTarget;
-			RemainingMoveDelta -= VectorToTarget;
-			bReachedTargetThisStep = true;
-		}
-		else
-		{
-			// If not overshooting the target point
-			MoveThisStep = RemainingMoveDelta;
-			RemainingMoveDelta = FVector::ZeroVector;
-		}
-
-		// --- Core Change: Actually move the actor and check for collision results ---
-		FHitResult HitResult;
-		Owner->SetActorLocation(CurrentLocation + MoveThisStep, true, &HitResult);
-
-		if (GetMovementMode() == EPathMovementMode::Spline)
-		{
-			AdjustProgressToSpline(CurrentVelocity);
-		}
-		if (HitResult.bBlockingHit)
-		{
-			// If something was hit during movement
-			UE_LOG(LogTemp, Warning, TEXT("Movement blocked by %s. Invalidating path."), *HitResult.GetActor()->GetName());
-			
-			// The current path is no longer valid, so stop movement and request a new path.
-			InvalidatePathAndRequestRepath(); 
-			
-			// Cancel all movement for this frame and exit the function.
-			return; 
-		}
-
-		// If movement was successful and the target was reached, process the next path point.
-		if (bReachedTargetThisStep)
-		{
-			ProgressNextPoint();
+			// 현재 위치가 목표 지점의 허용 반경 안에 있는가?
+			if (DistToTargetSq < FMath::Square(AcceptanceRadius))
+			{
+				// 도착했으므로, 다음 목표 지점으로 넘어갑니다.
+				ProgressNextPoint();
+				bAdvanced = true; // 경로가 바뀌었으니, 새 목표에 대해서도 바로 도착했는지 확인하기 위해 루프를 한 번 더 돕니다.
+			}
 		}
 	}
+	while (bAdvanced && !bIsReachDestination); // 경로의 끝에 도달하면 루프를 멈춥니다.
 }
 
 void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
@@ -460,10 +453,31 @@ void UPathfindingComponent::ProgressNextPoint()
 
 	if (CurrentPathDestinationIndex >= FoundPath.Num())
 	{
-		OnDestinationReached.Broadcast();
-		bIsReachDestination = true;
-		return;
+		const FVector LastPathPoint = FoundPath.Last();
+		const float DistanceToFinalGoalSq = FVector::DistSquared(LastPathPoint, CurrentTargetLocation);
+
+		if (DistanceToFinalGoalSq <= FMath::Square(GoalUpdateThreshold))
+		{
+			UE_LOG(LogTemp, Log, TEXT("Reached the final destination. Stopping movement."));
+			OnDestinationReached.Broadcast();
+			bIsReachDestination = true;
+			FoundPath.Empty();
+			StopMovement();
+			return;
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Reached end of a partial path. Requesting next path segment immediately."));
+
+			FoundPath.Empty();
+			PreferredVelocity = FVector::ZeroVector;
+			CurrentVelocity = FVector::ZeroVector;
+			
+			RequestPathToLocation(CurrentTargetLocation);
+			return;
+		}
 	}
+
 
 	DetermineMovementModeForNextPath();
 }
@@ -566,32 +580,15 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 		}
 		return;
 	}
-	if (CurrentState == EPathfindingState::PathInvalidated)
-	{
-		UE_LOG(LogTemp, Log, TEXT("Accepting new path unconditionally because current state is Invalidated."));
-	}
-	else if (CurrentState == EPathfindingState::FollowPath)
-	{
-		const FVector NewPathEndpoint = Path.Last();
-		const float DistanceToGoalSq = FVector::DistSquared(NewPathEndpoint, CurrentTargetLocation);
-		if (DistanceToGoalSq > FMath::Square(GoalUpdateThreshold * 1.5f)) // 약간의 여유를 줍니다.
-		{
-			UE_LOG(LogTemp, Log, TEXT("Periodic repath result is too far from goal. Ignoring and keeping current path."));
-			GetWorld()->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath, RepathCooldown, false);
-			return;
-		}
-	}
+	
 	if (bSuccess && Path.Num() > 0)
 	{
-		const FVector NewPathStartLocation = Path[0];
-		const FVector CurrentActorLocation = GetOwner()->GetActorLocation();
-
-		if (IsPathObstructed(GetOwner()->GetActorLocation(), Path[0]))
-		{
-			UE_LOG(LogTemp, Warning, TEXT("New path is obstructed from actor's current location. Requesting a new path immediately."));
-			RequestPathToLocation(CurrentTargetLocation);
-			return;
-		}
+		// if (IsPathObstructed(GetOwner()->GetActorLocation(), Path[0]))
+		// {
+		// 	UE_LOG(LogTemp, Warning, TEXT("New path is obstructed from actor's current location. Requesting a new path immediately."));
+		// 	RequestPathToLocation(CurrentTargetLocation);
+		// 	return;
+		// }
 		
 		// *** Case: Path is safe ***
 		FoundPath = Path;
@@ -687,7 +684,14 @@ void UPathfindingComponent::InvalidatePathAndRequestRepath()
 	UE_LOG(LogTemp, Warning, TEXT("Path Invalidated! Stopping movement and scheduling a repath..."));
 
 	// Begin Test
-
+	FoundPath.Empty();
+	PreferredVelocity = FVector::ZeroVector;
+	CurrentVelocity = FVector::ZeroVector;
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(RepathCooldownTimer);
+	}
+	CurrentState = EPathfindingState::PathInvalidated;
 	RequestPathToLocation(CurrentTargetLocation);
 
 	// End Test

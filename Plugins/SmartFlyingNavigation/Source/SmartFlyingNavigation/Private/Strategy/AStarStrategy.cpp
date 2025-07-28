@@ -15,13 +15,24 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	const TArray<FOctreeNode>& PoolRef = *(OctreeData.StaticNodePoolPtr);
 
 	int32 StartNodeIndex = OctreeData.FindLeafNodeAt(InRequest.StartLocation);
-
-	bool bIsStartNodeInvalid = (StartNodeIndex == -1) || (PoolRef[StartNodeIndex].State != EOctreeNodeState::Empty);
-
+	FVector EffectiveStartLocation = InRequest.StartLocation;
+	
+	bool bIsStartNodeInvalid = false;
+	if (StartNodeIndex == -1 || !PoolRef.IsValidIndex(StartNodeIndex) || PoolRef[StartNodeIndex].State != EOctreeNodeState::Empty)
+	{
+		bIsStartNodeInvalid = true;
+	}
+	else
+	{
+		FBox StartQueryBox = AStarStrategyUtils::MakeAgentQueryBox(InRequest.StartLocation, InRequest.AgentRadius);
+		if (OctreeData.IsRegionDynamicallyBlocked(StartQueryBox))
+		{
+			bIsStartNodeInvalid = true;
+		}
+	}
 
 	if (bIsStartNodeInvalid)
 	{
-		// If invalid, search for the nearest valid leaf node for the agent.
 		UE_LOG(LogTemp, Warning, TEXT("AStarStrategy: Start location is inside a blocked voxel. Searching for a nearby valid start node."));
 		const int32 NewStartNodeIndex = OctreeData.FindNearestValidLeafForAgent(
 			InRequest.StartLocation,
@@ -31,16 +42,14 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 
 		if (NewStartNodeIndex == -1)
 		{
-			// If even the nearby search fails, then pathfinding is truly impossible from this area.
 			UE_LOG(LogTemp, Error, TEXT("AStarStrategy: Could not find any valid start node near the agent. Pathfinding failed."));
 			return false;
 		}
 		
-		// We found a valid nearby node, use it as our starting point.
 		StartNodeIndex = NewStartNodeIndex;
+		
+		EffectiveStartLocation = PoolRef[StartNodeIndex].Bounds.GetCenter();
 	}
-
-	
 
 	
 	int32 GoalNodeIndex = OctreeData.FindLeafNodeAt(InRequest.EndLocation);
@@ -68,7 +77,7 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	auto& NodePool = *static_cast<TNodeMemoryPool<FAstarPathNode>*>(BasePool);
 
 	FAstarPathfinder Pathfinder(OctreeData, StartNodeIndex, GoalNodeIndex,
-	                            InRequest.StartLocation, InRequest.EndLocation,
+	                            EffectiveStartLocation, InRequest.EndLocation,
 	                            InRequest.AgentRadius, NodePool);
 
 	const EPathfindingResult Result = Pathfinder.FindPath(OutPath);
@@ -315,10 +324,9 @@ bool FAstarPathfinder::HasClearPath(const FVector& Start, const FVector& End) co
 {
 	if (OctreeData.CheckForSolidNodesInCapsule(Start, End, AgentRadius))
 	{
-		return false; // 고정 장애물과 충돌
+		return false; 
 	}
 
-	// 2. 동적 장애물 검사는 그대로 수행
 	if (OctreeData.IsPathDynamicallyBlocked_Sweep(Start, End, AgentRadius))
 	{
 		return false;
