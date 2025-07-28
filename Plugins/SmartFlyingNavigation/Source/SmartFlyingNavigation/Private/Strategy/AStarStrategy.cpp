@@ -288,9 +288,7 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 	{
 		RawPath.Add(ActualGoalLocation);
 	}
-	OutPath = RawPath;
-	return;
-
+	
 	// --- Step 4: Perform the "String Pulling" algorithm ---
 	// Now, perform the smoothing on the safely-modified path.
 	OutPath.Empty();
