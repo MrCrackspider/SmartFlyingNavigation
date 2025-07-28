@@ -184,9 +184,6 @@ protected:
 	void PeriodicRepath();
 	
 	UFUNCTION()
-	void HandleVoxelPathResult(const TArray<FIntVector>& PathIndices, bool bSuccess);
-	
-	UFUNCTION()
 	void HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess);
 
 	void PartialSplinePointUpdate(int32 StartIndex);

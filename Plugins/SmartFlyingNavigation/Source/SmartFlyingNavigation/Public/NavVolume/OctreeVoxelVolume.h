@@ -363,7 +363,7 @@ public:
 
 	// 데이터가 로드되어 길찾기에 사용될 준비가 되었는지 확인하는 함수
 	FORCEINLINE bool IsReadyForNavigation() const { return LoadState == EVolumeLoadState::Loaded; }
-
+	FORCEINLINE EVolumeLoadState GetLoadState() const { return LoadState; }
 	// 볼륨의 월드 바운드를 가져오는 함수
 	FBox GetVolumeBounds() const;
 	// End Test

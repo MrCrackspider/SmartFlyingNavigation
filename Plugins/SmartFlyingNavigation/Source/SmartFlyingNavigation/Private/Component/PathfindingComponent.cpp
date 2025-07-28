@@ -15,7 +15,6 @@
 #include "Engine/Engine.h"
 #include "Strategy/AStarStrategy.h"
 #include "Components/WorldPartitionStreamingSourceComponent.h"
-//#include "Subsystem/OctreeNavSubsystem.h"
 #include "Utility/Parallel/PathfindingRequest.h"
 
 UPathfindingComponent::UPathfindingComponent()
@@ -169,57 +168,57 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	const FVector StartLocation = GetOwner()->GetActorLocation();
 	AOctreeVoxelVolume* StartVolume = NavSubsystem->GetVolumeChunkAt(StartLocation);
 
-	// 시작 볼륨이 없는 경우 (에이전트가 내비게이션 영역 밖에 있음)
+	// --- 1. 시작 볼륨 유효성 검사 ---
 	if (!StartVolume)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Pathfinding request failed: Agent is not inside any navigation volume."));
 		return false;
 	}
-	// Begin Test?
-	if (!IsValid(PathSplinePtr))
-	{
-		return false;
-	}
 
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(RepathCooldownTimer);
-	}
-	// End Test?
-	
-	// 시작 볼륨이 아직 로드되지 않은 경우
+	// --- 2. 시작 볼륨이 아직 준비되지 않은 경우, 요청을 보류합니다. ---
 	if (!StartVolume->IsReadyForNavigation())
 	{
 		UE_LOG(LogTemp, Log, TEXT("Start volume '%s' is not ready. Path request is pending."), *StartVolume->GetName());
-
-		// 요청 정보를 저장하고 보류 상태로 전환
 		bHasPendingPathRequest = true;
 		PendingTargetLocation = TargetLocation;
-
-		// 이 볼륨이 준비되었을 때만 호출될 델리게이트에 한 번만 바인딩
-		// 이전에 바인딩된 것이 있다면 해제하고 새로 바인딩하여 중복 호출을 방지
 		NavSubsystem->OnVolumeRegistered.RemoveDynamic(this, &UPathfindingComponent::OnVolumeBecameReadyForPendingRequest);
 		NavSubsystem->OnVolumeRegistered.AddDynamic(this, &UPathfindingComponent::OnVolumeBecameReadyForPendingRequest);
-
-		return true;
+		return true; // 요청 접수됨
 	}
 
-	// 시작 볼륨이 이미 준비된 경우
-	UE_LOG(LogTemp, Log, TEXT("Start volume is ready. Requesting hierarchical path to location: %s"), *TargetLocation.ToString());
+	// --- 3. 로컬/계층 길찾기 분기 ---
+	bHasPendingPathRequest = false; // 보류 중인 요청이 있었다면 해제
+	CurrentTargetLocation = TargetLocation;
 
-	// 보류 중인 요청이 있었다면 초기화
-	bHasPendingPathRequest = false;
+	AOctreeVoxelVolume* EndVolume = NavSubsystem->GetVolumeChunkAt(TargetLocation);
 
-	FHierarchicalPathRequest HRequest;
-	HRequest.RequestingComponent = this;
-	HRequest.StartLocation = StartLocation;
-	HRequest.EndLocation = TargetLocation;
-	HRequest.AgentRadius = this->AgentRadius;
-	HRequest.Strategy = PathfindingStrategy;
-	HRequest.OnHierarchicalPathComplete.BindDynamic(this, &UPathfindingComponent::HandleWorldPathResult);
+	// --- CASE A: 명백한 로컬 길찾기 ---
+	// 시작 볼륨과 끝 볼륨이 동일하고, 유효하며, 준비된 상태입니다.
+	if (EndVolume && StartVolume == EndVolume)
+	{
+		UE_LOG(LogTemp, Log, TEXT("Requesting LOCAL path within volume '%s'."), *StartVolume->GetName());
+		// 단일 볼륨 내 길찾기는 더 간단한 FPathfindingRequest를 직접 사용합니다.
+		// 이 경우 HandleWorldPathResult가 아닌 다른 콜백을 사용하거나, HandleWorldPathResult를 수정해야 합니다.
+		// 여기서는 기존 구조를 최대한 활용하기 위해 RequestLocalPath_Internal을 사용합니다.
+		return RequestLocalPath_Internal(StartLocation, TargetLocation, StartVolume);
+	}
+	// --- CASE B: 계층적 길찾기 ---
+	// 끝 볼륨이 다르거나, 스트리밍되지 않아 null인 경우입니다.
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("Requesting HIERARCHICAL path from '%s' to an external or unloaded volume."), *StartVolume->GetName());
 
-	CurrentRequestID = PathfindingSubsystem->RequestHierarchicalPath(this, HRequest);
-	return CurrentRequestID != -1;
+		FHierarchicalPathRequest HRequest;
+		HRequest.RequestingComponent = this;
+		HRequest.StartLocation = StartLocation;
+		HRequest.EndLocation = TargetLocation;
+		HRequest.AgentRadius = this->AgentRadius;
+		HRequest.Strategy = PathfindingStrategy;
+		HRequest.OnHierarchicalPathComplete.BindDynamic(this, &UPathfindingComponent::HandleWorldPathResult);
+
+		CurrentRequestID = PathfindingSubsystem->RequestHierarchicalPath(this, HRequest);
+		return CurrentRequestID != -1;
+	}
 }
 
 bool UPathfindingComponent::RequestLocalPath_Internal(const FVector& Start, const FVector& End, AOctreeVoxelVolume* Volume)
@@ -528,24 +527,6 @@ void UPathfindingComponent::UpdateSteering(float DeltaTime)
 	UpdatePreferredVelocity(DeltaTime);
 }
 
-// ????
-void UPathfindingComponent::HandleVoxelPathResult(const TArray<FIntVector>& PathIndices, bool bSuccess)
-{
-	if (!bSuccess || PathIndices.Num() == 0)
-	{
-		CurrentState = EPathfindingState::Idle;
-	}
-
-	if (bPeriodicRepath && !bIsReachDestination)
-	{
-		if (UWorld* World = GetWorld())
-		{
-			//Recursive Call PeriodicRepath
-			World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath,
-			                                  RepathCooldown, false);
-		}
-	}
-}
 
 void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 {
@@ -594,11 +575,17 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 
 		// *** Case: Path is safe ***
 		FoundPath = Path;
-		
-		// To prevent "rushing" to the start, modify the path's starting point to the actor's current location.
-		FoundPath[0] = CurrentActorLocation;
-		
-		// Reset state variables.
+		if (FVector::DistSquared(GetOwner()->GetActorLocation(), FoundPath[0]) < FMath::Square(10.0f))
+		{
+			CurrentPathDestinationIndex = 0;
+		}
+		else
+		{
+			// 그렇지 않다면, 기존 로직대로 현재 위치에서 시작하도록 경로를 수정합니다.
+			FoundPath.Insert(GetOwner()->GetActorLocation(), 0);
+			CurrentPathDestinationIndex = 1;
+		}
+
 		bIsReachDestination = false;
 		CurrentState = EPathfindingState::FollowPath;
 		CurrentPathDestinationIndex = 1; // Set to start following from the second point of the path (index 1).
@@ -829,6 +816,7 @@ void UPathfindingComponent::UpdateSplinePreferredVelocity(float DeltaTime)
 
 	PreferredVelocity = SplineDirection * MovementSpeed;
 }
+
 bool UPathfindingComponent::IsSplinePathSafe() const
 {
 	AOctreeVoxelVolume* VoxelVolume = Cast<AOctreeVoxelVolume>(GetCurrentVolume());
