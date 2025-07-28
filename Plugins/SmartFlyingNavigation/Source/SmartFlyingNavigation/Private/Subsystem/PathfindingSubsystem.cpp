@@ -39,12 +39,10 @@ static void ReconstructDataAssetPath(
 
 void FPathfindingAsyncTasks::DoThreadedWork()
 {
-	// 서브시스템이 Deinitialize되면 IsValid()가 false를 반환하여 스레드가 안전하게 중단됩니다.
 	if (!OwnerSubsystem.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Pathfinding Task [%d] is aborting because the subsystem is no longer valid."), Request.RequestID);
-		// 메모리 풀 반환 로직은 Abandon()에서 처리되므로 여기서 직접 호출할 필요가 없을 수 있지만,
-		// 안전을 위해 유지하거나 Abandon()으로 통일할 수 있습니다.
+	
 		if (Request.MemoryPool)
 		{
 			OwnerSubsystem->ReturnPool(Request.MemoryPool);
@@ -237,24 +235,19 @@ int32 UPathfindingSubsystem::RequestHierarchicalPath(const UObject* WorldContext
 	}
 
 	Request.RequestID = NextRequestID.Increment();
-
-	// 태스크 객체를 생성
+	
 	FHierarchicalPathfindingTask NewTask(Request);
-
-	// 데이터 기반의 상위 레벨 경로를 탐색
+	
 	if (!FindHighLevelPath(WorldContextObject, Request, NewTask.HighLevelDataAssetPath))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Hierarchical Pathfinding Failed for RequestID %d: Could not find a high-level path of data assets."), Request.RequestID);
 		Request.OnHierarchicalPathComplete.ExecuteIfBound({}, false);
 		return -1;
 	}
-
-	// 태스크를 활성 목록에 추가하고, 첫 번째 세그먼트 처리를 위해 상태를 변경
-	// 첫 번째 볼륨은 Agent가 이미 그 안에 있으므로 항상 로드되어 있다고 가정
+	
 	NewTask.State = EHierarchicalTaskState::ReadyToFindLocalPath;
 	ActiveHierarchicalTasks.Add(Request.RequestID, NewTask);
-
-	// 4. 상태 머신의 첫 번째 턴을 시작합니다.
+	
 	ProcessNextHierarchicalSegment(WorldContextObject, ActiveHierarchicalTasks.FindChecked(Request.RequestID));
 
 	return Request.RequestID;
@@ -670,7 +663,6 @@ void UPathfindingSubsystem::ProcessNextHierarchicalSegment(const UObject* WorldC
 
 	if (!Task.HighLevelDataAssetPath.IsValidIndex(Task.CurrentSegmentIndex))
 	{
-		// OnHierarchicalSegmentCompleted에서 모든 세그먼트가 완료되었을 때 처리
 		Task.State = EHierarchicalTaskState::Complete;
 		return;
 	}
@@ -685,8 +677,7 @@ void UPathfindingSubsystem::ProcessNextHierarchicalSegment(const UObject* WorldC
 		if (TargetVolume && TargetVolume->IsReadyForNavigation())
 		{
 			UE_LOG(LogTemp, Log, TEXT("Segment %d for RequestID %d: Volume is ready. Finding local path in '%s'."), Task.CurrentSegmentIndex, Task.OriginalRequest.RequestID, *TargetVolume->GetName());
-
-			// 이 볼륨을 로드하기 위해 생성했을 수 있는 프로브는 이제 임무를 완수했으므로 파괴
+			
 			DestroyStreamingProbeForRequest(WorldContextObject, Task.OriginalRequest.RequestID);
 
 			FVector StartLocation, EndLocation;
@@ -779,7 +770,6 @@ void UPathfindingSubsystem::ProcessNextHierarchicalSegment(const UObject* WorldC
 				ActiveHierarchicalTasks.Remove(Task.OriginalRequest.RequestID);
 			}
 		}
-		// 다음 세그먼트의 볼륨이 로드되지 않은 경우, 프로브 활성화
 		else
 		{
 			UE_LOG(LogTemp, Log, TEXT("Segment %d for RequestID %d: Volume with data '%s' is not loaded. Activating streaming probe."), Task.CurrentSegmentIndex, Task.OriginalRequest.RequestID, *CurrentDataAsset.ToString());
