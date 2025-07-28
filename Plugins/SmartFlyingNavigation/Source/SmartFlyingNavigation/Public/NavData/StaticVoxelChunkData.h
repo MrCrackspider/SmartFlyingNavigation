@@ -26,6 +26,19 @@ struct F128BitChunk
 		Words[0] = 0;
 		Words[1] = 0;
 	}
+	bool GetBit(int32 BitIndex) const
+	{
+		if (BitIndex < 0 || BitIndex >= 128)
+		{
+			return false;
+		}
+
+		const int32 WordIndex = BitIndex / 64;
+
+		const int32 BitInWord = BitIndex % 64;
+
+		return ((Words[WordIndex] >> BitInWord) & 1) != 0;
+	}
 };
 
 UCLASS()

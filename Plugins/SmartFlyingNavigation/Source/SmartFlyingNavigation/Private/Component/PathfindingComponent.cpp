@@ -93,17 +93,16 @@ void UPathfindingComponent::BeginPlay()
 }
 
 void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
-                                          FActorComponentTickFunction* ThisTickFunction)
+										  FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
+	
 	if (!IsValid(AvoidanceSubsystem) || !AvoidanceSubsystem->GetbUseAvoidance())
 	{
 		UpdateSteering(DeltaTime);
 		ApplyMovement(PreferredVelocity, DeltaTime);
 	}
 	
-	// Called to update pathfinding in response to a scale change at runtime.
 	UpdateAgentRadiusFromScale();
 }
 
@@ -412,7 +411,7 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 
 		if (GetMovementMode() == EPathMovementMode::Spline)
 		{
-			AdjustProgressToSpline(CurrentVelocity); // 실제 적용된 속도(CurrentVelocity)를 기준으로 진행 상황을 기록합니다.
+			AdjustProgressToSpline(CurrentVelocity);
 		}
 		if (HitResult.bBlockingHit)
 		{
@@ -558,21 +557,42 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 		return;
 	}
 
+	if (!bSuccess || Path.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed or path is empty."));
+		if (bPeriodicRepath)
+		{
+			GetWorld()->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath, RepathCooldown, false);
+		}
+		return;
+	}
+	if (CurrentState == EPathfindingState::PathInvalidated)
+	{
+		UE_LOG(LogTemp, Log, TEXT("Accepting new path unconditionally because current state is Invalidated."));
+	}
+	else if (CurrentState == EPathfindingState::FollowPath)
+	{
+		const FVector NewPathEndpoint = Path.Last();
+		const float DistanceToGoalSq = FVector::DistSquared(NewPathEndpoint, CurrentTargetLocation);
+		if (DistanceToGoalSq > FMath::Square(GoalUpdateThreshold * 1.5f)) // 약간의 여유를 줍니다.
+		{
+			UE_LOG(LogTemp, Log, TEXT("Periodic repath result is too far from goal. Ignoring and keeping current path."));
+			GetWorld()->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath, RepathCooldown, false);
+			return;
+		}
+	}
 	if (bSuccess && Path.Num() > 0)
 	{
-		const FVector CurrentActorLocation = GetOwner()->GetActorLocation();
 		const FVector NewPathStartLocation = Path[0];
+		const FVector CurrentActorLocation = GetOwner()->GetActorLocation();
 
-		// Use the helper function to check if the path from the current location to the new path's start is clear.
-		if (IsPathObstructed(CurrentActorLocation, NewPathStartLocation))
+		if (IsPathObstructed(GetOwner()->GetActorLocation(), Path[0]))
 		{
-			// *** Case: Path is not safe ***
-			// The received path is dangerous, so discard it and immediately request a new one.
 			UE_LOG(LogTemp, Warning, TEXT("New path is obstructed from actor's current location. Requesting a new path immediately."));
 			RequestPathToLocation(CurrentTargetLocation);
-			return; // Exit the function
+			return;
 		}
-
+		
 		// *** Case: Path is safe ***
 		FoundPath = Path;
 		if (FVector::DistSquared(GetOwner()->GetActorLocation(), FoundPath[0]) < FMath::Square(10.0f))
@@ -581,7 +601,6 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 		}
 		else
 		{
-			// 그렇지 않다면, 기존 로직대로 현재 위치에서 시작하도록 경로를 수정합니다.
 			FoundPath.Insert(GetOwner()->GetActorLocation(), 0);
 			CurrentPathDestinationIndex = 1;
 		}
@@ -679,42 +698,47 @@ bool UPathfindingComponent::IsPathObstructed(const FVector& Start, const FVector
 	AOctreeVoxelVolume* OctreeVolume = Cast<AOctreeVoxelVolume>(GetCurrentVolume());
 	if (!OctreeVolume)
 	{
-		// If there's no volume, treat the path as obstructed for safety.
-		UE_LOG(LogTemp, Error, TEXT("IsPathObstructed: TargetVolume is not a valid AOctreeVoxelVolume."));
 		return true; 
 	}
 
 	const FVector PathVector = End - Start;
 	const float TotalDistance = PathVector.Size();
 	
-	// If the path is very short, just check the endpoint.
-	if (TotalDistance < KINDA_SMALL_NUMBER)
+	const float StepSize = AgentRadius * 0.5f; 
+
+	if (TotalDistance < StepSize)
 	{
 		return OctreeVolume->IsLocationInBlockedVoxel(End);
 	}
 
 	const FVector Direction = PathVector.GetSafeNormal();
-	// The step size should be smaller than the agent's radius to avoid missing small obstacles.
-	const float StepSize = AgentRadius * 0.8f; 
-
-	// Check at intervals of StepSize from the start to the end.
+	
 	for (float Distance = 0; Distance < TotalDistance; Distance += StepSize)
 	{
-		const FVector CurrentPosition = Start + Direction * Distance;
-		if (OctreeVolume->IsLocationInBlockedVoxel(CurrentPosition))
+		const FVector CenterPosition = Start + Direction * Distance;
+
+		const FVector TestOffsets[] = {
+			FVector::ZeroVector,
+			FVector(0, AgentRadius, 0),  // 좌
+			FVector(0, -AgentRadius, 0), // 우
+			FVector(0, 0, AgentRadius),  // 위
+			FVector(0, 0, -AgentRadius)
+		};
+
+		for (const FVector& Offset : TestOffsets)
 		{
-			// Obstacle found mid-path!
-			return true;
+			if (OctreeVolume->IsLocationInBlockedVoxel(CenterPosition + Offset))
+			{
+				return true;
+			}
 		}
 	}
 
-	// After the loop, perform one final check at the exact endpoint of the path.
 	if (OctreeVolume->IsLocationInBlockedVoxel(End))
 	{
 		return true;
 	}
 
-	// If all checks pass, the path is clear.
 	return false;
 }
 
@@ -725,10 +749,9 @@ void UPathfindingComponent::DrawDebugPath()
 	{
 		return;
 	}
-
-
+	
 	const float Duration = 1.0f;
-	const float LineThickness = 40.0f;
+	const float LineThickness = 5.0f;
 	const float BoxThickness = AgentRadius * 0.7;
 	const FVector BoxHalfSize(AgentRadius *0.05);
 

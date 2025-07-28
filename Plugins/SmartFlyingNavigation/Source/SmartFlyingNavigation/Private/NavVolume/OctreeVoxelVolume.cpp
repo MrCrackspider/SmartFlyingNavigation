@@ -65,7 +65,7 @@ void AOctreeVoxelVolume::BeginPlay()
 	RequestAsyncLoad();
 
 	InitializeDynamicLayer();
-	GetWorldTimerManager().SetTimer(DynamicObstacleTimer, this, &AOctreeVoxelVolume::UpdateDynamicObstacles, 0.1f, true, 0.1f);
+	GetWorldTimerManager().SetTimer(DynamicObstacleTimer, this, &AOctreeVoxelVolume::UpdateDynamicObstacles, 0.01f, true, 0.1f);
 }
 
 void AOctreeVoxelVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -200,47 +200,63 @@ bool AOctreeVoxelVolume::IsLocationInBlockedVoxel(const FVector& WorldLocation) 
 	}
 
 	// --- 2. 동적 장애물 레이어 확인 (빠른 비트마스크 검사) ---
-	const FIntVector VoxelIndex = WorldToVoxelIndex(WorldLocation);
-	if (!IsIndexValid(VoxelIndex))
+	// 이 로직은 IsLocationBlockedByDynamicObstacle 함수와 동일하지만, 여기서 직접 처리하는 것이 더 효율적입니다.
+	const FVector LocalPos = WorldLocation - GetVolumeBounds().Min;
+	const int32 VoxelIndexX = FMath::FloorToInt(LocalPos.X / VoxelExtent);
+	const int32 VoxelIndexY = FMath::FloorToInt(LocalPos.Y / VoxelExtent);
+	const int32 VoxelIndexZ = FMath::FloorToInt(LocalPos.Z / VoxelExtent);
+	
+	if (IsIndexValid({VoxelIndexX, VoxelIndexY, VoxelIndexZ}))
 	{
-		return true; // 변환된 인덱스가 유효하지 않음
-	}
+		const int64 LinearIndex = (static_cast<int64>(VoxelIndexZ) * MapSize.X * MapSize.Y) + 
+								  (static_cast<int64>(VoxelIndexY) * MapSize.X) + VoxelIndexX;
+		const int32 ChunkIndex = LinearIndex / 128;
+		const int32 BitIndex = LinearIndex % 128;
 
-	const int32 FlatIndex = VoxelIndex.Z * (MapSize.X * MapSize.Y) + VoxelIndex.Y * MapSize.X + VoxelIndex.X;
-	const int32 ChunkIndex = FlatIndex / 128;
-	const int32 BitIndex = FlatIndex % 128;
-
-	if (DynamicObstacleBitmask.IsValidIndex(ChunkIndex))
-	{
-		const F128BitChunk& TargetChunk = DynamicObstacleBitmask[ChunkIndex];
-		const int32 WordIndex = BitIndex / 64;
-		const uint64 BitMask = 1ULL << (BitIndex % 64);
-
-		if ((TargetChunk.Words[WordIndex] & BitMask) != 0)
+		if (DynamicObstacleBitmask.IsValidIndex(ChunkIndex) && DynamicObstacleBitmask[ChunkIndex].GetBit(BitIndex))
 		{
 			// 동적 장애물에 의해 막힘
 			return true;
 		}
 	}
 
-	// --- 3. 정적 장애물 레이어 확인 (옥트리 순회) ---
-	const int32 LeafNodeIndex = FindLeafNodeAt(WorldLocation);
-	
-	if (StaticNodePoolPtr && StaticNodePoolPtr->IsValidIndex(LeafNodeIndex))
+	// --- 3. 정적 장애물 레이어 확인 (수정된 옥트리 순회) ---
+	if (!StaticNodePoolPtr || RootNodeIndex == -1)
 	{
-		// 찾은 리프 노드의 상태가 'Solid'이면 막힌 것입니다.
-		if ((*StaticNodePoolPtr)[LeafNodeIndex].State == EOctreeNodeState::Solid)
+		// 정적 데이터가 없으면 동적 장애물 결과만 신뢰합니다.
+		return false;
+	}
+
+	int32 CurrentNodeIndex = RootNodeIndex;
+	int32 CurrentDepth = 0;
+
+	while (StaticNodePoolPtr->IsValidIndex(CurrentNodeIndex))
+	{
+		const FOctreeNode& Node = (*StaticNodePoolPtr)[CurrentNodeIndex];
+
+		// 최종 판단: 리프 노드에 도달했거나, 최대 깊이에 도달했을 때
+		if (Node.State != EOctreeNodeState::Mixed || CurrentDepth >= GetMaxOctreeDepth())
 		{
-			return true;
+			// 이 노드가 Solid 상태일 때만 막힌 것입니다. Empty 상태는 안전합니다.
+			return Node.State == EOctreeNodeState::Solid;
+		}
+
+		// 분기: Mixed 노드이므로 자식으로 내려가야 합니다.
+		const int32 ChildOctant = GetOctantContainingVoxel(Node.Bounds, WorldLocation);
+		CurrentNodeIndex = Node.ChildrenIndices[ChildOctant];
+		CurrentDepth++;
+		
+		// 만약 자식 인덱스가 -1이라면, 이 분기는 비어있어서 최적화된(Collapse) 것입니다.
+		// 따라서 이 위치는 막히지 않았습니다.
+		if (CurrentNodeIndex == -1)
+		{
+			return false;
 		}
 	}
-	else
-	{
-		// 유효한 리프 노드를 찾지 못했다면, 경로 계산에 문제가 생길 수 있으므로 막혔다고 처리
-		return true;
-	}
-	
-	// --- 4. 모든 검사 통과: 이 위치는 안전함 ---
+
+	// 루프가 비정상적으로 종료된 경우 (예: WorldLocation이 볼륨 밖에 있는 경우 등)
+	// 안전을 위해 막혔다고 처리할 수 있지만, 위의 사전 검사로 대부분 걸러집니다.
+	// 여기까지 왔다는 것은 해당 위치가 비어있다는 것을 의미합니다.
 	return false;
 }
 //~======================================================================

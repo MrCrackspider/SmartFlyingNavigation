@@ -65,17 +65,14 @@ private:
 
 	FIntVector WorldToVoxelIndex(const FVector& WorldPos) const
 	{
-		if (MapSize.IsZero() || !VolumeBounds.IsValid) return FIntVector::ZeroValue;
+		if (VoxelSize <= 0.f || !VolumeBounds.IsValid) return FIntVector::ZeroValue;
 
 		const FVector LocalPos = WorldPos - VolumeBounds.Min;
-		const FVector VoxelDimensions = VolumeBounds.GetSize() / FVector(MapSize);
-
-		if (VoxelDimensions.X == 0 || VoxelDimensions.Y == 0 || VoxelDimensions.Z == 0) return FIntVector::ZeroValue;
-
+		
 		return FIntVector(
-			FMath::FloorToInt(LocalPos.X / VoxelDimensions.X),
-			FMath::FloorToInt(LocalPos.Y / VoxelDimensions.Y),
-			FMath::FloorToInt(LocalPos.Z / VoxelDimensions.Z)
+			FMath::FloorToInt(LocalPos.X / VoxelSize),
+			FMath::FloorToInt(LocalPos.Y / VoxelSize),
+			FMath::FloorToInt(LocalPos.Z / VoxelSize)
 		);
 	}
 
@@ -334,21 +331,11 @@ public:
 		TRACE_CPUPROFILER_EVENT_SCOPE(Octree_IsRegionDynamicallyBlocked);
 
 		const FIntVector MinCorner = WorldToVoxelIndex(QueryBox.Min);
-
-		const FVector LocalMax = QueryBox.Max - VolumeBounds.Min;
-		const FVector VoxelDimensions = VolumeBounds.GetSize() / FVector(MapSize);
-
-		if (VoxelDimensions.X == 0 || VoxelDimensions.Y == 0 || VoxelDimensions.Z == 0) return false;
-
-		const FIntVector MaxCorner(
-			FMath::CeilToInt(LocalMax.X / VoxelDimensions.X),
-			FMath::CeilToInt(LocalMax.Y / VoxelDimensions.Y),
-			FMath::CeilToInt(LocalMax.Z / VoxelDimensions.Z)
-		);
+		const FIntVector MaxCorner = WorldToVoxelIndex(QueryBox.Max);
 
 		const FIntVector ClampedMin(FMath::Max(MinCorner.X, 0), FMath::Max(MinCorner.Y, 0), FMath::Max(MinCorner.Z, 0));
 		const FIntVector ClampedMax(FMath::Min(MaxCorner.X, MapSize.X - 1), FMath::Min(MaxCorner.Y, MapSize.Y - 1),
-		                            FMath::Min(MaxCorner.Z, MapSize.Z - 1));
+									FMath::Min(MaxCorner.Z, MapSize.Z - 1));
 
 		if (ClampedMin.X > ClampedMax.X || ClampedMin.Y > ClampedMax.Y || ClampedMin.Z > ClampedMax.Z) return false;
 		if (DynamicObstacleBitmask.Num() == 0) return false;

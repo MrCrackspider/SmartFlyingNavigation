@@ -51,18 +51,7 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 
 	if (bIsGoalNodeInvalid)
 	{
-		const int32 NewGoalNodeIndex = OctreeData.FindNearestValidLeafForAgent(
-			InRequest.EndLocation,
-			InRequest.AgentRadius,
-			NearbyGoalSearchRadius,
-			NearbyGoalSearchIterations);
-
-		if (NewGoalNodeIndex == -1)
-		{
-			return false;
-		}
-
-		GoalNodeIndex = NewGoalNodeIndex;
+		UE_LOG(LogTemp, Warning, TEXT("AStarStrategy: Goal location is inside a blocked voxel. A* will attempt to find the closest possible path."));
 	}
 
 	FBox GoalQueryBox = AStarStrategyUtils::MakeAgentQueryBox(InRequest.EndLocation, InRequest.AgentRadius);
@@ -338,26 +327,44 @@ bool FAstarPathfinder::HasClearPath(const FVector& Start, const FVector& End) co
 	return true;
 }
 
-
 void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPathNode*>& OutSuccessors)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_IdentifySuccessors_Internal);
+	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_IdentifySuccessors_PortalCentric);
 	OutSuccessors.Empty();
 
-	TArray<int32> AdjacentNodeIndices;
-	OctreeData.FindAdjacentEmptyLeaves(Node->NodeIndex, AdjacentNodeIndices);
 	const TArray<FOctreeNode>& PoolRef = *(OctreeData.StaticNodePoolPtr);
-	for (const int32 NeighborIndex : AdjacentNodeIndices)
+	if (!PoolRef.IsValidIndex(Node->NodeIndex))
 	{
-		const auto& NeighborNode = PoolRef[NeighborIndex];
-		const FBox NeighborBounds = NeighborNode.Bounds;
-		FVector NeighborCenter = NeighborBounds.GetCenter();
+		return;
+	}
 
-		FAstarPathNode* Successor = MemoryPool.NewNode();
-		Successor->NodeIndex = NeighborIndex;
-		Successor->WorldPosition = NeighborCenter;
-		OutSuccessors.Add(Successor);
-		
+	const FOctreeNode& CurrentNode = PoolRef[Node->NodeIndex];
+
+	for (int32 DirIndex = 0; DirIndex < static_cast<int32>(ENeighborDirection::MAX); ++DirIndex)
+	{
+		const int32 NeighborNodeIndex = CurrentNode.Neighbors[DirIndex];
+
+		if (PoolRef.IsValidIndex(NeighborNodeIndex) && PoolRef[NeighborNodeIndex].State == EOctreeNodeState::Empty)
+		{
+			const FOctreeNode& NeighborNode = PoolRef[NeighborNodeIndex];
+			
+			FVector PortalCenter;
+			const FBox& CurrentBounds = CurrentNode.Bounds;
+			const FBox& NeighborBounds = NeighborNode.Bounds;
+
+			const FBox PortalBounds = CurrentBounds.Overlap(NeighborBounds);
+			PortalCenter = PortalBounds.GetCenter();
+
+			if (HasClearPath(Node->WorldPosition, PortalCenter))
+			{
+				FAstarPathNode* Successor = MemoryPool.NewNode();
+				Successor->NodeIndex = NeighborNodeIndex;
+				
+				Successor->WorldPosition = PortalCenter;
+				
+				OutSuccessors.Add(Successor);
+			}
+		}
 	}
 }
 
