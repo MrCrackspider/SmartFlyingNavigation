@@ -37,7 +37,7 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UAvoidanceSubsystem::PostInitialize()
 {
-    //Super::PostInitialize();
+    Super::PostInitialize();
 }
 
 void UAvoidanceSubsystem::Deinitialize()
@@ -69,17 +69,14 @@ void UAvoidanceSubsystem::UnregisterAgent(UPathfindingComponent* AgentComponent)
     }
 }
 
-TStatId UAvoidanceSubsystem::GetStatId() const
-{
-    RETURN_QUICK_DECLARE_CYCLE_STAT(UAvoidanceSubsystem, STATGROUP_Tickables);
-}
-
 void UAvoidanceSubsystem::Tick(float DeltaTime)
 {
-    //Super::Tick(DeltaTime);
+    Super::Tick(DeltaTime);
     SCOPE_CYCLE_COUNTER(STAT_AvoidanceSubsystem_Tick);
-    bUseAvoidance = false;
-    if (!bUseAvoidance) return;
+    if (!bUseAvoidance)
+    {
+        return;
+    }
     
     if (bIsTaskRunning && AsyncTask && AsyncTask->IsWorkDone())
     {
@@ -214,6 +211,11 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
         AsyncTask->StartBackgroundTask();
         bIsTaskRunning = true;
     }
+}
+
+TStatId UAvoidanceSubsystem::GetStatId() const
+{
+    RETURN_QUICK_DECLARE_CYCLE_STAT(UAvoidanceSubsystem, STATGROUP_Tickables);
 }
 
 void UAvoidanceSubsystem::RunAvoidanceCalculation(

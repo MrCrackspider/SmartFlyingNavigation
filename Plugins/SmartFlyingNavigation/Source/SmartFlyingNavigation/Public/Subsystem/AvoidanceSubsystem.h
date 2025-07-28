@@ -31,13 +31,13 @@ class UPathfindingComponent;
 class FParallelAvoidanceTask;
 
 UCLASS(Config=Game) 
-class SMARTFLYINGNAVIGATION_API UAvoidanceSubsystem :  public UEngineSubsystem, public FTickableGameObject
+class SMARTFLYINGNAVIGATION_API UAvoidanceSubsystem :  public UTickableWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void PostInitialize();
+    virtual void PostInitialize() override;
     virtual void Deinitialize() override;
     virtual void Tick(float DeltaTime) override;
     virtual TStatId GetStatId() const override;
@@ -47,7 +47,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Avoidance Subsystem")
     void UnregisterAgent(UPathfindingComponent* AgentComponent);
 
-    bool GetbUseAvoidance() {return bUseAvoidance;}
+    bool GetbUseAvoidance() const { return bUseAvoidance; }
     void SetbUseAvoidance(bool IsUse) {bUseAvoidance = IsUse;};
     
     static void RunAvoidanceCalculation(

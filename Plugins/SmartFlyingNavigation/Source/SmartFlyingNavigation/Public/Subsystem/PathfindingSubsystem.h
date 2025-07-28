@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/EngineSubsystem.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "Tickable.h"
 #include "Async/AsyncWork.h"
 #include "Containers/Queue.h"
@@ -11,7 +11,54 @@
 #include "HAL/CriticalSection.h"
 #include "GameFramework/Actor.h"
 #include "Utility/Parallel/PathfindingRequest.h"
+#include "Subsystem/OctreeNavSubsystem.h"
+#include "NavVolume/OctreeVoxelVolume.h"
 #include "PathfindingSubsystem.generated.h"
+
+class UWorldNavigationDataAsset;
+class APathfindingStreamingProbe;
+
+/**
+ * Represents a request for a path that may span multiple volumes.
+ */
+struct FHierarchicalPathRequest
+{
+	int32 RequestID = -1;
+	TWeakObjectPtr<UPathfindingComponent> RequestingComponent;
+	FVector StartLocation = FVector::ZeroVector;
+	FVector EndLocation = FVector::ZeroVector;
+	float AgentRadius = 0.f;
+	TWeakObjectPtr<UPathfindingStrategy> Strategy;
+	FWorldPathfindingResultDelegate OnHierarchicalPathComplete;
+};
+
+enum class EHierarchicalTaskState : uint8
+{
+	Idle,                       // Initial state
+	WaitingForVolumeToLoad,     // Waiting for the next volume to stream in
+	ReadyToFindLocalPath,       // Volume loaded, ready to begin local pathfinding
+	FindingLocalPath,           // Local pathfinding task is in progress
+	Complete,                   // All segments are complete
+	Failed                      // The task has failed
+};
+
+/**
+ * Manages the state of an ongoing hierarchical pathfinding task.
+ */
+struct FHierarchicalPathfindingTask
+{
+	FHierarchicalPathRequest OriginalRequest;
+	TArray<FVector> CombinedWorldPath;
+	TArray<TPair<TSoftObjectPtr<UOctreeDataAsset>, int32>> HighLevelDataAssetPath;
+	EHierarchicalTaskState State = EHierarchicalTaskState::Idle;
+	int32 CurrentSegmentIndex = 0;
+	int32 LastLocalRequestID = -1;
+
+	FHierarchicalPathfindingTask(const FHierarchicalPathRequest& InRequest)
+		: OriginalRequest(InRequest)
+	{
+	}
+};
 
 class FPathfindingAsyncTasks : public IQueuedWork
 {
@@ -50,8 +97,8 @@ struct FPathfindingResult
  * This subsystem handles queuing requests, executing them on worker threads,
  * and delivering results back to the game thread.
  */
-UCLASS(Config=Game)
-class SMARTFLYINGNAVIGATION_API UPathfindingSubsystem : public UEngineSubsystem, public FTickableGameObject
+UCLASS(Config = Game)
+class SMARTFLYINGNAVIGATION_API UPathfindingSubsystem : public UTickableWorldSubsystem 
 {
 	GENERATED_BODY()
 
@@ -60,22 +107,17 @@ public:
 	// Public API
 	//~=============================================================================
 
-	/**
-	 * Submits a new pathfinding request to be processed asynchronously.
-	 * @param Request The pathfinding request parameters.
-	 * @return A unique ID for the submitted request, or -1 if the request is invalid or the subsystem is not initialized.
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-	int32 RequestPath(FPathfindingRequest& Request);
+	UFUNCTION(BlueprintCallable, Category = "Pathfinding", meta = (WorldContext = "WorldContextObject"))
+	int32 RequestPath(const UObject* WorldContextObject, FPathfindingRequest& Request);
+
+	int32 RequestHierarchicalPath(const UObject* WorldContextObject, FHierarchicalPathRequest& Request);
 
 	//~=============================================================================
 	// Tick Interface
 	//~=============================================================================
 
 	virtual void Tick(float DeltaTime) override;
-	virtual bool IsTickable() const override { return true; }
-	virtual bool IsTickableInEditor() const override { return true; }
-	virtual TStatId GetStatId() const override { return TStatId(); }
+	virtual TStatId GetStatId() const override;
 
 	//~=============================================================================
 	// Debug & Configuration
@@ -118,7 +160,6 @@ public:
 	 */
 	void ReturnPool(FPathNodeMemoryPoolBase* PoolToReturn);
 
-	bool GetIsLevelChanging() {return bIsLevelChanging.load();}
 protected:
 	//~=============================================================================
 	// Subsystem Lifecycle
@@ -131,62 +172,52 @@ private:
 	//~=============================================================================
 	// Path Completion Callbacks
 	//~=============================================================================
-	
-	/** Called on the game thread when a world-space path request is complete. */
+
 	void OnPathfindingCompleted(const FPathfindingRequest& Request, const TArray<FVector>& WorldPath, bool bSuccess);
+	void OnHierarchicalSegmentCompleted(int32 RequestID, const TArray<FVector>& SegmentPath, bool bSuccess);
 
 	//~=============================================================================
 	// Threading & Task Management
 	//~=============================================================================
 
-	/** The thread pool for executing pathfinding tasks. */
 	FQueuedThreadPool* PathfindingThreadPool = nullptr;
 
-	/** The current number of worker threads in the pool. */
 	UPROPERTY(Config)
 	int32 CurrentNumWorkerThreads = 5;
 
-	/** The maximum number of completed pathfinding callbacks to fire per frame. */
 	UPROPERTY(Config)
 	int32 MaxCallbacksPerFrame = 100;
 
-	/** A thread-safe counter for generating unique request IDs. */
 	FThreadSafeCounter NextRequestID;
-
-	/** A queue for holding results from worker threads that are ready to be processed on the game thread. */
 	TQueue<FPathfindingResult, EQueueMode::Mpsc> CompletedTasksQueue;
+	TMap<int32, FHierarchicalPathfindingTask> ActiveHierarchicalTasks;
+
+	//~=============================================================================
+	// Hierarchical Pathfinding Internals
+	//~=============================================================================
+
+	bool FindHighLevelPath(const UObject* WorldContextObject, const FHierarchicalPathRequest& Request, TArray<TPair<TSoftObjectPtr<UOctreeDataAsset>, int32>>& OutDataAssetPath);
+	void ProcessNextHierarchicalSegment(const UObject* WorldContextObject, FHierarchicalPathfindingTask& Task);
 
 	//~=============================================================================
 	// Memory Pooling
 	//~=============================================================================
 
-	/** A lock to protect access to the memory pools. */
 	FCriticalSection PoolLock;
-
-	/** A collection of idle memory pools for grid-based pathfinding nodes. */
 	TArray<FPathNodeMemoryPoolBase*> IdleGridPools;
-
-	/** A collection of idle memory pools for octree-based pathfinding nodes. */
 	TArray<FPathNodeMemoryPoolBase*> IdleOctreePools;
 
 private:
 	//~=============================================================================
-	// Level Transition Handling
+	// Level Transition Handling 
 	//~=============================================================================
 
-	/** Called just before a new map is loaded. */
-	void OnPreLoadMap(const FString& MapName);
+	UPROPERTY()
+	TObjectPtr<UWorldNavigationDataAsset> CurrentWorldNavData;
 
-	/** Called after a new map has been successfully loaded. */
-	void OnPostLoadMap(UWorld* LoadedWorld);
+	UPROPERTY()
+	TMap<int32, TObjectPtr<APathfindingStreamingProbe>> ActiveStreamingProbes;
 
-	void OnWorldBeingInitialized(UWorld* World, const UWorld::InitializationValues IVS);
-	void OnWorldInitialized(UWorld* World, const UWorld::InitializationValues IVS);
-
-	/** Handles to the registered delegates so we can unregister them later. */
-	FDelegateHandle OnPreWorldInitializationHandle;
-	FDelegateHandle OnPostWorldInitializationHandle;
-
-	/** Flag to indicate if we are currently in the process of changing levels. */
-	std::atomic<bool> bIsLevelChanging; // std::atomic for thread-safety
+	void CreateStreamingProbeForRequest(const UObject* WorldContextObject, int32 RequestID, const FVector& Location);
+	void DestroyStreamingProbeForRequest(const UObject* WorldContextObject, int32 RequestID);
 };

@@ -23,7 +23,7 @@ EBTNodeResult::Type UBTTask_FindPatrolPoint::ExecuteTask(UBehaviorTreeComponent&
 	}
 
 	UPathfindingComponent* PathComp = ControlledPawn->FindComponentByClass<UPathfindingComponent>();
-	AOctreeVoxelVolume* NavVolume = PathComp ? Cast<AOctreeVoxelVolume>(PathComp->GetTargetVolume()) : nullptr;
+	AOctreeVoxelVolume* NavVolume = PathComp ? Cast<AOctreeVoxelVolume>(PathComp->GetCurrentVolume()) : nullptr;
 	if (!NavVolume)
 	{
 		UE_LOG(LogTemp, Error, TEXT("FindPatrolPoint: Navigation Volume is not a valid OctreeVoxelVolume."));

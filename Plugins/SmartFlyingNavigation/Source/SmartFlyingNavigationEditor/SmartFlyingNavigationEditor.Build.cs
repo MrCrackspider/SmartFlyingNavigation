@@ -35,7 +35,7 @@ public class SmartFlyingNavigationEditor : ModuleRules
 				"SmartFlyingNavigation",
 				"InputCore",
 				"Landscape",
-			}
+            }
 		);
     }
 }

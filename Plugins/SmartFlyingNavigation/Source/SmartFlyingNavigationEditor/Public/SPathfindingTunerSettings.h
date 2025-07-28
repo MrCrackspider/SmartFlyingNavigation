@@ -38,7 +38,7 @@ public:
 	// Begin Test
 	/** 월드 전체를 Bake할 때 사용할 청크의 크기 (월드 단위) */
 	UPROPERTY(Config)
-	float WorldBake_ChunkSize = 25600.0f;
+	float WorldBake_VolumeSize = 25600.0f;
 
 	/** 월드 전체를 Bake할 때 사용할 Voxel의 크기 */
 	UPROPERTY(Config)

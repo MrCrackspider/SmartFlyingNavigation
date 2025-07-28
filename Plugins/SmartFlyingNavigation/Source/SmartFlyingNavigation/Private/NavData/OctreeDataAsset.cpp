@@ -11,7 +11,7 @@ const FName UOctreeDataAsset::OctreeAssetType = TEXT("OctreeData");
 void UOctreeDataAsset::SetAndCompressBakedData(const TArray<FOctreeNode>& InNodePool, const FIntVector& InMapSize, int32 InMaxDepth)
 {
 	// 1. Store all metadata first to ensure consistency.
-	this->BakedMapSize = InMapSize;
+	this->BakedVolumeSize = InMapSize;
 	this->BakedMaxOctreeDepth = InMaxDepth;
 
 	// 2. Serialize the node pool into a raw byte array.

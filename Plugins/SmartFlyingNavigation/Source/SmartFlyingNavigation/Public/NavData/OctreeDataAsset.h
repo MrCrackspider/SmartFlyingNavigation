@@ -7,25 +7,20 @@
 #include "OctreeDataAsset.generated.h"
 
 USTRUCT()
-struct FChunkPortalLink
+struct FVolumePortalLink
 {
 	GENERATED_BODY()
 
 	UPROPERTY()
-	TSoftObjectPtr<UOctreeDataAsset> TargetChunk;
+	TSoftObjectPtr<UOctreeDataAsset> TargetVolume;
 
 	UPROPERTY()
-	int32 TargetNodeIndex;
-};
-
-USTRUCT()
-struct FChunkPortalInfo
-{
-	GENERATED_BODY()
+	int32 TargetNodeIndex; 
 
 	UPROPERTY()
-	TArray<FChunkPortalLink> Links;
+	float MaxAllowedRadius = 0.f;
 };
+
 
 UENUM(BlueprintType)
 enum class EOctreeNodeState : uint8
@@ -110,7 +105,7 @@ class SMARTFLYINGNAVIGATION_API UOctreeDataAsset : public UPrimaryDataAsset
 
 public:
 	UPROPERTY(VisibleAnywhere, Category = "OctreeData")
-	FIntVector BakedMapSize;
+	FIntVector BakedVolumeSize;
 
 	UPROPERTY(VisibleAnywhere, Category = "OctreeData")
 	int32 BakedMaxOctreeDepth;
@@ -127,7 +122,7 @@ public:
 	int32 UncompressedSize;
 
 	UPROPERTY()
-	TMap<int32, FChunkPortalInfo> PortalNodes;
+	TMap<int32, FVolumePortalLink> PortalNodes;
 public:
 	void DecompressAndInitialize();
 #if WITH_EDITOR

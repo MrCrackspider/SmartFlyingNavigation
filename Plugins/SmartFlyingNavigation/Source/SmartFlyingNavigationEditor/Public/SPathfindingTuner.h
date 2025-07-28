@@ -3,13 +3,18 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "NavData/OctreeDataAsset.h"
 #include "Widgets/SCompoundWidget.h"
 
 class UPathfindingSubsystem;
 class UAvoidanceSubsystem;
+class UOctreeNavSubsystem;
 class UPathfindingTunerSettings;
 class AActor;
+class ULandscapeComponent;
+class AOctreeVoxelVolume;
 struct FAssetData; 
+struct FWorldBakeResult;
 
 class SPathfindingTuner : public SCompoundWidget
 {
@@ -107,7 +112,6 @@ private:
     void OnDrawDebugPathChanged(ECheckBoxState NewState);
     TOptional<ECheckBoxState> GetbPeriodicRepathState() const;
     void OnbPeriodicRepathChanged(ECheckBoxState NewState);
-    TOptional<bool> GetbUseAgentAvoidance() const;
     void OnbAvoidanceComitted(ECheckBoxState NewState);
 
     // --- Agent Settings ---
@@ -116,10 +120,7 @@ private:
     
     FString GetTargetActorPath() const;
     void OnTargetActorChanged(const FAssetData& AssetData);
-    
-    FString GetTargetVolumePath() const;
-    void OnTargetVolumeChanged(const FAssetData& AssetData);
-    
+        
     TOptional<float> GetAgentRadius() const;
     void OnAgentRadiusCommitted(float NewValue, ETextCommit::Type CommitType);
     
@@ -130,8 +131,8 @@ private:
     void OnAvoidanceRadiusCommitted(float NewValue, ETextCommit::Type CommitType);
 
     // --- World Bake Settings ---
-    TOptional<float> GetWorldBakeChunkSize() const;
-    void OnWorldBakeChunkSizeCommitted(float NewValue, ETextCommit::Type CommitType);
+    TOptional<float> GetWorldBakeVolumeSize() const;
+    void OnWorldBakeVolumeSizeCommitted(float NewValue, ETextCommit::Type CommitType);
     TOptional<float> GetWorldBakeVoxelExtent() const;
     void OnWorldBakeVoxelExtentCommitted(float NewValue, ETextCommit::Type CommitType);
     TOptional<int32> GetWorldBakeMaxDepth() const;
@@ -145,9 +146,9 @@ private:
     // --- Actions ---
     FReply OnBakeButtonClicked();
     FReply OnBakeWorldButtonClicked();
-    FReply OnCalculateChunksClicked();
+    FReply OnCalculateVolumesClicked();
 
-    FText GetEstimatedChunksText() const;
+    FText GetEstimatedVolumesText() const;
     void ShowWarningMessage(const FText& Message) const;
     FReply OnRequestPathButtonClicked();
     bool IsPIEActive() const;
@@ -157,9 +158,6 @@ private:
     // Member Variables
     //=================================================================================================
   
-    TWeakObjectPtr<UPathfindingSubsystem> PathfindingSubsystem;
-    TWeakObjectPtr<UAvoidanceSubsystem> AvoidanceSubsystem;
-    
     FTSTicker::FDelegateHandle ActorSelectionTickerHandle;
     
     TArray<TWeakObjectPtr<AActor>> LastSelectedActors;
@@ -168,7 +166,14 @@ private:
     
     //TObjectPtr<UPathfindingTunerSettings> TunerSettings;
     
-    TOptional<int32> EstimatedTotalChunks;
+    TOptional<int32> EstimatedTotalVolumes;
+
+
+    //=================================================================================================
+    // Internal Functions
+    //=================================================================================================
+    /** 월드 베이크 시작 전, 설정 값들이 유효한지 검사하고 사용자에게 확인을 받습니다. */
+    bool ValidateSettingsAndConfirm_Internal(const UPathfindingTunerSettings* InSettings) const;
 };
  
 //=================================================================================================

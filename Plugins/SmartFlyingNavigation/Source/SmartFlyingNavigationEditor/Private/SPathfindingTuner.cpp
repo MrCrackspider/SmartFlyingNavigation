@@ -45,6 +45,11 @@
 #include "Containers/UnrealString.h"
 #include "Landscape.h"
 #include "LandscapeStreamingProxy.h"
+#include "LandscapeComponent.h"
+#include "Subsystem/OctreeNavSubsystem.h"
+
+#include "PathfindingEditorSubsystem.h"
+
 
 #define LOCTEXT_NAMESPACE "PathfindingTuner"
 
@@ -54,9 +59,6 @@
 
 void SPathfindingTuner::Construct(const FArguments& InArgs)
 {
-	PathfindingSubsystem = GEngine->GetEngineSubsystem<UPathfindingSubsystem>();
-	AvoidanceSubsystem = GEngine->GetEngineSubsystem<UAvoidanceSubsystem>();
-
 	// Initialize ComboBox options
 	MapSizeOptions.Add(MakeShared<int32>(128));
 	MapSizeOptions.Add(MakeShared<int32>(256));
@@ -160,85 +162,91 @@ TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
 		.HeaderContent()
 		[
 			SNew(STextBlock)
-			.Text(LOCTEXT("PerformanceSettingsCategory", "Performance Settings"))
-			.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
-			.ShadowOffset(FVector2D(1.0f, 1.0f))
+				.Text(LOCTEXT("PerformanceSettingsCategory", "Performance Settings"))
+				.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
+				.ShadowOffset(FVector2D(1.0f, 1.0f))
 		]
 		.BodyContent()
 		[
 			SNew(SVerticalBox)
+				// --- Number of Worker Threads (이 부분은 변경 없음) ---
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(8.0f, 5.0f)
+				[
+					SNew(SHorizontalBox)
+						.ToolTipText(LOCTEXT("NumThreadsTooltip",
+							"Sets the number of worker threads for pathfinding calculations.\nHigher values can process more requests simultaneously but will increase CPU usage."))
+
+						+ SHorizontalBox::Slot()
+						.FillWidth(0.4f)
+						.VAlign(VAlign_Center)
+						.Padding(0, 0, 10, 0)
+						[
+							SNew(STextBlock)
+								.Text(LOCTEXT("NumThreadsLabel", "Number of Worker Threads"))
+								.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+						]
+
+						+ SHorizontalBox::Slot()
+						.FillWidth(0.6f)
+						.VAlign(VAlign_Center)
+						[
+							SNew(SNumericEntryBox<int32>)
+								.Value(this, &SPathfindingTuner::GetCurrentNumThreads)
+								.OnValueCommitted(this, &SPathfindingTuner::OnNumThreadsCommitted)
+								.MinValue(1)
+								.MaxValue(64)
+								.MinSliderValue(1)
+								.MaxSliderValue(16)
+						]
+				]
+
+			// --- Use Agent Avoidance (이 부분 수정) ---
 			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f, 5.0f)
-			[
-				SNew(SHorizontalBox)
-				.ToolTipText(LOCTEXT("NumThreadsTooltip",
-				                     "Sets the number of worker threads for pathfinding calculations.\nHigher values can process more requests simultaneously but will increase CPU usage."))
-
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.4f)
-				.VAlign(VAlign_Center)
-				.Padding(0, 0, 10, 0)
+				.AutoHeight()
+				.Padding(8.0f, 5.0f)
 				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("NumThreadsLabel", "Number of Worker Threads"))
-					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-				]
+					SNew(SHorizontalBox)
+						.ToolTipText(LOCTEXT("UseAvoidanceTooltip", "Enables or disables agent avoidance behavior globally."))
 
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.6f)
-				.VAlign(VAlign_Center)
-				[
-					SNew(SNumericEntryBox<int32>)
-					.Value(this, &SPathfindingTuner::GetCurrentNumThreads)
-					.OnValueCommitted(this, &SPathfindingTuner::OnNumThreadsCommitted)
-					.MinValue(1)
-					.MaxValue(64)
-					.MinSliderValue(1)
-					.MaxSliderValue(16)
-				]
-			]
+						+ SHorizontalBox::Slot()
+						.FillWidth(0.4f)
+						.VAlign(VAlign_Center)
+						.Padding(0, 0, 10, 0)
+						[
+							SNew(STextBlock)
+								.Text(LOCTEXT("UseAvoidanceLabel", "Use Agent Avoidance"))
+								.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+						]
 
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f, 5.0f)
-			[
-				SNew(SHorizontalBox)
-				.ToolTipText(LOCTEXT("UseAvoidanceTooltip", "Enables or disables agent avoidance behavior globally."))
-
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.4f)
-				.VAlign(VAlign_Center)
-				.Padding(0, 0, 10, 0)
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("UseAvoidanceLabel", "Use Agent Avoidance"))
-					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+						+ SHorizontalBox::Slot()
+						.FillWidth(0.6f)
+						.VAlign(VAlign_Center)
+						[
+							SNew(SCheckBox)
+								// [핵심 수정] IsChecked_Lambda가 GetDefault를 직접 호출하도록 변경
+								.IsChecked_Lambda([this]() -> ECheckBoxState
+									{
+										// UAvoidanceSubsystem의 Class Default Object(CDO)를 가져옵니다.
+										if (const UAvoidanceSubsystem* AvoidanceCDO = GetDefault<UAvoidanceSubsystem>())
+										{
+											// CDO의 프로퍼티 값을 직접 읽어 체크 상태를 반환합니다.
+											// UAvoidanceSubsystem::GetbUseAvoidance()는 const 함수여야 합니다.
+											return AvoidanceCDO->GetbUseAvoidance()
+												? ECheckBoxState::Checked
+												: ECheckBoxState::Unchecked;
+										}
+										// CDO를 가져올 수 없는 경우 (매우 드묾)
+										return ECheckBoxState::Undetermined;
+									})
+								.OnCheckStateChanged(this, &SPathfindingTuner::OnbAvoidanceComitted)
+						]
 				]
-
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.6f)
-				.VAlign(VAlign_Center)
-				[
-					SNew(SCheckBox)
-					.IsChecked_Lambda([this]() -> ECheckBoxState
-					{
-						if (AvoidanceSubsystem.IsValid())
-						{
-							return AvoidanceSubsystem->GetbUseAvoidance()
-								       ? ECheckBoxState::Checked
-								       : ECheckBoxState::Unchecked;
-						}
-						return ECheckBoxState::Undetermined;
-					})
-					.OnCheckStateChanged(this, &SPathfindingTuner::OnbAvoidanceComitted)
-				]
-			]
 		]
-		.InitiallyCollapsed(!TunerSettings->bIsPerformanceCategoryExpanded)
+	.InitiallyCollapsed(!TunerSettings->bIsPerformanceCategoryExpanded)
 		.OnAreaExpansionChanged(this, &SPathfindingTuner::OnPerformanceCategoryExpansionChanged);
 }
-
 TSharedRef<SWidget> SPathfindingTuner::BuildOctreeVolumeSettingsSection()
 {
 	const UPathfindingTunerSettings* TunerSettings = GetDefault<UPathfindingTunerSettings>();
@@ -367,19 +375,19 @@ TSharedRef<SWidget> SPathfindingTuner::BuildWorldBakeSection()
 		[
 			SNew(SVerticalBox)
 
-			// Chunk Size
+			// Volume Size
 			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
 			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
 				[
-					SNew(STextBlock).Text(LOCTEXT("WorldBakeChunkSizeLabel", "Chunk Size:"))
+					SNew(STextBlock).Text(LOCTEXT("WorldBakeVolumeSizeLabel", "Volume Size:"))
 				]
 				+ SHorizontalBox::Slot().FillWidth(0.6f)
 				[
 					SNew(SNumericEntryBox<float>)
-					.Value(this, &SPathfindingTuner::GetWorldBakeChunkSize)
-					.OnValueCommitted(this, &SPathfindingTuner::OnWorldBakeChunkSizeCommitted)
+					.Value(this, &SPathfindingTuner::GetWorldBakeVolumeSize)
+					.OnValueCommitted(this, &SPathfindingTuner::OnWorldBakeVolumeSizeCommitted)
 				]
 			]
 
@@ -431,7 +439,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildWorldBakeSection()
 						SNew(SEditableTextBox)
 						.Text(this, &SPathfindingTuner::GetWorldBakeSaveDirectory)
 						.OnTextCommitted(this, &SPathfindingTuner::OnWorldBakeSaveDirectoryCommitted)
-						.HintText(LOCTEXT("WorldBakeSaveDirHint", "/Game/Path/For/Generated/Chunks"))
+						.HintText(LOCTEXT("WorldBakeSaveDirHint", "/Game/Path/For/Generated/Volumes"))
 					]
 					+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f).VAlign(VAlign_Center)
 					[
@@ -459,7 +467,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildWorldBakeSection()
 				]
 			]
 
-			// Estimated Chunk Calculation
+			// Estimated Volume Calculation
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			.Padding(8.0f, 15.0f, 8.0f, 8.0f)
@@ -471,7 +479,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildWorldBakeSection()
 				.Padding(0, 0, 8.0f, 0)
 				[
 					SNew(STextBlock)
-					.Text(LOCTEXT("CalculateChunksDescription", "Estimate the number of chunks"))
+					.Text(LOCTEXT("CalculateVolumesDescription", "Estimate the number of Volumes"))
 					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
 					.ColorAndOpacity(FSlateColor(FLinearColor(0.8f, 0.8f, 0.8f)))
 					.AutoWrapText(true)
@@ -485,10 +493,10 @@ TSharedRef<SWidget> SPathfindingTuner::BuildWorldBakeSection()
 					SNew(SButton)
 					.ButtonStyle(FAppStyle::Get(), "PrimaryButton")
 					.TextStyle(FAppStyle::Get(), "PrimaryButtonText")
-					.Text(LOCTEXT("CalculateChunksButton", "Calculate Estimated Chunks"))
-					.ToolTipText(LOCTEXT("CalculateChunksTooltip",
-					                     "Scans the world geometry to estimate how many chunks will be generated with the current settings."))
-					.OnClicked(this, &SPathfindingTuner::OnCalculateChunksClicked)
+					.Text(LOCTEXT("CalculateVolumesButton", "Calculate Estimated Volumes"))
+					.ToolTipText(LOCTEXT("CalculateVolumesTooltip",
+					                     "Scans the world geometry to estimate how many Volumes will be generated with the current settings."))
+					.OnClicked(this, &SPathfindingTuner::OnCalculateVolumesClicked)
 				]
 			]
 
@@ -498,7 +506,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildWorldBakeSection()
 			.HAlign(HAlign_Right)
 			[
 				SNew(STextBlock)
-				.Text(this, &SPathfindingTuner::GetEstimatedChunksText)
+				.Text(this, &SPathfindingTuner::GetEstimatedVolumesText)
 				.Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont"))
 			]
 
@@ -531,7 +539,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildWorldBakeSection()
 					             .TextStyle(FAppStyle::Get(), "PrimaryButtonText")
 					             .Text(LOCTEXT("BakeWorldButtonText", "Bake Entire World"))
 					             .ToolTipText(LOCTEXT("BakeWorldButtonTooltip",
-					                                  "Scans the entire world, generates navigation chunks, and bakes them. This is a very long and destructive process."))
+					                                  "Scans the entire world, generates navigation Volumes, and bakes them. This is a very long and destructive process."))
 					             .OnClicked(this, &SPathfindingTuner::OnBakeWorldButtonClicked)
 				]
 			]
@@ -809,25 +817,6 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
 					.AllowedClass(AActor::StaticClass())
 					.ObjectPath(this, &SPathfindingTuner::GetTargetActorPath)
 					.OnObjectChanged(this, &SPathfindingTuner::OnTargetActorChanged)
-					.DisplayBrowse(true)
-				]
-			]
-
-			// Target Volume
-			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
-				[
-					SNew(STextBlock).Text(LOCTEXT("TargetVolumeLabel", "Target Volume:")).Font(
-						FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-				]
-				+ SHorizontalBox::Slot().FillWidth(0.6f)
-				[
-					SNew(SObjectPropertyEntryBox)
-					.AllowedClass(AOctreeVoxelVolume::StaticClass())
-					.ObjectPath(this, &SPathfindingTuner::GetTargetVolumePath)
-					.OnObjectChanged(this, &SPathfindingTuner::OnTargetVolumeChanged)
 					.DisplayBrowse(true)
 				]
 			]
@@ -1199,18 +1188,25 @@ void SPathfindingTuner::OnActorSelectionChanged()
 
 TOptional<int32> SPathfindingTuner::GetCurrentNumThreads() const
 {
-	return PathfindingSubsystem.IsValid() ? TOptional(PathfindingSubsystem->GetNumWorkerThreads()) : TOptional<int32>();
+	// GetDefault<T>()를 사용하여 CDO에서 값을 읽어옵니다.
+	if (const UPathfindingSubsystem* SubsystemCDO = GetDefault<UPathfindingSubsystem>())
+	{
+		return SubsystemCDO->GetNumWorkerThreads();
+	}
+	return TOptional<int32>();
 }
 
 void SPathfindingTuner::OnNumThreadsCommitted(int32 NewValue, ETextCommit::Type CommitInfo)
 {
-	if (PathfindingSubsystem.IsValid())
+	// GetMutableDefault<T>()를 사용하여 CDO를 수정하고 저장합니다.
+	if (UPathfindingSubsystem* SubsystemCDO = GetMutableDefault<UPathfindingSubsystem>())
 	{
-		PathfindingSubsystem->SetNumWorkerThreads(NewValue);
-		PathfindingSubsystem->SaveConfig();
+		SubsystemCDO->SetNumWorkerThreads(NewValue);
+		SubsystemCDO->SaveConfig(); // 변경사항을 .ini 파일에 저장
 		Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 	}
 }
+
 
 
 //=================================================================================================
@@ -1677,20 +1673,13 @@ void SPathfindingTuner::OnbPeriodicRepathChanged(ECheckBoxState NewState)
 	}
 }
 
-TOptional<bool> SPathfindingTuner::GetbUseAgentAvoidance() const
-{
-	return AvoidanceSubsystem.IsValid() ? TOptional(AvoidanceSubsystem->GetbUseAvoidance()) : TOptional<bool>();
-}
-
 void SPathfindingTuner::OnbAvoidanceComitted(ECheckBoxState NewState)
 {
-	if (AvoidanceSubsystem.IsValid()) // <-- 이 부분도 확인
+	if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
 	{
-		// ECheckBoxState를 bool로 변환
-		bool bUseAvoidance = (NewState == ECheckBoxState::Checked);
-
-		AvoidanceSubsystem->SetbUseAvoidance(bUseAvoidance);
-		AvoidanceSubsystem->SaveConfig(); // SaveConfig() 대신 SaveSubsystemConfig() 사용
+		const bool bUseAvoidance = (NewState == ECheckBoxState::Checked);
+		AvoidanceCDO->SetbUseAvoidance(bUseAvoidance);
+		AvoidanceCDO->SaveConfig();
 		Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 	}
 }
@@ -1747,31 +1736,6 @@ void SPathfindingTuner::OnTargetActorChanged(const FAssetData& AssetData)
 	                                                       {
 		                                                       C->SetTargetActor(Target);
 	                                                       });
-}
-
-FString SPathfindingTuner::GetTargetVolumePath() const
-{
-	const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
-	TOptional<AVoxelVolumeBase*> CommonVolume = GetCommonPropertyValue<UPathfindingComponent, AVoxelVolumeBase*>(
-		SelectedComponents,
-		[](const UPathfindingComponent* C) { return C->TargetVolume; });
-
-	return (CommonVolume.IsSet() && CommonVolume.GetValue()) ? CommonVolume.GetValue()->GetPathName() : FString();
-}
-
-void SPathfindingTuner::OnTargetVolumeChanged(const FAssetData& AssetData)
-{
-	AOctreeVoxelVolume* NewTargetVolume = Cast<AOctreeVoxelVolume>(AssetData.GetAsset());
-	const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
-
-	SetCommonPropertyValue<UPathfindingComponent, AVoxelVolumeBase*>(SelectedComponents, NewTargetVolume,
-	                                                                 LOCTEXT("SetAgentTargetVolume",
-	                                                                         "Set Agent Target Volume"),
-	                                                                 [](UPathfindingComponent* C,
-	                                                                    AVoxelVolumeBase* Volume)
-	                                                                 {
-		                                                                 C->TargetVolume = Volume;
-	                                                                 });
 }
 
 TOptional<float> SPathfindingTuner::GetAgentRadius() const
@@ -1845,6 +1809,7 @@ void SPathfindingTuner::OnAvoidanceRadiusCommitted(float NewValue,
 
 FReply SPathfindingTuner::OnBakeButtonClicked()
 {
+	// --- 1. UI 레벨의 사전 검사 ---
 	const auto SelectedVolumes = GetSelectedActorsOfType<AOctreeVoxelVolume>();
 	if (SelectedVolumes.IsEmpty())
 	{
@@ -1864,11 +1829,12 @@ FReply SPathfindingTuner::OnBakeButtonClicked()
 		}
 	}
 
+	// --- 2. 사용자 확인 (UI 로직) ---
 	if (SelectedVolumes.Num() > 1)
 	{
 		FText ConfirmationMessage = FText::Format(
 			LOCTEXT("MultiBakeConfirmation",
-			        "You have selected {0} volumes to bake.\nThis process could take a long time and may cause the editor to become unresponsive.\n\nDo you want to continue?"),
+				"You have selected {0} volumes to bake.\nThis process could take a long time and may cause the editor to become unresponsive.\n\nDo you want to continue?"),
 			FText::AsNumber(SelectedVolumes.Num())
 		);
 
@@ -1878,14 +1844,15 @@ FReply SPathfindingTuner::OnBakeButtonClicked()
 		}
 	}
 
-	const FScopedTransaction Transaction(LOCTEXT("BakeOctreeDataTransaction", "Bake Octree Data"));
-	for (AOctreeVoxelVolume* Volume : SelectedVolumes)
+	// --- 3. 에디터 서브시스템에 작업 위임 ---
+	if (UPathfindingEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UPathfindingEditorSubsystem>())
 	{
-		if (Volume)
-		{
-			Volume->Modify();
-			Volume->BakeStaticData();
-		}
+		EditorSubsystem->BakeSpecificVolumes(SelectedVolumes);
+		ShowWarningMessage(LOCTEXT("BakeSelectedComplete", "Bake process for selected volumes completed successfully!"));
+	}
+	else
+	{
+		ShowWarningMessage(LOCTEXT("NoEditorSubsystem", "Pathfinding Editor Subsystem not found. Cannot start bake."));
 	}
 
 	return FReply::Handled();
@@ -1893,310 +1860,49 @@ FReply SPathfindingTuner::OnBakeButtonClicked()
 
 FReply SPathfindingTuner::OnBakeWorldButtonClicked()
 {
+	// --- 1. UI 레벨의 사전 검사 및 사용자 확인 ---
 	const UPathfindingTunerSettings* TunerSettings = GetDefault<UPathfindingTunerSettings>();
+	if (!ValidateSettingsAndConfirm_Internal(TunerSettings))
+	{
+		return FReply::Handled();
+	}
 
-	if (!TunerSettings)
+	// --- 2. 에디터 서브시스템에 작업 위임 ---
+	if (UPathfindingEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UPathfindingEditorSubsystem>())
+	{
+		EditorSubsystem->BakeEntireWorld(TunerSettings);
+		ShowWarningMessage(LOCTEXT("WorldBakeStarted", "World Bake process has started. Check the Output Log for progress."));
+	}
+	else
+	{
+		ShowWarningMessage(LOCTEXT("NoEditorSubsystem", "Pathfinding Editor Subsystem not found. Cannot start world bake."));
+	}
+
+	return FReply::Handled();
+}
+
+bool SPathfindingTuner::ValidateSettingsAndConfirm_Internal(const UPathfindingTunerSettings* InSettings) const
+{
+	if (!InSettings)
 	{
 		ShowWarningMessage(LOCTEXT("NoTunerSettings", "Internal Error: TunerSettings is not valid."));
-		return FReply::Handled();
+		return false;
 	}
-	if (TunerSettings->WorldBake_SaveDirectory.Path.IsEmpty())
+	if (InSettings->WorldBake_SaveDirectory.Path.IsEmpty())
 	{
-		ShowWarningMessage(LOCTEXT("WorldBakeSaveDirNotSet",
-		                           "World Bake failed. Please set the 'Save Directory' in the World Bake Settings first."));
-		return FReply::Handled();
+		ShowWarningMessage(LOCTEXT("WorldBakeSaveDirNotSet", "World Bake failed. Please set the 'Save Directory' in the World Bake Settings first."));
+		return false;
 	}
-	if (!TunerSettings->WorldBake_ObstacleProfile.IsValid())
+	if (!InSettings->WorldBake_ObstacleProfile.IsValid())
 	{
-		ShowWarningMessage(LOCTEXT("WorldBakeProfileNotSet",
-		                           "World Bake failed. Please set the 'Obstacle Profile' in the World Bake Settings first."));
-		return FReply::Handled();
+		ShowWarningMessage(LOCTEXT("WorldBakeProfileNotSet", "World Bake failed. Please set the 'Obstacle Profile' in the World Bake Settings first."));
+		return false;
 	}
 
 	const FText DialogTitle = LOCTEXT("ConfirmWorldBakeTitle", "Confirm World Bake");
 	const FText DialogText = LOCTEXT("ConfirmWorldBakeText",
-	                                 "This will DELETE all previously baked navigation chunks in the target directory and regenerate everything from scratch.\nThis process can take a very long time and cannot be undone.\n\nAre you sure you want to continue?");
-	if (FMessageDialog::Open(EAppMsgType::YesNo, DialogText, &DialogTitle) == EAppReturnType::No)
-	{
-		return FReply::Handled();
-	}
-
-	UWorld* World = GEditor->GetEditorWorldContext().World();
-	if (!World)
-	{
-		ShowWarningMessage(LOCTEXT("NoWorld", "Could not get a valid editor world."));
-		return FReply::Handled();
-	}
-
-	TArray<TObjectPtr<UPackage>> PackagesToSave;
-	TArray<TObjectPtr<AActor>> CreatedActors;
-
-	TMap<ULandscapeComponent*, TEnumAsByte<ECollisionEnabled::Type>> OriginalCollisionStates;
-	for (TActorIterator<ALandscapeProxy> It(World); It; ++It)
-	{
-		ALandscapeProxy* Proxy = *It;
-		if (Proxy)
-		{
-			TArray<ULandscapeComponent*> LandscapeComponents;
-			Proxy->GetComponents<ULandscapeComponent>(LandscapeComponents);
-			for (ULandscapeComponent* Comp : LandscapeComponents)
-			{
-				if (Comp)
-				{
-					OriginalCollisionStates.Add(Comp, Comp->GetCollisionEnabled());
-					Comp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-				}
-			}
-		}
-	}
-
-	bool bBakeCancelled = false;
-
-	{
-		const FScopedTransaction Transaction(LOCTEXT("WorldBakeTransaction", "Bake Entire World Navigation"));
-
-		FString SavePath = TunerSettings->WorldBake_SaveDirectory.Path;
-		if (!SavePath.StartsWith(TEXT("/")))
-		{
-			SavePath = FPaths::Combine(TEXT("/Game"), SavePath);
-		}
-		SavePath.RemoveFromEnd(TEXT("/"));
-
-		TArray<FString> AssetPathStrings = UEditorAssetLibrary::ListAssets(SavePath, true, false);
-		if (AssetPathStrings.Num() > 0)
-		{
-			TArray<FAssetData> AssetsToDelete;
-			FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(
-				"AssetRegistry");
-			for (const FString& Path : AssetPathStrings)
-			{
-				FAssetData AssetData = AssetRegistryModule.Get().GetAssetByObjectPath(FSoftObjectPath(Path));
-				if (AssetData.IsValid()) AssetsToDelete.Add(AssetData);
-			}
-			if (AssetsToDelete.Num() > 0) ObjectTools::DeleteAssets(AssetsToDelete, true);
-		}
-
-		TArray<AActor*> ActorsToDelete;
-		for (TActorIterator<AOctreeVoxelVolume> It(World); It; ++It)
-		{
-			ActorsToDelete.Add(*It);
-		}
-		for (AActor* Actor : ActorsToDelete)
-		{
-			World->DestroyActor(Actor);
-		}
-
-		FBox WorldBounds(ForceInit);
-		for (TActorIterator<AActor> It(World); It; ++It)
-		{
-			AActor* Actor = *It;
-			if (!Actor || Actor->ActorHasTag(FName("NoNavBake"))) continue;
-			TArray<UStaticMeshComponent*> StaticMeshComponents;
-			Actor->GetComponents<UStaticMeshComponent>(StaticMeshComponents);
-			for (UStaticMeshComponent* Component : StaticMeshComponents)
-			{
-				if (Component && Component->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
-				{
-					WorldBounds += Component->Bounds.GetBox();
-				}
-			}
-		}
-		for (TActorIterator<ALandscapeStreamingProxy> It(World); It; ++It)
-		{
-			ALandscapeStreamingProxy* LandscapeProxy = *It;
-			if (LandscapeProxy && !LandscapeProxy->ActorHasTag(FName("NoNavBake")))
-			{
-				WorldBounds += LandscapeProxy->GetComponentsBoundingBox(true);
-			}
-		}
-
-		for (TActorIterator<ALandscape> It(World); It; ++It)
-		{
-			ALandscape* Landscape = *It;
-			if (Landscape && !Landscape->ActorHasTag(FName("NoNavBake")))
-			{
-				WorldBounds += Landscape->GetComponentsBoundingBox(true);
-			}
-		}
-
-		const float ChunkSize = TunerSettings->WorldBake_ChunkSize;
-		if (ChunkSize <= 0)
-		{
-			ShowWarningMessage(LOCTEXT("InvalidChunkSize", "Chunk Size must be greater than 0."));
-			goto Cleanup;
-		}
-
-		const int32 GridMinX = FMath::FloorToInt(WorldBounds.Min.X / ChunkSize);
-		const int32 GridMaxX = FMath::CeilToInt(WorldBounds.Max.X / ChunkSize);
-		const int32 GridMinY = FMath::FloorToInt(WorldBounds.Min.Y / ChunkSize);
-		const int32 GridMaxY = FMath::CeilToInt(WorldBounds.Max.Y / ChunkSize);
-		const int32 GridMinZ = FMath::FloorToInt(WorldBounds.Min.Z / ChunkSize);
-		const int32 GridMaxZ = FMath::CeilToInt(WorldBounds.Max.Z / ChunkSize);
-
-		const int32 TotalChunks = (GridMaxX - GridMinX) * (GridMaxY - GridMinY) * (GridMaxZ - GridMinZ);
-		if (TotalChunks <= 0)
-		{
-			ShowWarningMessage(FText::Format(
-				LOCTEXT("NoChunksToBake",
-				        "No chunks to bake. TotalChunks calculated as {0}. Check WorldBounds and ChunkSize."),
-				FText::AsNumber(TotalChunks)));
-			goto Cleanup;
-		}
-
-		FScopedSlowTask BakeTask(TotalChunks, LOCTEXT("BakingWorldTask", "Baking World Navigation Chunks..."));
-		BakeTask.MakeDialog(true);
-
-		UVoxelObstacleProfile* ObstacleProfile = TunerSettings->WorldBake_ObstacleProfile.LoadSynchronous();
-		if (!ObstacleProfile)
-		{
-			ShowWarningMessage(LOCTEXT("ProfileLoadFailed",
-			                           "Failed to load the specified Obstacle Profile. Aborting."));
-			goto Cleanup;
-		}
-
-		for (int32 GZ = GridMinZ; GZ < GridMaxZ; ++GZ)
-		{
-			for (int32 GY = GridMinY; GY < GridMaxY; ++GY)
-			{
-				for (int32 GX = GridMinX; GX < GridMaxX; ++GX)
-				{
-					if (BakeTask.ShouldCancel())
-					{
-						ShowWarningMessage(LOCTEXT("BakeCancelled", "World Bake process was cancelled by the user."));
-						bBakeCancelled = true;
-						goto EndBakeLoop;
-					}
-					BakeTask.EnterProgressFrame(1.f, FText::Format(
-						                            LOCTEXT("BakingChunkProgress", "Baking Chunk ({0}, {1}, {2})"),
-						                            FText::AsNumber(GX), FText::AsNumber(GY), FText::AsNumber(GZ)));
-
-					const FBox ChunkBounds(FVector(GX, GY, GZ) * ChunkSize,
-					                       FVector(GX + 1, GY + 1, GZ + 1) * ChunkSize);
-
-					AOctreeVoxelVolume* TempBakeVolume = World->SpawnActor<AOctreeVoxelVolume>();
-					if (!TempBakeVolume) continue;
-
-					TempBakeVolume->VoxelExtent = TunerSettings->WorldBake_VoxelExtent;
-					TempBakeVolume->MapSize = FIntVector(FMath::RoundToInt(ChunkSize / TempBakeVolume->VoxelExtent));
-					TempBakeVolume->GetRootComponent()->SetWorldLocationAndRotation(
-						ChunkBounds.GetCenter(), FRotator::ZeroRotator);
-					TempBakeVolume->VolumeBox->SetBoxExtent(ChunkBounds.GetExtent());
-					TempBakeVolume->MaxOctreeDepth = TunerSettings->WorldBake_MaxOctreeDepth;
-					TempBakeVolume->StaticObjectProfile = ObstacleProfile;
-
-					TSet<FIntVector> Obstacles;
-					TempBakeVolume->ScanForAllStaticObstacles(Obstacles, World, ChunkBounds);
-
-					if (Obstacles.IsEmpty())
-					{
-						TempBakeVolume->Destroy();
-						continue;
-					}
-
-					TArray<FOctreeNode> NodePool;
-					const int32 RootIndex = NodePool.AddDefaulted();
-					NodePool[RootIndex].Bounds = ChunkBounds;
-					for (const FIntVector& Voxel : Obstacles)
-					{
-						TempBakeVolume->InsertObstacleRecursive_Bake(NodePool, RootIndex, Voxel, 0,
-						                                             TempBakeVolume->MaxOctreeDepth);
-					}
-					TempBakeVolume->OptimizeAndCollapse_Bake(NodePool, RootIndex);
-					TempBakeVolume->PrecomputeNeighbors_Bake(NodePool, ChunkBounds, TempBakeVolume->MaxOctreeDepth);
-
-					TempBakeVolume->Destroy();
-					const FString ActorLabelName = FString::Printf(TEXT("NavChunk_%d_%d_%d"), GX, GY, GZ);
-					//const FString DataAssetName = FString::Printf(TEXT("DA_NavChunk_%d_%d_%d"), GX, GY, GZ);
-					const FString DataAssetName = TEXT("DA_") + ActorLabelName;
-					const FString PackagePath = FPaths::Combine(SavePath, DataAssetName);
-					UPackage* Package = CreatePackage(*PackagePath);
-					if (!Package) continue;
-
-					Package->FullyLoad();
-					UOctreeDataAsset* NewDataAsset = NewObject<UOctreeDataAsset>(
-						Package, FName(*DataAssetName), RF_Public | RF_Standalone);
-					NewDataAsset->Modify();
-					NewDataAsset->SetAndCompressBakedData(NodePool, TempBakeVolume->MapSize,
-					                                      TempBakeVolume->MaxOctreeDepth);
-					FAssetRegistryModule::AssetCreated(NewDataAsset);
-					Package->MarkPackageDirty();
-
-					PackagesToSave.Add(Package);
-
-					AOctreeVoxelVolume* ChunkActor = World->SpawnActor<AOctreeVoxelVolume>(
-						ChunkBounds.GetCenter(), FRotator::ZeroRotator);
-					if (ChunkActor)
-					{
-						ChunkActor->Modify();
-						CreatedActors.Add(ChunkActor);
-						ChunkActor->SetActorLabel(ActorLabelName);
-						ChunkActor->SetFolderPath(FName("/BakedNavChunks"));
-						ChunkActor->VolumeBox->SetBoxExtent(ChunkBounds.GetExtent(), true);
-						ChunkActor->SetBakedOctreeData(NewDataAsset);
-						// Begin Test
-						//                        ChunkActor->SetbDrawDebugBox(true);
-						//
-						//#if WITH_EDITOR
-						//                        ChunkActor->GetDebugSolidNodesComponent()->SetVisibility(false);
-						//                        ChunkActor->GetDebugMixedNodesComponent()->SetVisibility(false);
-						//#endif
-						// End Test
-						ChunkActor->GetLevel()->MarkPackageDirty();
-					}
-				}
-			}
-		}
-	EndBakeLoop:;
-	} // Bake 스코프 끝. FScopedSlowTask와 FScopedTransaction이 여기서 파괴됩니다.
-
-Cleanup:
-	for (auto const& [Component, OriginalState] : OriginalCollisionStates)
-	{
-		if (Component)
-		{
-			Component->SetCollisionEnabled(OriginalState);
-		}
-	}
-
-	if (bBakeCancelled)
-	{
-		// Bake가 취소되었더라도, 이미 생성된 객체들이 있을 수 있으므로
-		// 저장할지 물어보거나, 아니면 여기서 삭제 처리를 해주는 것이 더 좋습니다.
-		// 여기서는 단순화를 위해 그냥 종료합니다.
-		return FReply::Handled();
-	}
-
-
-	if (PackagesToSave.Num() > 0 || CreatedActors.Num() > 0)
-	{
-		TSet<UPackage*> LevelPackagesToSave;
-		for (AActor* Actor : CreatedActors)
-		{
-			if (Actor)
-			{
-				LevelPackagesToSave.Add(Actor->GetLevel()->GetPackage());
-			}
-		}
-		PackagesToSave.Append(LevelPackagesToSave.Array());
-
-		const bool bWasSuccess = UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, true);
-
-		if (bWasSuccess)
-		{
-			ShowWarningMessage(LOCTEXT("WorldBakeComplete", "World Bake process completed successfully!"));
-		}
-		else
-		{
-			ShowWarningMessage(LOCTEXT("WorldBakeSaveFailed",
-			                           "World Bake completed, but assets were not saved. Please check the Output Log and save manually."));
-		}
-	}
-	else
-	{
-		ShowWarningMessage(LOCTEXT("WorldBakeNoObstacles",
-		                           "World Bake completed, but no obstacles were found to generate navigation data."));
-	}
-	return FReply::Handled();
+		"This will DELETE all previously baked navigation Volumes in the target directory and regenerate everything from scratch.\nThis process can take a very long time and cannot be undone.\n\nAre you sure you want to continue?");
+	return FMessageDialog::Open(EAppMsgType::YesNo, DialogText, &DialogTitle) == EAppReturnType::Yes;
 }
 
 void SPathfindingTuner::ShowWarningMessage(const FText& Message) const
@@ -2250,7 +1956,7 @@ FReply SPathfindingTuner::OnRequestPathButtonClicked()
 		}
 
 		// 1. Validate the Target Volume associated with the Pathfinding Component.
-		AVoxelVolumeBase* BaseVolume = Component->GetTargetVolume();
+		AVoxelVolumeBase* BaseVolume = Component->GetCurrentVolume();
 		if (!IsValid(BaseVolume))
 		{
 			if (!bVolumeNotSetWarningShown) // Show this warning only once
@@ -2405,20 +2111,20 @@ void SPathfindingTuner::OnWorldBakeCategoryExpansionChanged(bool bIsExpanded)
 	}
 }
 
-TOptional<float> SPathfindingTuner::GetWorldBakeChunkSize() const
+TOptional<float> SPathfindingTuner::GetWorldBakeVolumeSize() const
 {
 	const UPathfindingTunerSettings* TunerSettings = GetDefault<UPathfindingTunerSettings>();
 
-	return TunerSettings ? TunerSettings->WorldBake_ChunkSize : 0.0f;
+	return TunerSettings ? TunerSettings->WorldBake_VolumeSize : 0.0f;
 }
 
-void SPathfindingTuner::OnWorldBakeChunkSizeCommitted(float NewValue, ETextCommit::Type CommitType)
+void SPathfindingTuner::OnWorldBakeVolumeSizeCommitted(float NewValue, ETextCommit::Type CommitType)
 {
 	UPathfindingTunerSettings* TunerSettings = GetMutableDefault<UPathfindingTunerSettings>();
 
 	if (TunerSettings)
 	{
-		TunerSettings->WorldBake_ChunkSize = NewValue;
+		TunerSettings->WorldBake_VolumeSize = NewValue;
 		TunerSettings->SaveConfig();
 	}
 }
@@ -2527,33 +2233,33 @@ void SPathfindingTuner::OnWorldBakeObstacleProfileChanged(const FAssetData& Asse
 	}
 }
 
-FText SPathfindingTuner::GetEstimatedChunksText() const
+FText SPathfindingTuner::GetEstimatedVolumesText() const
 {
-	if (EstimatedTotalChunks.IsSet())
+	if (EstimatedTotalVolumes.IsSet())
 	{
 		return FText::Format(
-			LOCTEXT("EstimatedChunksResult", "Estimated: {0} Chunks"),
-			FText::AsNumber(EstimatedTotalChunks.GetValue()));
+			LOCTEXT("EstimatedVolumesResult", "Estimated: {0} Volumes"),
+			FText::AsNumber(EstimatedTotalVolumes.GetValue()));
 	}
-	return LOCTEXT("EstimatedChunksPending", "Press 'Calculate' to estimate.");
+	return LOCTEXT("EstimatedVolumesPending", "Press 'Calculate' to estimate.");
 }
 
-FReply SPathfindingTuner::OnCalculateChunksClicked()
+FReply SPathfindingTuner::OnCalculateVolumesClicked()
 {
 	UWorld* World = GEditor->GetEditorWorldContext().World();
 	if (!World)
 	{
 		ShowWarningMessage(LOCTEXT("NoWorld", "Could not get a valid editor world."));
-		EstimatedTotalChunks.Reset();
+		EstimatedTotalVolumes.Reset();
 		return FReply::Handled();
 	}
 	UPathfindingTunerSettings* TunerSettings = GetMutableDefault<UPathfindingTunerSettings>();
 
-	if (!TunerSettings || TunerSettings->WorldBake_ChunkSize <= 0)
+	if (!TunerSettings || TunerSettings->WorldBake_VolumeSize <= 0)
 	{
 		ShowWarningMessage(
-			LOCTEXT("ChunkSizeNotSetForCalc", "Cannot calculate. Please set a valid 'Chunk Size' first."));
-		EstimatedTotalChunks.Reset();
+			LOCTEXT("VolumeSizeNotSetForCalc", "Cannot calculate. Please set a valid 'Volume Size' first."));
+		EstimatedTotalVolumes.Reset();
 		return FReply::Handled();
 	}
 
@@ -2605,16 +2311,16 @@ FReply SPathfindingTuner::OnCalculateChunksClicked()
 	       *WorldBounds.GetSize().ToString());
 	// ====================================================================
 
-	const float ChunkSize = TunerSettings->WorldBake_ChunkSize;
-	const int32 GridMinX = FMath::FloorToInt(WorldBounds.Min.X / ChunkSize);
-	const int32 GridMaxX = FMath::CeilToInt(WorldBounds.Max.X / ChunkSize);
-	const int32 GridMinY = FMath::FloorToInt(WorldBounds.Min.Y / ChunkSize);
-	const int32 GridMaxY = FMath::CeilToInt(WorldBounds.Max.Y / ChunkSize);
-	const int32 GridMinZ = FMath::FloorToInt(WorldBounds.Min.Z / ChunkSize);
-	const int32 GridMaxZ = FMath::CeilToInt(WorldBounds.Max.Z / ChunkSize);
+	const float VolumeSize = TunerSettings->WorldBake_VolumeSize;
+	const int32 GridMinX = FMath::FloorToInt(WorldBounds.Min.X / VolumeSize);
+	const int32 GridMaxX = FMath::CeilToInt(WorldBounds.Max.X / VolumeSize);
+	const int32 GridMinY = FMath::FloorToInt(WorldBounds.Min.Y / VolumeSize);
+	const int32 GridMaxY = FMath::CeilToInt(WorldBounds.Max.Y / VolumeSize);
+	const int32 GridMinZ = FMath::FloorToInt(WorldBounds.Min.Z / VolumeSize);
+	const int32 GridMaxZ = FMath::CeilToInt(WorldBounds.Max.Z / VolumeSize);
 
-	const int32 TotalChunks = (GridMaxX - GridMinX) * (GridMaxY - GridMinY) * (GridMaxZ - GridMinZ);
-	EstimatedTotalChunks = TotalChunks;
+	const int32 TotalVolumes = (GridMaxX - GridMinX) * (GridMaxY - GridMinY) * (GridMaxZ - GridMinZ);
+	EstimatedTotalVolumes = TotalVolumes;
 
 	Invalidate(EInvalidateWidgetReason::Layout);
 

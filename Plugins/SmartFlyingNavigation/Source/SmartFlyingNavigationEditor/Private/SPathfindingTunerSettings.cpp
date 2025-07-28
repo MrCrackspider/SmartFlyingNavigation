@@ -12,7 +12,7 @@ UPathfindingTunerSettings::UPathfindingTunerSettings()
 	bIsDebugSettingsCategoryExpanded = false;
 	bAgentDebugSettingsExpanded = false;
 
-	WorldBake_ChunkSize = 25600.0f;
+	WorldBake_VolumeSize = 25600.0f;
 	WorldBake_VoxelExtent = 100.0f;
 	WorldBake_MaxOctreeDepth = 7;
 	bIsWorldBakeCategoryExpanded = true;

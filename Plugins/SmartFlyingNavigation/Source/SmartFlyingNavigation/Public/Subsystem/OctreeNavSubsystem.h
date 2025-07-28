@@ -1,12 +1,16 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+ï»¿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "NavVolume/OctreeVoxelVolume.h"
 #include "OctreeNavSubsystem.generated.h"
 
-class AOctreeVoxelVolume;
+class UOctreeDataAsset;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVolumeRegistered, AOctreeVoxelVolume*, RegisteredVolume);
+
 /**
  * 
  */
@@ -16,18 +20,31 @@ class SMARTFLYINGNAVIGATION_API UOctreeNavSubsystem : public UWorldSubsystem
 	GENERATED_BODY()
 
 public:
-	void RegisterVolumeChunk(AOctreeVoxelVolume* Volume);
 
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	void RegisterVolumeChunk(AOctreeVoxelVolume* Volume);
 	void UnregisterVolumeChunk(AOctreeVoxelVolume* Volume);
 
 	AOctreeVoxelVolume* GetVolumeChunkAt(const FVector& WorldLocation) const;
+	AOctreeVoxelVolume* GetVolumeByDataAsset(const TSoftObjectPtr<UOctreeDataAsset>& DataAsset) const;
 
-	// TO-DO: °èÃşÀû ±æÃ£±â ±¸Çö
-	// int32 RequestHierarchicalPath(FPathfindingRequest& Request);
+	UPROPERTY(BlueprintAssignable, Category = "Navigation")
+	FOnVolumeRegistered OnVolumeRegistered;
+
+	const TArray<TObjectPtr<AOctreeVoxelVolume>>& GetRegisteredVolumes() const { return RegisteredVolumeChunks; }
+
+#if WITH_EDITOR
+	AOctreeVoxelVolume* FindVolumeContainingPoint_BakeTime(const FVector& WorldLocation) const;
+
+	void ClearAllRegisteredVolumes();
+#endif
 
 protected:
-	// ¿ùµå¿¡ Á¸ÀçÇÏ´Â ¸ğµç Volume ChunkµéÀ» °ü¸®
-	// ºü¸¥ Á¶È¸¸¦ À§ÇØ ±×¸®µå³ª ´Ù¸¥ °ø°£ ºĞÇÒ ±¸Á¶·Î °³¼± °¡´É
+	// ì›”ë“œì— ì¡´ì¬í•˜ëŠ” ëª¨ë“  Volume Chunkë“¤ì„ ê´€ë¦¬
+	// ë¹ ë¥¸ ì¡°íšŒë¥¼ ìœ„í•´ ê·¸ë¦¬ë“œë‚˜ ë‹¤ë¥¸ ê³µê°„ ë¶„í•  êµ¬ì¡°ë¡œ ê°œì„  ê°€ëŠ¥
 	UPROPERTY()
 	TArray<TObjectPtr<AOctreeVoxelVolume>> RegisteredVolumeChunks;
+
+	UPROPERTY()
+	TMap<TSoftObjectPtr<UOctreeDataAsset>, TObjectPtr<AOctreeVoxelVolume>> VolumeDataAssetMap;
 };

@@ -4,21 +4,55 @@
 #include "Strategy/PathfindingStrategy.h"
 #include "Utility/Parallel/MemoryPool.h"
 #include "Utility/AStarStrategyUtils.h"
+#include "Component/PathfindingComponent.h"
+#include "HAL/PlatformProcess.h"
+#include "HAL/ThreadManager.h"
+#include "NavData/WorldNavigationDataAsset.h"
+#include "Utility/PathfindingStreamingProbe.h"
 
+#include "WorldPartition/WorldPartitionSubsystem.h"
+
+FORCEINLINE uint32 GetTypeHash(const TSoftObjectPtr<UOctreeDataAsset>& Ptr)
+{
+	return GetTypeHash(Ptr.ToSoftObjectPath());
+}
+
+static void ReconstructDataAssetPath(
+	TMap<TSoftObjectPtr<UOctreeDataAsset>, TPair<TSoftObjectPtr<UOctreeDataAsset>, int32>> CameFrom,
+	TSoftObjectPtr<UOctreeDataAsset> CurrentDataAsset,
+	TArray<TPair<TSoftObjectPtr<UOctreeDataAsset>, int32>>& OutDataAssetPath)
+{
+	TArray<TPair<TSoftObjectPtr<UOctreeDataAsset>, int32>> TotalPath;
+	TotalPath.Add({ CurrentDataAsset, -1 });
+
+	while (CameFrom.Contains(CurrentDataAsset))
+	{
+		TPair<TSoftObjectPtr<UOctreeDataAsset>, int32> ParentInfo = CameFrom[CurrentDataAsset];
+		CurrentDataAsset = ParentInfo.Key;
+		if (CurrentDataAsset.IsNull()) break;
+		TotalPath.Add(ParentInfo);
+	}
+	Algo::Reverse(TotalPath);
+
+	OutDataAssetPath = TotalPath;
+}
 
 void FPathfindingAsyncTasks::DoThreadedWork()
 {
-	if (!OwnerSubsystem.IsValid() || OwnerSubsystem->GetIsLevelChanging()) // .load() for std::atomic
+	// 서브시스템이 Deinitialize되면 IsValid()가 false를 반환하여 스레드가 안전하게 중단됩니다.
+	if (!OwnerSubsystem.IsValid())
 	{
-		UE_LOG(LogTemp, Error, TEXT("Pathfinding Task [%d] is aborting due to level change."), Request.RequestID);
-		if (OwnerSubsystem.IsValid() && Request.MemoryPool)
+		UE_LOG(LogTemp, Warning, TEXT("Pathfinding Task [%d] is aborting because the subsystem is no longer valid."), Request.RequestID);
+		// 메모리 풀 반환 로직은 Abandon()에서 처리되므로 여기서 직접 호출할 필요가 없을 수 있지만,
+		// 안전을 위해 유지하거나 Abandon()으로 통일할 수 있습니다.
+		if (Request.MemoryPool)
 		{
 			OwnerSubsystem->ReturnPool(Request.MemoryPool);
 		}
 		delete this;
 		return;
 	}
-	
+
 	FPathfindingResult Result;
 	Result.Request = Request;
 	Result.bSuccess = false;
@@ -52,13 +86,12 @@ void FPathfindingAsyncTasks::Abandon()
 		Result.Request = Request;
 		Result.bSuccess = false;
 		OwnerSubsystem->QueueCompletedResult(Result);
-	}
 
-	if (OwnerSubsystem.IsValid() && Request.MemoryPool)
-	{
-		OwnerSubsystem->ReturnPool(Request.MemoryPool);
+		if (Request.MemoryPool)
+		{
+			OwnerSubsystem->ReturnPool(Request.MemoryPool);
+		}
 	}
-
 	delete this;
 }
 
@@ -69,46 +102,77 @@ void FPathfindingAsyncTasks::Abandon()
 void UPathfindingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
-	bIsLevelChanging = false;
 
-	if (PathfindingThreadPool)
-	{
-		return;
-	}
-	
-	const int32 RequestedNumThreads = this->CurrentNumWorkerThreads;
-	const int32 NumPhysicalCores = FPlatformMisc::NumberOfCores();
-	const int32 IdealMaxThreads = FMath::Max(1, NumPhysicalCores - 2); // Leave cores for game and render threads
-	const int32 FinalNumThreads = FMath::Clamp(RequestedNumThreads, 1, IdealMaxThreads);
-	
+	UWorld* World = GetWorld();
+	UE_LOG(LogTemp, Log, TEXT("PathfindingSubsystem::Initialize for world '%s'."), *World->GetMapName());
 
-	PathfindingThreadPool = FQueuedThreadPool::Allocate();
-	if (PathfindingThreadPool)
-	{
-		PathfindingThreadPool->Create(FinalNumThreads, 32 * 1024, TPri_Normal, TEXT("PathfindingThreadPool"));
-		this->CurrentNumWorkerThreads = FinalNumThreads;
-	}
-	else
-	{
-		if(PathfindingThreadPool)
-		{
-			PathfindingThreadPool->Destroy();
-			PathfindingThreadPool = nullptr;
-		}
-		this->CurrentNumWorkerThreads = 0;
-	}
-
-	NextRequestID.Set(0);
-}
-
-
-void UPathfindingSubsystem::Deinitialize()
-{
 	if (PathfindingThreadPool)
 	{
 		PathfindingThreadPool->Destroy();
 		PathfindingThreadPool = nullptr;
 	}
+
+	const int32 RequestedNumThreads = this->CurrentNumWorkerThreads;
+	const int32 NumPhysicalCores = FPlatformMisc::NumberOfCores();
+	const int32 IdealMaxThreads = FMath::Max(1, NumPhysicalCores - 2); 
+	const int32 FinalNumThreads = FMath::Clamp(RequestedNumThreads, 1, IdealMaxThreads);
+
+	PathfindingThreadPool = FQueuedThreadPool::Allocate();
+	if (PathfindingThreadPool)
+	{
+		if (PathfindingThreadPool->Create(FinalNumThreads, 32 * 1024, TPri_Normal, TEXT("PathfindingThreadPool")))
+		{
+			this->CurrentNumWorkerThreads = FinalNumThreads;
+			UE_LOG(LogTemp, Log, TEXT("PathfindingThreadPool created with %d threads."), FinalNumThreads);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("Failed to create PathfindingThreadPool."));
+			PathfindingThreadPool->Destroy();
+			PathfindingThreadPool = nullptr;
+			this->CurrentNumWorkerThreads = 0;
+		}
+	}
+
+	const FString OriginalMapName = UWorld::RemovePIEPrefix(World->GetMapName());
+	const FString ManifestAssetName = TEXT("DA_WorldNav_") + OriginalMapName;
+	const FString ManifestAssetPath = FPaths::Combine(TEXT("/Game/Data/Navigation/"), ManifestAssetName);
+
+	CurrentWorldNavData = LoadObject<UWorldNavigationDataAsset>(nullptr, *ManifestAssetPath);
+
+	if (CurrentWorldNavData)
+	{
+		UE_LOG(LogTemp, Log, TEXT("World Navigation Data Manifest '%s' loaded successfully."), *ManifestAssetPath);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("World Navigation Data Manifest '%s' could not be found. Long-range hierarchical pathfinding may be disabled."), *ManifestAssetPath);
+	}
+
+	NextRequestID.Set(0);
+}
+
+void UPathfindingSubsystem::Deinitialize()
+{
+	UE_LOG(LogTemp, Log, TEXT("PathfindingSubsystem::Deinitialize for world '%s'."), *GetWorld()->GetMapName());
+
+	for (auto& ProbePair : ActiveStreamingProbes)
+	{
+		if (IsValid(ProbePair.Value))
+		{
+			ProbePair.Value->Destroy();
+		}
+	}
+	ActiveStreamingProbes.Empty();
+
+	if (PathfindingThreadPool)
+	{
+		UE_LOG(LogTemp, Log, TEXT("Destroying PathfindingThreadPool."));
+		PathfindingThreadPool->Destroy();
+		PathfindingThreadPool = nullptr;
+	}
+
+	CompletedTasksQueue.Empty();
 
 	{
 		FScopeLock Lock(&PoolLock);
@@ -134,7 +198,7 @@ void UPathfindingSubsystem::Deinitialize()
 //~=============================================================================
 
 
-int32 UPathfindingSubsystem::RequestPath(FPathfindingRequest& Request)
+int32 UPathfindingSubsystem::RequestPath(const UObject* WorldContextObject, FPathfindingRequest& Request)
 {
 	if (!PathfindingThreadPool)
 	{
@@ -165,12 +229,42 @@ int32 UPathfindingSubsystem::RequestPath(FPathfindingRequest& Request)
 
 }
 
+int32 UPathfindingSubsystem::RequestHierarchicalPath(const UObject* WorldContextObject, FHierarchicalPathRequest& Request)
+{
+	if (!PathfindingThreadPool || !Request.RequestingComponent.IsValid() || !Request.Strategy.IsValid())
+	{
+		return -1;
+	}
+
+	Request.RequestID = NextRequestID.Increment();
+
+	// 태스크 객체를 생성
+	FHierarchicalPathfindingTask NewTask(Request);
+
+	// 데이터 기반의 상위 레벨 경로를 탐색
+	if (!FindHighLevelPath(WorldContextObject, Request, NewTask.HighLevelDataAssetPath))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Hierarchical Pathfinding Failed for RequestID %d: Could not find a high-level path of data assets."), Request.RequestID);
+		Request.OnHierarchicalPathComplete.ExecuteIfBound({}, false);
+		return -1;
+	}
+
+	// 태스크를 활성 목록에 추가하고, 첫 번째 세그먼트 처리를 위해 상태를 변경
+	// 첫 번째 볼륨은 Agent가 이미 그 안에 있으므로 항상 로드되어 있다고 가정
+	NewTask.State = EHierarchicalTaskState::ReadyToFindLocalPath;
+	ActiveHierarchicalTasks.Add(Request.RequestID, NewTask);
+
+	// 4. 상태 머신의 첫 번째 턴을 시작합니다.
+	ProcessNextHierarchicalSegment(WorldContextObject, ActiveHierarchicalTasks.FindChecked(Request.RequestID));
+
+	return Request.RequestID;
+}
 
 void UPathfindingSubsystem::Tick(float DeltaTime)
 {
 	TArray<FPathfindingResult> TasksToProcessThisFrame;
 	TasksToProcessThisFrame.Reserve(MaxCallbacksPerFrame);
-	
+
 	for (int32 i = 0; i < MaxCallbacksPerFrame; ++i)
 	{
 		FPathfindingResult TempResult;
@@ -183,14 +277,64 @@ void UPathfindingSubsystem::Tick(float DeltaTime)
 			break;
 		}
 	}
-	
 
 	for (const FPathfindingResult& Result : TasksToProcessThisFrame)
 	{
-		OnPathfindingCompleted(Result.Request, Result.WorldPath, Result.bSuccess);
+		bool bIsHierarchicalSegment = false;
+		for (auto& Elem : ActiveHierarchicalTasks)
+		{
+			if (Elem.Value.LastLocalRequestID == Result.Request.RequestID)
+			{
+				OnHierarchicalSegmentCompleted(Elem.Key, Result.WorldPath, Result.bSuccess);
+				bIsHierarchicalSegment = true;
+				break;
+			}
+		}
+
+		if (!bIsHierarchicalSegment)
+		{
+			OnPathfindingCompleted(Result.Request, Result.WorldPath, Result.bSuccess);
+		}
+	}
+
+	UOctreeNavSubsystem* NavSubsystem = GetWorld()->GetSubsystem<UOctreeNavSubsystem>();
+	if (!NavSubsystem) return;
+
+	for (auto& TaskPair : ActiveHierarchicalTasks)
+	{
+		FHierarchicalPathfindingTask& Task = TaskPair.Value;
+
+		if (Task.State == EHierarchicalTaskState::WaitingForVolumeToLoad)
+		{
+			const TSoftObjectPtr<UOctreeDataAsset> WaitingForDataAsset = Task.HighLevelDataAssetPath[Task.CurrentSegmentIndex].Key;
+
+			AOctreeVoxelVolume* LoadedVolume = NavSubsystem->GetVolumeByDataAsset(WaitingForDataAsset);
+			if (LoadedVolume && LoadedVolume->IsReadyForNavigation())
+			{
+				UE_LOG(LogTemp, Log, TEXT("Segment %d for RequestID %d: Volume with data '%s' has been successfully loaded! Resuming task."), Task.CurrentSegmentIndex, Task.OriginalRequest.RequestID, *WaitingForDataAsset.ToString());
+				Task.State = EHierarchicalTaskState::ReadyToFindLocalPath;
+
+				if (UPathfindingComponent* RequestingComp = Task.OriginalRequest.RequestingComponent.Get())
+				{
+					ProcessNextHierarchicalSegment(RequestingComp, Task);
+				}
+				else
+				{
+					UE_LOG(LogTemp, Warning, TEXT("Hierarchical path failed for RequestID %d: Requesting component is no longer valid."), Task.OriginalRequest.RequestID);
+					Task.State = EHierarchicalTaskState::Failed;
+					DestroyStreamingProbeForRequest(nullptr, Task.OriginalRequest.RequestID);
+					Task.OriginalRequest.OnHierarchicalPathComplete.ExecuteIfBound({}, false);
+					ActiveHierarchicalTasks.Remove(Task.OriginalRequest.RequestID);
+				}
+			}
+		}
 	}
 }
 
+TStatId UPathfindingSubsystem::GetStatId() const
+{
+	RETURN_QUICK_DECLARE_CYCLE_STAT(UPathfindingSubsystem, STATGROUP_Tickables);
+}
 
 //~=============================================================================
 // Debug & Configuration
@@ -311,68 +455,399 @@ void UPathfindingSubsystem::OnPathfindingCompleted(const FPathfindingRequest& Re
 	}
 }
 
-void UPathfindingSubsystem::OnPreLoadMap(const FString& MapName)
+void UPathfindingSubsystem::OnHierarchicalSegmentCompleted(int32 HierarchicalRequestID, const TArray<FVector>& SegmentPath, bool bSuccess)
 {
-	UE_LOG(LogTemp, Warning, TEXT("UPathfindingSubsystem::OnPreLoadMap: Tearing down pathfinding system for level change."));
+	FHierarchicalPathfindingTask* Task = ActiveHierarchicalTasks.Find(HierarchicalRequestID);
+	if (!Task) return;
 
-	// 1. Set the level changing flag to true to prevent new requests.
-	bIsLevelChanging = true;
-
-	// 2. Destroy the thread pool to forcibly stop all ongoing and queued tasks.
-	//    This is the safest and most reliable method.
-	if (PathfindingThreadPool)
+	const UObject* WorldContextObject = Task->OriginalRequest.RequestingComponent.Get();
+	if (!bSuccess)
 	{
-		PathfindingThreadPool->Destroy();
-		PathfindingThreadPool = nullptr;
+		UE_LOG(LogTemp, Error, TEXT("Hierarchical Pathfinding Failed for RequestID %d: Segment %d failed."), HierarchicalRequestID, Task->CurrentSegmentIndex);
+		Task->OriginalRequest.OnHierarchicalPathComplete.ExecuteIfBound({}, false);
+
+		DestroyStreamingProbeForRequest(WorldContextObject, HierarchicalRequestID);
+		ActiveHierarchicalTasks.Remove(HierarchicalRequestID);
+		return;
 	}
 
-	// 3. Empty the completed tasks queue to discard any stale results from the old level.
-	CompletedTasksQueue.Empty();
-
-	// 4. Clean up all idle memory pools as well.
+	if (Task->CombinedWorldPath.Num() > 0 && SegmentPath.Num() > 0)
 	{
-		FScopeLock Lock(&PoolLock);
-		for (FPathNodeMemoryPoolBase* Pool : IdleGridPools) { delete Pool; }
-		IdleGridPools.Empty();
-		for (FPathNodeMemoryPoolBase* Pool : IdleOctreePools) { delete Pool; }
-		IdleOctreePools.Empty();
-	}
-}
-
-void UPathfindingSubsystem::OnPostLoadMap(UWorld* LoadedWorld)
-{
-	UE_LOG(LogTemp, Warning, TEXT("UPathfindingSubsystem::OnPostLoadMap: Re-initializing pathfinding system."));
-
-	// 1. Since the new level is loaded, re-create the thread pool.
-	//    (This is the same thread pool creation logic from the Initialize function).
-	const int32 RequestedNumThreads = this->CurrentNumWorkerThreads;
-	const int32 NumPhysicalCores = FPlatformMisc::NumberOfCores();
-	const int32 IdealMaxThreads = FMath::Max(1, NumPhysicalCores - 2); // Leave cores for game and render threads
-	const int32 FinalNumThreads = FMath::Clamp(RequestedNumThreads, 1, IdealMaxThreads);
-
-	PathfindingThreadPool = FQueuedThreadPool::Allocate();
-	if (PathfindingThreadPool)
-	{
-		PathfindingThreadPool->Create(FinalNumThreads, 32 * 1024, TPri_Normal, TEXT("PathfindingThreadPool"));
-		this->CurrentNumWorkerThreads = FinalNumThreads;
+		Task->CombinedWorldPath.Append(SegmentPath.GetData() + 1, SegmentPath.Num() - 1);
 	}
 	else
 	{
-		this->CurrentNumWorkerThreads = 0;
+		Task->CombinedWorldPath.Append(SegmentPath);
 	}
 
-	// 2. Set the level changing flag back to false, allowing the system to accept new requests.
-	bIsLevelChanging = false;
+	Task->CurrentSegmentIndex++;
+
+	if (Task->CurrentSegmentIndex >= Task->HighLevelDataAssetPath.Num())
+	{
+		Task->State = EHierarchicalTaskState::Complete;
+		Task->OriginalRequest.OnHierarchicalPathComplete.ExecuteIfBound(Task->CombinedWorldPath, true);
+
+		DestroyStreamingProbeForRequest(WorldContextObject, HierarchicalRequestID);
+		ActiveHierarchicalTasks.Remove(HierarchicalRequestID);
+	}
+	else
+	{
+		Task->State = EHierarchicalTaskState::ReadyToFindLocalPath;
+		ProcessNextHierarchicalSegment(WorldContextObject, *Task);
+	}
 }
 
-void UPathfindingSubsystem::OnWorldBeingInitialized(UWorld* World,
-	const UWorld::InitializationValues IVS)
+void UPathfindingSubsystem::CreateStreamingProbeForRequest(const UObject* WorldContextObject, int32 RequestID, const FVector& Location)
 {
-	OnPreLoadMap(World->GetMapName()); 
+	DestroyStreamingProbeForRequest(WorldContextObject, RequestID);
+
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+	if (World)
+	{
+		APathfindingStreamingProbe* NewProbe = World->SpawnActor<APathfindingStreamingProbe>();
+		if (NewProbe)
+		{
+			NewProbe->ActivateProbe(Location);
+			ActiveStreamingProbes.Add(RequestID, NewProbe);
+		}
+	}
 }
 
-void UPathfindingSubsystem::OnWorldInitialized(UWorld* World,
-	const UWorld::InitializationValues IVS)
+void UPathfindingSubsystem::DestroyStreamingProbeForRequest(const UObject* WorldContextObject, int32 RequestID)
 {
-	OnPostLoadMap(World);
+	if (TObjectPtr<APathfindingStreamingProbe>* FoundProbe = ActiveStreamingProbes.Find(RequestID))
+	{
+		if (IsValid(*FoundProbe))
+		{
+			(*FoundProbe)->Destroy();
+		}
+		ActiveStreamingProbes.Remove(RequestID);
+	}
+}
+
+//~=============================================================================
+// Hierarchical Pathfinding Internals
+//~=============================================================================
+bool UPathfindingSubsystem::FindHighLevelPath(const UObject* WorldContextObject, const FHierarchicalPathRequest& Request, TArray<TPair<TSoftObjectPtr<UOctreeDataAsset>, int32>>& OutDataAssetPath)
+{
+	if (!CurrentWorldNavData)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FindHighLevelPath failed: World Navigation Data Manifest (CurrentWorldNavData) is not loaded."));
+		return false;
+	}
+
+	TSoftObjectPtr<UOctreeDataAsset> StartDataAsset, EndDataAsset;
+	FBox StartVolumeBounds, EndVolumeBounds;
+
+	for (const FVolumeSpatialInfo& Info : CurrentWorldNavData->VolumeInfos)
+	{
+		if (Info.Bounds.IsInside(Request.StartLocation))
+		{
+			StartDataAsset = Info.NavDataAsset;
+			StartVolumeBounds = Info.Bounds;
+		}
+		if (Info.Bounds.IsInside(Request.EndLocation))
+		{
+			EndDataAsset = Info.NavDataAsset;
+			EndVolumeBounds = Info.Bounds;
+		}
+	}
+
+	if (StartDataAsset.IsNull() )
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FindHighLevelPath Failed: Start location is not inside any navigation volume defined in the World Manifest. Start: %s"), *StartDataAsset.ToString());
+		return false;
+	}
+	if (EndDataAsset.IsNull())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FindHighLevelPath Failed: End location is not inside any navigation volume defined in the World Manifest. End: %s"), *EndDataAsset.ToString());
+		return false;
+	}
+
+	if (StartDataAsset == EndDataAsset)
+	{
+		OutDataAssetPath.Add({ StartDataAsset, -1 });
+		return true;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("--- Starting Data-Driven High-Level A* Search from '%s' to '%s' ---"), *StartDataAsset.ToString(), *EndDataAsset.ToString());
+
+	struct FDataAssetNode
+	{
+		TSoftObjectPtr<UOctreeDataAsset> DataAsset;
+		FBox VolumeBounds;
+		float GCost = 0;
+		float HCost = 0;
+		float GetFCost() const { return GCost + HCost; }
+		bool operator>(const FDataAssetNode& Other) const { return GetFCost() > Other.GetFCost(); }
+		bool operator<(const FDataAssetNode& Other) const { return GetFCost() < Other.GetFCost(); }
+	};
+
+	TArray<FDataAssetNode> OpenSet;
+	TMap<TSoftObjectPtr<UOctreeDataAsset>, TPair<TSoftObjectPtr<UOctreeDataAsset>, int32>> CameFrom;
+	TMap<TSoftObjectPtr<UOctreeDataAsset>, float> GCostMap;
+
+	const float HCost = FVector::Dist(StartVolumeBounds.GetCenter(), EndVolumeBounds.GetCenter());
+	FDataAssetNode StartNode = { StartDataAsset, StartVolumeBounds, 0.f, HCost };
+	OpenSet.HeapPush(StartNode, TGreater<FDataAssetNode>());
+	GCostMap.Add(StartDataAsset, 0.f);
+
+	while (OpenSet.Num() > 0)
+	{
+		FDataAssetNode CurrentNode;
+		OpenSet.HeapPop(CurrentNode, TGreater<FDataAssetNode>());
+
+		if (CurrentNode.DataAsset == EndDataAsset)
+		{
+			UE_LOG(LogTemp, Log, TEXT("--- Data-Driven High-Level A* Search SUCCEEDED! Reconstructing path... ---"));
+			ReconstructDataAssetPath(CameFrom, CurrentNode.DataAsset, OutDataAssetPath);
+			return true;
+		}
+
+		UOctreeDataAsset* CurrentData = CurrentNode.DataAsset.LoadSynchronous();
+		if (!CurrentData)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("A* Search: Failed to load data asset '%s'."), *CurrentNode.DataAsset.ToString());
+			continue;
+		}
+		CurrentData->DecompressAndInitialize();
+
+		for (const auto& PortalPair : CurrentData->PortalNodes)
+		{
+			const FVolumePortalLink& PortalLink = PortalPair.Value;
+			TSoftObjectPtr<UOctreeDataAsset> NeighborDataAsset = PortalLink.TargetVolume;
+			FBox NeighborBounds;
+			bool bFoundNeighborInfo = false;
+			for (const FVolumeSpatialInfo& Info : CurrentWorldNavData->VolumeInfos)
+			{
+				if (Info.NavDataAsset == NeighborDataAsset)
+				{
+					NeighborBounds = Info.Bounds;
+					bFoundNeighborInfo = true;
+					break;
+				}
+			}
+			if (!bFoundNeighborInfo) continue;
+
+			const float NewGCost = CurrentNode.GCost + FVector::Dist(CurrentNode.VolumeBounds.GetCenter(), NeighborBounds.GetCenter());
+			if (!GCostMap.Contains(NeighborDataAsset) || NewGCost < GCostMap[NeighborDataAsset])
+			{
+				GCostMap.Add(NeighborDataAsset, NewGCost);
+				const float NeighborHCost = FVector::Dist(NeighborBounds.GetCenter(), EndVolumeBounds.GetCenter());
+				FDataAssetNode NeighborNode = { NeighborDataAsset, NeighborBounds, NewGCost, NeighborHCost };
+				OpenSet.HeapPush(NeighborNode, TGreater<FDataAssetNode>());
+				CameFrom.Add(NeighborDataAsset, { CurrentNode.DataAsset, PortalPair.Key });
+			}
+		}
+	}
+
+	UE_LOG(LogTemp, Error, TEXT("--- Data-Driven High-Level A* Search FAILED! OpenSet is empty but goal was not reached. ---"));
+	return false;
+}
+
+void UPathfindingSubsystem::ProcessNextHierarchicalSegment(const UObject* WorldContextObject, FHierarchicalPathfindingTask& Task)
+{
+	if (!IsValid(WorldContextObject))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Hierarchical path failed for RequestID %d: WorldContextObject is invalid."), Task.OriginalRequest.RequestID);
+		Task.State = EHierarchicalTaskState::Failed;
+		DestroyStreamingProbeForRequest(WorldContextObject, Task.OriginalRequest.RequestID);
+		Task.OriginalRequest.OnHierarchicalPathComplete.ExecuteIfBound({}, false);
+		ActiveHierarchicalTasks.Remove(Task.OriginalRequest.RequestID);
+		return;
+	}
+
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+	if (!World)
+	{
+		UE_LOG(LogTemp, Error, TEXT("Hierarchical path failed for RequestID %d: Could not get World from WorldContextObject."), Task.OriginalRequest.RequestID);
+		Task.State = EHierarchicalTaskState::Failed;
+		DestroyStreamingProbeForRequest(WorldContextObject, Task.OriginalRequest.RequestID);
+		Task.OriginalRequest.OnHierarchicalPathComplete.ExecuteIfBound({}, false);
+		ActiveHierarchicalTasks.Remove(Task.OriginalRequest.RequestID);
+		return;
+	}
+
+	if (!Task.HighLevelDataAssetPath.IsValidIndex(Task.CurrentSegmentIndex))
+	{
+		// OnHierarchicalSegmentCompleted에서 모든 세그먼트가 완료되었을 때 처리
+		Task.State = EHierarchicalTaskState::Complete;
+		return;
+	}
+
+	const TSoftObjectPtr<UOctreeDataAsset> CurrentDataAsset = Task.HighLevelDataAssetPath[Task.CurrentSegmentIndex].Key;
+
+	if (Task.State == EHierarchicalTaskState::ReadyToFindLocalPath)
+	{
+		UOctreeNavSubsystem* NavSubsystem = World->GetSubsystem<UOctreeNavSubsystem>();
+		AOctreeVoxelVolume* TargetVolume = NavSubsystem ? NavSubsystem->GetVolumeByDataAsset(CurrentDataAsset) : nullptr;
+
+		if (TargetVolume && TargetVolume->IsReadyForNavigation())
+		{
+			UE_LOG(LogTemp, Log, TEXT("Segment %d for RequestID %d: Volume is ready. Finding local path in '%s'."), Task.CurrentSegmentIndex, Task.OriginalRequest.RequestID, *TargetVolume->GetName());
+
+			// 이 볼륨을 로드하기 위해 생성했을 수 있는 프로브는 이제 임무를 완수했으므로 파괴
+			DestroyStreamingProbeForRequest(WorldContextObject, Task.OriginalRequest.RequestID);
+
+			FVector StartLocation, EndLocation;
+			bool bLocationsValid = true;
+
+			if (Task.CurrentSegmentIndex == 0)
+			{
+				StartLocation = Task.OriginalRequest.StartLocation;
+			}
+			else
+			{
+				const TSoftObjectPtr<UOctreeDataAsset> PreviousDataAsset = Task.HighLevelDataAssetPath[Task.CurrentSegmentIndex - 1].Key;
+				const int32 ExitPortalNodeIndexInPrevVolume = Task.HighLevelDataAssetPath[Task.CurrentSegmentIndex - 1].Value;
+
+				if (UOctreeDataAsset* PreviousData = PreviousDataAsset.LoadSynchronous())
+				{
+					PreviousData->DecompressAndInitialize();
+					if (const FVolumePortalLink* PortalLink = PreviousData->PortalNodes.Find(ExitPortalNodeIndexInPrevVolume))
+					{
+						if (UOctreeDataAsset* CurrentData = CurrentDataAsset.LoadSynchronous())
+						{
+							CurrentData->DecompressAndInitialize();
+							if (CurrentData->NodePool.IsValidIndex(PortalLink->TargetNodeIndex))
+							{
+								StartLocation = CurrentData->NodePool[PortalLink->TargetNodeIndex].Bounds.GetCenter();
+							}
+							else { bLocationsValid = false; }
+						}
+						else { bLocationsValid = false; }
+					}
+					else { bLocationsValid = false; }
+				}
+				else { bLocationsValid = false; }
+			}
+
+			const bool bIsLastSegment = (Task.CurrentSegmentIndex == Task.HighLevelDataAssetPath.Num() - 1);
+			if (bIsLastSegment)
+			{
+				EndLocation = Task.OriginalRequest.EndLocation;
+			}
+			else
+			{
+				const int32 ExitPortalNodeIndex = Task.HighLevelDataAssetPath[Task.CurrentSegmentIndex].Value;
+				if (UOctreeDataAsset* CurrentData = CurrentDataAsset.LoadSynchronous())
+				{
+					CurrentData->DecompressAndInitialize();
+					if (CurrentData->NodePool.IsValidIndex(ExitPortalNodeIndex))
+					{
+						EndLocation = CurrentData->NodePool[ExitPortalNodeIndex].Bounds.GetCenter();
+					}
+					else { bLocationsValid = false; }
+				}
+				else { bLocationsValid = false; }
+			}
+
+			if (!bLocationsValid || StartLocation.IsZero() || EndLocation.IsZero())
+			{
+				UE_LOG(LogTemp, Error, TEXT("Hierarchical path failed for RequestID %d: Could not calculate Start or End location for segment %d."), Task.OriginalRequest.RequestID, Task.CurrentSegmentIndex);
+				Task.State = EHierarchicalTaskState::Failed;
+				DestroyStreamingProbeForRequest(WorldContextObject, Task.OriginalRequest.RequestID);
+				Task.OriginalRequest.OnHierarchicalPathComplete.ExecuteIfBound({}, false);
+				ActiveHierarchicalTasks.Remove(Task.OriginalRequest.RequestID);
+				return;
+			}
+
+			FPathfindingRequest LocalRequest;
+			LocalRequest.RequestingObject = Task.OriginalRequest.RequestingComponent.Get();
+			LocalRequest.StartLocation = StartLocation;
+			LocalRequest.EndLocation = EndLocation;
+			LocalRequest.AgentRadius = Task.OriginalRequest.AgentRadius;
+			LocalRequest.Strategy = Task.OriginalRequest.Strategy;
+			LocalRequest.NodeType = EPathfindingNodeType::Octree;
+
+			if (UPathfindingComponent* Comp = Task.OriginalRequest.RequestingComponent.Get())
+			{
+				Comp->CreateOctreeDataSnapshot(TargetVolume, LocalRequest.NavigationData);
+			}
+
+			Task.LastLocalRequestID = RequestPath(WorldContextObject, LocalRequest);
+			if (Task.LastLocalRequestID != -1)
+			{
+				Task.State = EHierarchicalTaskState::FindingLocalPath;
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error, TEXT("Hierarchical path failed for RequestID %d: Failed to submit local path request for segment %d."), Task.OriginalRequest.RequestID, Task.CurrentSegmentIndex);
+				Task.State = EHierarchicalTaskState::Failed;
+				DestroyStreamingProbeForRequest(WorldContextObject, Task.OriginalRequest.RequestID);
+				Task.OriginalRequest.OnHierarchicalPathComplete.ExecuteIfBound({}, false);
+				ActiveHierarchicalTasks.Remove(Task.OriginalRequest.RequestID);
+			}
+		}
+		// 다음 세그먼트의 볼륨이 로드되지 않은 경우, 프로브 활성화
+		else
+		{
+			UE_LOG(LogTemp, Log, TEXT("Segment %d for RequestID %d: Volume with data '%s' is not loaded. Activating streaming probe."), Task.CurrentSegmentIndex, Task.OriginalRequest.RequestID, *CurrentDataAsset.ToString());
+
+			bool bFoundVolumeInfo = false;
+			if (CurrentWorldNavData)
+			{
+				for (const FVolumeSpatialInfo& Info : CurrentWorldNavData->VolumeInfos)
+				{
+					if (Info.NavDataAsset == CurrentDataAsset)
+					{
+						DestroyStreamingProbeForRequest(WorldContextObject, Task.OriginalRequest.RequestID);
+
+						const FVector SpawnLocation = Info.Bounds.GetCenter();
+						const FTransform SpawnTransform(FRotator::ZeroRotator, SpawnLocation);
+
+						FActorSpawnParameters SpawnParams;
+						SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+						if (const AActor* ContextActor = Cast<const AActor>(WorldContextObject))
+						{
+							SpawnParams.OverrideLevel = ContextActor->GetLevel();
+						}
+						else if (const UActorComponent* ContextComponent = Cast<const UActorComponent>(WorldContextObject))
+						{
+							if (ContextComponent->GetOwner())
+							{
+								SpawnParams.OverrideLevel = ContextComponent->GetOwner()->GetLevel();
+							}
+						}
+
+						UE_LOG(LogTemp, Warning, TEXT("[Probe Spawner] Attempting to spawn probe in Level: %s"),
+							SpawnParams.OverrideLevel ? *SpawnParams.OverrideLevel->GetPathName() : TEXT("NULL (This will likely fail)"));
+						UE_LOG(LogTemp, Warning, TEXT("[Probe Spawner] Spawning at Transform: %s"), *SpawnTransform.ToString());
+
+						if (APathfindingStreamingProbe* NewProbe = World->SpawnActor<APathfindingStreamingProbe>(APathfindingStreamingProbe::StaticClass(), SpawnTransform, SpawnParams))
+						{
+							UE_LOG(LogTemp, Warning, TEXT("[Probe Spawner] Spawn Succeeded. Probe's location post-spawn: %s"), *NewProbe->GetActorLocation().ToString());
+
+							const float RequiredRadius = Info.Bounds.GetExtent().Size();
+							NewProbe->SetupStreamingSource(RequiredRadius);
+							NewProbe->ActivateProbe(SpawnLocation);
+
+							ActiveStreamingProbes.Add(Task.OriginalRequest.RequestID, NewProbe);
+						}
+						else
+						{
+							UE_LOG(LogTemp, Error, TEXT("[Probe Spawner] Spawn FAILED. World->SpawnActor returned nullptr."));
+						}
+
+						bFoundVolumeInfo = true;
+						break;
+					}
+				}
+			}
+
+			if (bFoundVolumeInfo)
+			{
+				Task.State = EHierarchicalTaskState::WaitingForVolumeToLoad;
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error, TEXT("Hierarchical path failed for RequestID %d: Could not find spatial info for data asset '%s' in the world manifest."), Task.OriginalRequest.RequestID, *CurrentDataAsset.ToString());
+				Task.State = EHierarchicalTaskState::Failed;
+				DestroyStreamingProbeForRequest(WorldContextObject, Task.OriginalRequest.RequestID);
+				Task.OriginalRequest.OnHierarchicalPathComplete.ExecuteIfBound({}, false);
+				ActiveHierarchicalTasks.Remove(Task.OriginalRequest.RequestID);
+			}
+		}
+	}
 }

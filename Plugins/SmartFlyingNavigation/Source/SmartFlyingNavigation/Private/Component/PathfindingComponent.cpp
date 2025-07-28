@@ -14,6 +14,9 @@
 #include "NavVolume/OctreeVoxelVolume.h"
 #include "Engine/Engine.h"
 #include "Strategy/AStarStrategy.h"
+#include "Components/WorldPartitionStreamingSourceComponent.h"
+//#include "Subsystem/OctreeNavSubsystem.h"
+#include "Utility/Parallel/PathfindingRequest.h"
 
 UPathfindingComponent::UPathfindingComponent()
 {
@@ -28,16 +31,13 @@ UPathfindingComponent::UPathfindingComponent()
 	PathSplinePtr = CreateDefaultSubobject<USplineComponent>(TEXT("SplineComponent"));
 
 	DebugSphereComponent = CreateDefaultSubobject<USphereComponent>(TEXT("DebugAgentRadiusSphere"));
-
 	DebugSphereComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	DebugSphereComponent->SetCanEverAffectNavigation(false);
 	DebugSphereComponent->bHiddenInGame = true;
 	DebugSphereComponent->SetSphereRadius(BaseAgentRadius);
 
-	if (TargetVolume.Get() != nullptr && IsValid(TargetVolume.Get()))
-	{
-		GoalUpdateThreshold = TargetVolume->VoxelExtent;
-	}
+	StreamingSourceComponent = CreateDefaultSubobject<UWorldPartitionStreamingSourceComponent>(TEXT("StreamingSourceComponent"));
+	StreamingSourceComponent->DisableStreamingSource();
 }
 
 void UPathfindingComponent::BeginPlay()
@@ -47,10 +47,8 @@ void UPathfindingComponent::BeginPlay()
 	UWorld* World = GetWorld();
 	if (!ensure(World)) return;
 
-	PathSubsystem = GEngine->GetEngineSubsystem<UPathfindingSubsystem>();
-	AvoidanceSubsystem = GEngine->GetEngineSubsystem<UAvoidanceSubsystem>();
-
-	if (!ensure(PathSubsystem))
+	PathfindingSubsystem = World->GetSubsystem<UPathfindingSubsystem>();
+	if (!ensure(PathfindingSubsystem))
 	{
 		return;
 	}
@@ -61,6 +59,8 @@ void UPathfindingComponent::BeginPlay()
 		PathSplinePtr->SetupAttachment(GetOwner()->GetRootComponent());
 	}
 
+
+	AvoidanceSubsystem = World->GetSubsystem<UAvoidanceSubsystem>();
 	if (AvoidanceSubsystem)
 	{
 		AvoidanceSubsystem->RegisterAgent(this);
@@ -74,6 +74,22 @@ void UPathfindingComponent::BeginPlay()
 		{
 			PathfindingStrategy->Initialize();
 		}
+	}
+
+	if (StreamingSourceComponent)
+	{
+		ActivateStreaming();
+	}
+
+	if (AVoxelVolumeBase* StartingVolume = GetCurrentVolume())
+	{
+		GoalUpdateThreshold = StartingVolume->VoxelExtent;
+	}
+	else
+	{
+		// 기본값 설정
+		// 근데 이거를 VoxelExtent값이랑 동일하게 처리하고 싶음.
+		GoalUpdateThreshold = 100.0f;
 	}
 }
 
@@ -104,6 +120,11 @@ void UPathfindingComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		GetWorld()->GetTimerManager().ClearAllTimersForObject(this);
 	}
 
+	if (StreamingSourceComponent)
+	{
+		DeactivateStreaming();
+	}
+
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -118,13 +139,43 @@ void UPathfindingComponent::OnRegister()
 	}
 }
 
+void UPathfindingComponent::OnVolumeBecameReadyForPendingRequest(AOctreeVoxelVolume* RegisteredVolume)
+{
+	// 펜딩된 요청이 없거나, 등록된 볼륨이 내가 기다리던 볼륨이 아니면 무시
+	if (!bHasPendingPathRequest) return;
+
+	UOctreeNavSubsystem* NavSubsystem = GetWorld()->GetSubsystem<UOctreeNavSubsystem>();
+	if (!NavSubsystem) return;
+
+	AOctreeVoxelVolume* CurrentVolume = NavSubsystem->GetVolumeChunkAt(GetOwner()->GetActorLocation());
+	if (RegisteredVolume != CurrentVolume) return;
+
+	UE_LOG(LogTemp, Log, TEXT("Start volume '%s' is now ready. Executing pending path request."), *RegisteredVolume->GetName());
+
+	bHasPendingPathRequest = false;
+
+	// 델리게이트는 이제 필요 없으므로 해제
+	NavSubsystem->OnVolumeRegistered.RemoveDynamic(this, &UPathfindingComponent::OnVolumeBecameReadyForPendingRequest);
+
+	// 저장해둔 목표 지점으로 길찾기를 다시 요청
+	RequestPathToLocation(PendingTargetLocation);
+}
+
 bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 {
-	if (!PathfindingStrategy || !TargetVolume)
+	UOctreeNavSubsystem* NavSubsystem = GetWorld()->GetSubsystem<UOctreeNavSubsystem>();
+	if (!NavSubsystem || !PathfindingSubsystem) return false;
+
+	const FVector StartLocation = GetOwner()->GetActorLocation();
+	AOctreeVoxelVolume* StartVolume = NavSubsystem->GetVolumeChunkAt(StartLocation);
+
+	// 시작 볼륨이 없는 경우 (에이전트가 내비게이션 영역 밖에 있음)
+	if (!StartVolume)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("Pathfinding request failed: Agent is not inside any navigation volume."));
 		return false;
 	}
-
+	// Begin Test?
 	if (!IsValid(PathSplinePtr))
 	{
 		return false;
@@ -134,43 +185,69 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	{
 		World->GetTimerManager().ClearTimer(RepathCooldownTimer);
 	}
+	// End Test?
+	
+	// 시작 볼륨이 아직 로드되지 않은 경우
+	if (!StartVolume->IsReadyForNavigation())
+	{
+		UE_LOG(LogTemp, Log, TEXT("Start volume '%s' is not ready. Path request is pending."), *StartVolume->GetName());
+
+		// 요청 정보를 저장하고 보류 상태로 전환
+		bHasPendingPathRequest = true;
+		PendingTargetLocation = TargetLocation;
+
+		// 이 볼륨이 준비되었을 때만 호출될 델리게이트에 한 번만 바인딩
+		// 이전에 바인딩된 것이 있다면 해제하고 새로 바인딩하여 중복 호출을 방지
+		NavSubsystem->OnVolumeRegistered.RemoveDynamic(this, &UPathfindingComponent::OnVolumeBecameReadyForPendingRequest);
+		NavSubsystem->OnVolumeRegistered.AddDynamic(this, &UPathfindingComponent::OnVolumeBecameReadyForPendingRequest);
+
+		return true;
+	}
+
+	// 시작 볼륨이 이미 준비된 경우
+	UE_LOG(LogTemp, Log, TEXT("Start volume is ready. Requesting hierarchical path to location: %s"), *TargetLocation.ToString());
+
+	// 보류 중인 요청이 있었다면 초기화
+	bHasPendingPathRequest = false;
+
+	FHierarchicalPathRequest HRequest;
+	HRequest.RequestingComponent = this;
+	HRequest.StartLocation = StartLocation;
+	HRequest.EndLocation = TargetLocation;
+	HRequest.AgentRadius = this->AgentRadius;
+	HRequest.Strategy = PathfindingStrategy;
+	HRequest.OnHierarchicalPathComplete.BindDynamic(this, &UPathfindingComponent::HandleWorldPathResult);
+
+	CurrentRequestID = PathfindingSubsystem->RequestHierarchicalPath(this, HRequest);
+	return CurrentRequestID != -1;
+}
+
+bool UPathfindingComponent::RequestLocalPath_Internal(const FVector& Start, const FVector& End, AOctreeVoxelVolume* Volume)
+{
+	if (!PathfindingStrategy || !Volume)
+	{
+		return false;
+	}
 
 	FPathfindingRequest Request;
 	Request.RequestingObject = this;
-	Request.StartLocation = GetOwner()->GetActorLocation();
-	Request.EndLocation = TargetLocation;
+	Request.StartLocation = Start;
+	Request.EndLocation = End;
 	Request.AgentRadius = this->AgentRadius;
 	Request.Strategy = PathfindingStrategy;
-	bool bRequestDataValid = false;
+	Request.NodeType = EPathfindingNodeType::Octree;
+	Request.OnWorldPathComplete.BindDynamic(this, &UPathfindingComponent::HandleWorldPathResult);
 
-	if (AOctreeVoxelVolume* OctreeVolume = Cast<AOctreeVoxelVolume>(TargetVolume))
-	{
-		Request.NodeType = EPathfindingNodeType::Octree;
-		Request.OnWorldPathComplete.BindDynamic(this, &UPathfindingComponent::HandleWorldPathResult);
+	// 볼륨에서 데이터 스냅샷 생성
+	CreateOctreeDataSnapshot(Volume, Request.NavigationData);
 
-		// --- 3. Create a thread-safe data snapshot using the optimized helper function. ---
-		CreateOctreeDataSnapshot(OctreeVolume, Request.NavigationData);
+	CurrentTargetLocation = End;
+	CurrentRequestID = PathfindingSubsystem->RequestPath(this, Request);
 
-		bRequestDataValid = true;
-	}
-
-	// --- 4. Dispatch the request if the data is valid. ---
-	if (bRequestDataValid)
-	{
-		CurrentTargetLocation = TargetLocation;
-
-		CurrentRequestID = PathSubsystem->RequestPath(Request);
-		if (CurrentRequestID != -1)
-		{
-			return true; // Request successfully queued.
-		}
-	}
-
-	return false;
+	return CurrentRequestID != -1;
 }
 
-void UPathfindingComponent::CreateOctreeDataSnapshot(const AOctreeVoxelVolume* OctreeVolume,
-                                                     FOctreePathfindingData& SnapshotData) const
+void UPathfindingComponent::CreateOctreeDataSnapshot(const AOctreeVoxelVolume* OctreeVolume, FOctreePathfindingData& SnapshotData) const
 {
 	// --- Step 1: Copy small, trivial member variables directly. ---
 	SnapshotData.RootNodeIndex = OctreeVolume->GetRootNodeIndex();
@@ -224,6 +301,44 @@ void UPathfindingComponent::StopMovement()
 	bIsReachDestination = true;
 }
 
+AVoxelVolumeBase* UPathfindingComponent::GetCurrentVolume() const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	if (UOctreeNavSubsystem* NavSubsystem = World->GetSubsystem<UOctreeNavSubsystem>())
+	{
+		if (AActor* Owner = GetOwner())
+		{
+			return NavSubsystem->GetVolumeChunkAt(Owner->GetActorLocation());
+		}
+	}
+
+	return nullptr;
+}
+
+void UPathfindingComponent::ActivateStreaming()
+{
+	// 지금은 BeginPlay에서 호출하고 있지만 길찾기를 하는 순간 호출해도 괜찮음.
+	// 그런데 그러면 Load되는 시간이 있기 때문에 문제가 될 수도 있는 점을 감안해야 함.
+	if (StreamingSourceComponent)
+	{
+		StreamingSourceComponent->EnableStreamingSource();
+	}
+}
+
+void UPathfindingComponent::DeactivateStreaming()
+{
+	// 길찾기 종료 시에 호출
+	if (StreamingSourceComponent)
+	{
+		StreamingSourceComponent->DisableStreamingSource();
+	}
+}
+
 //======================================================================================
 // Avoidance Interface
 //======================================================================================
@@ -255,6 +370,7 @@ FVector UPathfindingComponent::GetPreferredVelocity() const
 
 	return PreferredVelocity;
 }
+
 void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float DeltaTime)
 {
 	AActor* Owner = GetOwner();
@@ -316,11 +432,10 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 		{
 			ProgressNextPoint();
 		}
-		
 	}
 }
 
-void UPathfindingComponent::AdjustProgressToSpline(const FVector& FinalVelocity)
+void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 {
 	if(!IsValid(PathSplinePtr) || PathSplinePtr->GetNumberOfSplinePoints() < 2)
 	{
@@ -413,24 +528,43 @@ void UPathfindingComponent::UpdateSteering(float DeltaTime)
 	UpdatePreferredVelocity(DeltaTime);
 }
 
+// ????
+void UPathfindingComponent::HandleVoxelPathResult(const TArray<FIntVector>& PathIndices, bool bSuccess)
+{
+	if (!bSuccess || PathIndices.Num() == 0)
+	{
+		CurrentState = EPathfindingState::Idle;
+	}
+
+	if (bPeriodicRepath && !bIsReachDestination)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			//Recursive Call PeriodicRepath
+			World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath,
+			                                  RepathCooldown, false);
+		}
+	}
+}
+
 void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 {
 	if (PathSplinePtr->GetNumberOfSplinePoints() <= 2)
 	{
 		return;
 	}
-
+	
 	DistanceAlongSpline = 0;
-
+	
 	PathSplinePtr->RemoveSplinePoint(0);
 
 	int32 AddIndex = StartIndex + PartialPointSplineNum - 1;
-
+	
 	if (AddIndex >= FoundPath.Num())
 	{
 		return;
 	}
-
+	
 	PathSplinePtr->AddSplinePoint(FoundPath[AddIndex], ESplineCoordinateSpace::World, false);
 	PathSplinePtr->UpdateSpline();
 }
@@ -528,6 +662,18 @@ void UPathfindingComponent::UpdateAgentRadiusFromScale(bool bForceUpdate)
 // Internal Logic
 //======================================================================================
 
+void UPathfindingComponent::HandlePathfindingResult()
+{
+	if (bPeriodicRepath && !bIsReachDestination)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath,
+			                                  RepathCooldown, false);
+		}
+	}
+}
+
 void UPathfindingComponent::InvalidatePathAndRequestRepath()
 {
 	if (CurrentState == EPathfindingState::PathInvalidated) return;
@@ -543,7 +689,7 @@ void UPathfindingComponent::InvalidatePathAndRequestRepath()
 
 bool UPathfindingComponent::IsPathObstructed(const FVector& Start, const FVector& End) const
 {
-	AOctreeVoxelVolume* OctreeVolume = Cast<AOctreeVoxelVolume>(TargetVolume.Get());
+	AOctreeVoxelVolume* OctreeVolume = Cast<AOctreeVoxelVolume>(GetCurrentVolume());
 	if (!OctreeVolume)
 	{
 		// If there's no volume, treat the path as obstructed for safety.
@@ -685,7 +831,7 @@ void UPathfindingComponent::UpdateSplinePreferredVelocity(float DeltaTime)
 }
 bool UPathfindingComponent::IsSplinePathSafe() const
 {
-	AOctreeVoxelVolume* VoxelVolume = Cast<AOctreeVoxelVolume>(TargetVolume.Get());
+	AOctreeVoxelVolume* VoxelVolume = Cast<AOctreeVoxelVolume>(GetCurrentVolume());
 	if (!IsValid(PathSplinePtr) || !IsValid(VoxelVolume))
 	{
 		return true;

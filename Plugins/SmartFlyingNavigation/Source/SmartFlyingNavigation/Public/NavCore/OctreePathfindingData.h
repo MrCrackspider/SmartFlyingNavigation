@@ -37,7 +37,7 @@ struct FOctreePathfindingData
 			{
 				const FOctreeNode& LeafNode = (*StaticNodePoolPtr)[LeafIndex];
 
-				if (LeafNode.State == EOctreeNodeState::Empty)
+				if (LeafNode.State == EOctreeNodeState::Empty && LeafNode.MaxAllowedRadius > AgentRadius)
 				{
 					const float DistSq = FVector::DistSquared(Origin, LeafNode.Bounds.GetCenter());
 					if (DistSq < MinDistSq)

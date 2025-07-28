@@ -13,6 +13,7 @@ class UAvoidanceSubsystem;
 class USphereComponent; 
 class AVoxelVolumeBase;
 class AOctreeVoxelVolume;
+class UWorldPartitionStreamingSourceComponent;
 struct FOctreePathfindingData;
 
 UENUM(BlueprintType)
@@ -61,6 +62,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Pathfinding|Configuration")
 	bool RequestPathToLocation(const FVector& TargetLocation);
 
+	bool RequestLocalPath_Internal(const FVector& Start, const FVector& End, AOctreeVoxelVolume* Volume);
+
 	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
 	bool RequestPathToTargetActor();
 
@@ -69,7 +72,7 @@ public:
 	
 	/** Returns the Voxel Volume that this component currently targets. */
 	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-	AVoxelVolumeBase* GetTargetVolume() const { return TargetVolume; }
+	AVoxelVolumeBase* GetCurrentVolume() const;
 
 	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
 	AActor* GetTargetActor() const { return TargetActor; }
@@ -91,6 +94,8 @@ public:
 	
 	void SetbPeriodicRepath(bool NewValue) { bPeriodicRepath = NewValue; }
 
+	void CreateOctreeDataSnapshot(const AOctreeVoxelVolume* OctreeVolume, FOctreePathfindingData& SnapshotData) const;
+
 	bool HasReachedDestination() const { return CurrentPathDestinationIndex >= FoundPath.Num(); }
 
 	void StopMovement();
@@ -99,7 +104,16 @@ public:
 	// A function called when a property is changed in the editor.
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
-	
+#pragma endregion
+
+#pragma region World Partition
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Streaming")
+	TObjectPtr<UWorldPartitionStreamingSourceComponent> StreamingSourceComponent;
+
+	UFUNCTION(BlueprintCallable, Category = "Streaming")
+	void ActivateStreaming();
+	UFUNCTION(BlueprintCallable, Category = "Streaming")
+	void DeactivateStreaming();
 #pragma endregion
 
 #pragma region Avoidance Interface
@@ -149,7 +163,7 @@ public:
 	bool IsSplinePathSafe() const;
 	bool IsOnSplineLine() const;
 	
-	void AdjustProgressToSpline(const FVector& FinalVelocity);
+	void AdjustProgressToSpline(FVector FinalVelocity); // const?
 	void ProgressNextPoint();
 	void DetermineMovementModeForNextPath();
 
@@ -167,21 +181,24 @@ protected:
 	void PeriodicRepath();
 	
 	UFUNCTION()
+	void HandleVoxelPathResult(const TArray<FIntVector>& PathIndices, bool bSuccess);
+	
+	UFUNCTION()
 	void HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess);
 
 	void PartialSplinePointUpdate(int32 StartIndex);
 
-	void CreateOctreeDataSnapshot(const AOctreeVoxelVolume* OctreeVolume, FOctreePathfindingData& SnapshotData) const;
-
 	void UpdateAgentRadiusFromScale(bool bForceUpdate = false);
 	
+	/** Process the results when the asynchronous pathfinding task completes. */
+	void HandlePathfindingResult();
+
 	/** When the path is invalid, the current movement is stopped and a retracing timer is started. */
 	void InvalidatePathAndRequestRepath();
 
 	bool IsPathObstructed(const FVector& Start, const FVector& End) const;
 	
 	void DrawDebugPath();
-
 	
 #pragma endregion
 
@@ -289,14 +306,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding", meta = (AllowPrivateAccess = "true", HiddenInDetails))
 	TObjectPtr<AActor> TargetActor;
 	
-	UPROPERTY(EditAnywhere, Category = "Pathfinding", meta = (HiddenInDetails))
-	TObjectPtr<AVoxelVolumeBase> TargetVolume;
-	
 	UPROPERTY()
 	TObjectPtr<UPathfindingStrategy> PathfindingStrategy;
 
 	UPROPERTY() 
-	TObjectPtr<UPathfindingSubsystem> PathSubsystem;
+	TObjectPtr<UPathfindingSubsystem> PathfindingSubsystem;
 
 	UPROPERTY()
 	TObjectPtr<UAvoidanceSubsystem> AvoidanceSubsystem;
@@ -307,4 +321,10 @@ private:
 	UPROPERTY()
 	TObjectPtr<USplineComponent> PathSplinePtr; 
 #pragma endregion
+
+	UFUNCTION()
+	void OnVolumeBecameReadyForPendingRequest(AOctreeVoxelVolume* RegisteredVolume);
+	
+    bool bHasPendingPathRequest = false;
+	FVector PendingTargetLocation;
 };

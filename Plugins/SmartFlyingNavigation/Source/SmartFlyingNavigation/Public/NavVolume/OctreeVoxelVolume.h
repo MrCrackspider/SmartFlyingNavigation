@@ -10,10 +10,11 @@
 
 class UDynamicObstacleComponent;
 class UVoxelObstacleProfile;
+class UOctreeNavSubsystem;
 struct FStreamableHandle;
 
 UENUM(BlueprintType)
-enum class EChunkLoadState : uint8
+enum class EVolumeLoadState : uint8
 {
 	//Unloading,
 	Unloaded,
@@ -129,6 +130,8 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+	virtual void PostInitializeComponents() override;
+
 	/** Called every frame. */
 	virtual void Tick(float DeltaTime) override;
 
@@ -142,9 +145,17 @@ public:
 	 * Initiates the process of baking static geometry within this volume into an octree data asset.
 	 * This function should only be called from the editor.
 	 */
-	void BakeStaticData();
+	bool BakeStaticData(UWorld* World, TArray<FOctreeNode>& OutNodePool);
 
-	// 컴포넌트를 복셀화하여 장애물 목록에 추가하는 헬퍼
+
+	void ConnectPortals_Bake(
+		TArray<FOctreeNode>& InOutMyNodePool,
+		TMap<int32, FVolumePortalLink>& OutPortalNodes,
+		const TMap<AOctreeVoxelVolume*, TArray<FOctreeNode>>& AllVolumeData,
+		const TArray<AOctreeVoxelVolume*>& AllCreatedVolumes
+	);
+	
+	// 컴포넌트를 복셀화하여 장애물 목록에 추가
 	void VoxelizeComponent(const FBox& ComponentBounds, const FCollisionObjectQueryParams& ObjectQueryParams, TSet<FIntVector>& OutStaticObstacles) const;
 	/**
 	 * Scans the volume to identify all static actors that should be treated as obstacles,
@@ -245,37 +256,37 @@ private:
 	};
 	/** Determines which of the 8 octants a given voxel belongs to within a node's bounds. */
 	int32 GetOctantContainingVoxel(const FBox& NodeBounds, const FVector& VoxelWorldPos) const;
-
-	/** Constructs the full package path and asset name for the baked data asset. */
-	bool GetBakedAssetPath(FString& OutPackagePath, FString& OutAssetName) const;
-	
-	/** Handles the creation, saving, and assignment of the UOctreeDataAsset. */
-	void SaveOctreeToAsset(const TArray<FOctreeNode>& NodePoolToSave);
-
+		
 	/** Recursively gathers information about octree nodes for debug visualization. */
 	void GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex, const FBox& NodeBounds, int32 CurrentDepth) const;
 
 public:
-		/** Recursively inserts a single obstacle voxel into the octree during the baking process. */
-		void InsertObstacleRecursive_Bake(
-			TArray<FOctreeNode>& InOutNodePool,
-			int32 NodeIndex,
-			const FIntVector& ObstacleVoxel,
-			int32 CurrentDepth,
-			int32 MaxDepth
-		);
-		/** Traverses the octree to find the leaf node containing a specific world position. For bake-time use only. */
-		int32 FindLeafNodeAt_BakeTime(
-			const TArray<FOctreeNode>& InNodePool,
-			int32 CurrentNodeIndex,
-			const FVector& WorldPos,
-			int32 MaxDepth,
-			int32 CurrentDepth = 0
-		);
-		/** Traverses the octree bottom-up to merge child nodes that have the same state, optimizing memory usage. */
-		void OptimizeAndCollapse_Bake(TArray<FOctreeNode>& InOutNodePool, int32 NodeIndex);
-		/** After building the tree, this pre-calculates and stores neighbors for each leaf node to accelerate pathfinding. */
-		void PrecomputeNeighbors_Bake(TArray<FOctreeNode>& InOutNodePool, const FBox& TotalVolumeBounds, int32 MaxDepth);
+	/** Constructs the full package path and asset name for the baked data asset. */
+	bool GetBakedAssetPath(FString& OutPackagePath, FString& OutAssetName) const;
+
+	/** Handles the creation, saving, and assignment of the UOctreeDataAsset. */
+	void SaveOctreeToAsset(const TArray<FOctreeNode>& NodePoolToSave, const TMap<int32, FVolumePortalLink>& PortalsToSave);
+
+	/** Recursively inserts a single obstacle voxel into the octree during the baking process. */
+	void InsertObstacleRecursive_Internal(
+		TArray<FOctreeNode>& InOutNodePool,
+		int32 NodeIndex,
+		const FIntVector& ObstacleVoxel,
+		int32 CurrentDepth,
+		int32 MaxDepth
+	);
+	/** Traverses the octree to find the leaf node containing a specific world position. For bake-time use only. */
+	int32 FindLeafNode_Internal(
+		const TArray<FOctreeNode>& InNodePool,
+		int32 CurrentNodeIndex,
+		const FVector& WorldPos,
+		int32 MaxDepth,
+		int32 CurrentDepth = 0
+	);
+	/** Traverses the octree bottom-up to merge child nodes that have the same state, optimizing memory usage. */
+	void OptimizeAndCollapse_Internal(TArray<FOctreeNode>& InOutNodePool, int32 NodeIndex);
+	/** After building the tree, this pre-calculates and stores neighbors for each leaf node to accelerate pathfinding. */
+	void PrecomputeNeighbors_Internal(TArray<FOctreeNode>& InOutNodePool, const FBox& TotalVolumeBounds, int32 MaxDepth);
 
 #endif
 
@@ -320,7 +331,6 @@ private:
 	/** The runtime pool of nodes for the static octree, loaded from BakedOctreeData. */
 	/** 로드된 데이터 에셋의 노드 풀을 가리키는 포인터. LoadedDataAsset이 소유권을 가짐. */
 	TArray<FOctreeNode>* StaticNodePoolPtr = nullptr; 
-	//TArray<FOctreeNode> StaticNodePool; 
 
 	/** The index of the root node in the StaticNodePool array. Initialized to -1. */
 	int32 RootNodeIndex = -1;
@@ -336,8 +346,8 @@ private:
 	// 비동기 로딩이 완료되었을 때 호출될 콜백 함수
 	void OnDataAssetLoaded();
 
-	// 현재 청크 데이터의 로딩 상태
-	EChunkLoadState LoadState = EChunkLoadState::Unloaded;
+	// 현재 볼륨 데이터의 로딩 상태
+	EVolumeLoadState LoadState = EVolumeLoadState::Unloaded;
 
 	// 비동기 로딩 핸들
 	TSharedPtr<FStreamableHandle> AsyncLoadHandle;
@@ -351,10 +361,9 @@ public:
 	void RequestAsyncLoad();
 
 	// 데이터가 로드되어 길찾기에 사용될 준비가 되었는지 확인하는 함수
-	FORCEINLINE bool IsReadyForNavigation() const { return LoadState == EChunkLoadState::Loaded; }
+	FORCEINLINE bool IsReadyForNavigation() const { return LoadState == EVolumeLoadState::Loaded; }
 
-	// 볼륨의 월드 바운드를 가져오는 편의 함수
+	// 볼륨의 월드 바운드를 가져오는 함수
 	FBox GetVolumeBounds() const;
-
 	// End Test
 };
