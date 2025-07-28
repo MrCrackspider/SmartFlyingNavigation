@@ -596,7 +596,7 @@ bool UPathfindingSubsystem::FindHighLevelPath(const UObject* WorldContextObject,
 			ReconstructDataAssetPath(CameFrom, CurrentNode.DataAsset, OutDataAssetPath);
 			return true;
 		}
-
+ 
 		UOctreeDataAsset* CurrentData = CurrentNode.DataAsset.LoadSynchronous();
 		if (!CurrentData)
 		{

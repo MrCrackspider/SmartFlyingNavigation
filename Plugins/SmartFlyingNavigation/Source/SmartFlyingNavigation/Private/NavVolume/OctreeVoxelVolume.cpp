@@ -43,8 +43,7 @@ AOctreeVoxelVolume::AOctreeVoxelVolume()
 
 	SetIsSpatiallyLoaded(true);
 
-	// Default value for octree depth. For a 128^3 volume, a depth of 7 provides voxel-level precision (2^7 = 128).
-	MaxOctreeDepth = 7;
+	// Default value for octree depth. For a 128^3 volume, a depth of 7 provides voxel-level precision (2^7 = 128
 }
 
 //~======================================================================
@@ -122,7 +121,7 @@ void AOctreeVoxelVolume::RegisterDynamicObstacle(UDynamicObstacleComponent* Obst
 	{
 		RegisteredObstacles.Add(ObstacleComponent);
 	}
-}
+} 
 
 void AOctreeVoxelVolume::UnregisterDynamicObstacle(UDynamicObstacleComponent* ObstacleComponent)
 {
@@ -417,7 +416,7 @@ bool AOctreeVoxelVolume::BakeStaticData(UWorld* World, TArray<FOctreeNode>& OutN
 	ScanForAllStaticObstacles(AllStaticObstacles, World, VolumeBounds);
 
 	const double TotalWorkAmount = static_cast<double>(AllStaticObstacles.Num()) + 2.0;
-	FScopedSlowTask BakeTask(TotalWorkAmount, FText::FromString(TEXT("Baking Octree Data for ") + GetName() + "...")); // 이게 너무 반복적으로 호출되고 있어서 UX적으로 불편함. 볼륨 하나마다 계속 불리고 있음
+	FScopedSlowTask BakeTask(TotalWorkAmount, FText::FromString(TEXT("Baking Octree Data for ") + GetName() + "...")); 
 	BakeTask.MakeDialog();
 
 	TArray<FOctreeNode> BakeTimeNodePool;
@@ -426,11 +425,13 @@ bool AOctreeVoxelVolume::BakeStaticData(UWorld* World, TArray<FOctreeNode>& OutN
 	const int32 BakeRootIndex = BakeTimeNodePool.AddDefaulted();
 	BakeTimeNodePool[BakeRootIndex].Bounds = VolumeBounds;
 
+	auto a = MapSize;
+	
 	for (const FIntVector& ObstacleVoxel : AllStaticObstacles)
 	{
 		BakeTask.EnterProgressFrame(1.f);
 		if (BakeTask.ShouldCancel()) return false;
-		InsertObstacleRecursive_Internal(BakeTimeNodePool, BakeRootIndex, ObstacleVoxel, 0, MaxOctreeDepth);
+		InsertObstacleRecursive_Internal(BakeTimeNodePool, BakeRootIndex, ObstacleVoxel, 0, GetMaxOctreeDepth());
 	}
 
 	BakeTask.EnterProgressFrame(1.f, FText::FromString(TEXT("Optimizing Octree... (2/3)")));
@@ -439,7 +440,7 @@ bool AOctreeVoxelVolume::BakeStaticData(UWorld* World, TArray<FOctreeNode>& OutN
 
 	BakeTask.EnterProgressFrame(1.f, FText::FromString(TEXT("Precomputing Neighbors... (3/3)")));
 	if (BakeTask.ShouldCancel()) return false;
-	PrecomputeNeighbors_Internal(BakeTimeNodePool, VolumeBounds, MaxOctreeDepth);
+	PrecomputeNeighbors_Internal(BakeTimeNodePool, VolumeBounds, GetMaxOctreeDepth());
 
 	OutNodePool = BakeTimeNodePool;
 
@@ -606,7 +607,7 @@ void AOctreeVoxelVolume::SaveOctreeToAsset(const TArray<FOctreeNode>& NodePoolTo
 
 	DataAssetToSave->Modify();
 	DataAssetToSave->PortalNodes = PortalsToSave;
-	DataAssetToSave->SetAndCompressBakedData(NodePoolToSave, this->MapSize, this->MaxOctreeDepth);
+	DataAssetToSave->SetAndCompressBakedData(NodePoolToSave, this->MapSize, this->GetMaxOctreeDepth());
 
 	UE_LOG(LogTemp, Log, TEXT("'%s'의 데이터 에셋 저장을 위해 패키지를 Dirty로 표시했습니다."), *GetName());
 }
@@ -882,7 +883,7 @@ int32 AOctreeVoxelVolume::FindLeafNodeAt(const FVector& WorldPos) const
 	{
 		const FOctreeNode& Node = (*StaticNodePoolPtr)[CurrentNodeIndex];
 
-		if (Node.State != EOctreeNodeState::Mixed || CurrentDepth >= MaxOctreeDepth)
+		if (Node.State != EOctreeNodeState::Mixed || CurrentDepth >= GetMaxOctreeDepth())
 		{
 			return CurrentNodeIndex;
 		}
@@ -899,14 +900,14 @@ void AOctreeVoxelVolume::GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNo
 {
 	if (!StaticNodePoolPtr || StaticNodePoolPtr->IsEmpty()) return;
 
-	if (!StaticNodePoolPtr->IsValidIndex(NodeIndex) || CurrentDepth > MaxOctreeDepth)
+	if (!StaticNodePoolPtr->IsValidIndex(NodeIndex) || CurrentDepth > GetMaxOctreeDepth())
 	{
 		return;
 	}
 	const FOctreeNode& Node = (*StaticNodePoolPtr)[NodeIndex];
 
 	// Add node info if it's a leaf or if we've reached the desired debug draw depth.
-	if (Node.State != EOctreeNodeState::Mixed || CurrentDepth == MaxOctreeDepth)
+	if (Node.State != EOctreeNodeState::Mixed || CurrentDepth == GetMaxOctreeDepth())
 	{
 		OutNodes.Add({ NodeIndex, NodeBounds, Node.State });
 	}
@@ -989,7 +990,7 @@ FBox AOctreeVoxelVolume::GetVolumeBounds() const
 
 void AOctreeVoxelVolume::InsertObstacleRecursive_Internal(TArray<FOctreeNode>& InOutNodePool, int32 NodeIndex, const FIntVector& ObstacleVoxel, int32 CurrentDepth, int32 MaxDepth)
 {
-	if (!InOutNodePool.IsValidIndex(NodeIndex))
+ 	if (!InOutNodePool.IsValidIndex(NodeIndex))
 	{
 		return;
 	}

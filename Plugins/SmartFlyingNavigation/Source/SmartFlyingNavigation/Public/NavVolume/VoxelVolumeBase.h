@@ -55,10 +55,14 @@ protected:
 	 * @brief Called when the game starts or when spawned.
 	 */
 	virtual void BeginPlay() override;
-
- 
+	
+	UPROPERTY(EditAnywhere, Category = "Voxel|VolumeSettings")
+	FIntVector MapSize;
 
 public:
+
+	FIntVector GetMapSize() const { return MapSize; };
+	void SetMapSize(FIntVector NewMapSize) { MapSize = NewMapSize; };
 	/**
 	 * @brief Called every frame.
 	 * @param DeltaTime The time since the last frame.
@@ -84,8 +88,7 @@ public:
 	/**
 	 * @brief The size of the volume in voxels.
 	 */
-	UPROPERTY(BlueprintReadOnly, Category = "Voxel|VolumeSettings")
-	FIntVector MapSize;
+
 
 	///**
 	// * @brief The component that acts as the pivot for this volume.

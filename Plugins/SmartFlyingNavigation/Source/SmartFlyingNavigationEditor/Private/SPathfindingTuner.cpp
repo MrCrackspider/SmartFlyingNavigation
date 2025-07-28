@@ -288,26 +288,6 @@ TSharedRef<SWidget> SPathfindingTuner::BuildOctreeVolumeSettingsSection()
 
 				]
 			]
-			// Max Octree Depth
-			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
-				[
-					SNew(STextBlock).Text(LOCTEXT("MaxOctreeDepthLabel", "Max Octree Depth:")).Font(
-						FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-				]
-				+ SHorizontalBox::Slot().FillWidth(0.6f)
-				[
-					SNew(SNumericEntryBox<int32>)
-					.Value(this, &SPathfindingTuner::GetMaxOctreeDepth)
-					.OnValueCommitted(this, &SPathfindingTuner::OnMaxOctreeDepthCommitted)
-					.MinValue(0)
-					.MaxValue(10)
-					.MinSliderValue(0)
-					.MaxSliderValue(8)
-				]
-			]
 
 			// Voxel Extent
 			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
@@ -1405,31 +1385,6 @@ FReply SPathfindingTuner::OnBrowseButtonClicked()
 	return FReply::Handled();
 }
 
-TOptional<int32> SPathfindingTuner::GetMaxOctreeDepth() const
-{
-	const auto SelectedVolumes = GetSelectedActorsOfType<AOctreeVoxelVolume>();
-	return GetCommonPropertyValue<AOctreeVoxelVolume, int32>(SelectedVolumes,
-	                                                         [](const AOctreeVoxelVolume* V)
-	                                                         {
-		                                                         return V->GetMaxOctreeDepth();
-	                                                         });
-}
-
-void SPathfindingTuner::OnMaxOctreeDepthCommitted(int32 NewValue, ETextCommit::Type CommitType)
-{
-	if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
-	{
-		const auto SelectedVolumes = GetSelectedActorsOfType<AOctreeVoxelVolume>();
-		SetCommonPropertyValue<AOctreeVoxelVolume, int32>(SelectedVolumes, NewValue,
-		                                                  LOCTEXT("SetMaxOctreeDepthTransaction",
-		                                                          "Set Max Octree Depth"),
-		                                                  [](AOctreeVoxelVolume* V, int32 Value)
-		                                                  {
-			                                                  V->SetMaxOctreeDepth(Value);
-			                                                  V->MarkPackageDirty();
-		                                                  });
-	}
-}
 
 TOptional<float> SPathfindingTuner::GetVoxelExtent() const
 {
@@ -1463,7 +1418,7 @@ FText SPathfindingTuner::GetSelectedMapSizeText() const
 	if (SelectedVolumes.IsEmpty()) return LOCTEXT("NoVolumeSelected", "---");
 
 	TOptional<FIntVector> CommonMapSize = GetCommonPropertyValue<AOctreeVoxelVolume, FIntVector>(SelectedVolumes,
-		[](const AOctreeVoxelVolume* V) { return V->MapSize; });
+		[](const AOctreeVoxelVolume* V) { return V->GetMapSize(); });
 
 	if (!CommonMapSize.IsSet()) return LOCTEXT("MultipleMapSizes", "Multiple Values");
 
@@ -1485,7 +1440,7 @@ void SPathfindingTuner::OnMapSizeSelectionChanged(TSharedPtr<int32> NewSelection
 		                                                       LOCTEXT("SetMapSizeTransaction", "Set Map Size"),
 		                                                       [](AOctreeVoxelVolume* V, const FIntVector& Size)
 		                                                       {
-			                                                       V->MapSize = Size;
+			                                                       V->SetMapSize(Size);
 			                                                       V->RerunConstructionScripts();
 		                                                       });
 	}

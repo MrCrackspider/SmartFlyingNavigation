@@ -253,7 +253,7 @@ void UPathfindingComponent::CreateOctreeDataSnapshot(const AOctreeVoxelVolume* O
 	SnapshotData.RootNodeIndex = OctreeVolume->GetRootNodeIndex();
 	SnapshotData.MaxOctreeDepth = OctreeVolume->GetMaxOctreeDepth();
 	SnapshotData.VolumeBounds = OctreeVolume->VolumeBox->Bounds.GetBox();
-	SnapshotData.MapSize = OctreeVolume->MapSize;
+	SnapshotData.MapSize = OctreeVolume->GetMapSize();
 	SnapshotData.VoxelSize = OctreeVolume->VoxelExtent;
 
 	// --- Step 2: Perform a high-speed bulk memory copy for the static node pool. ---

@@ -71,8 +71,6 @@ public:
 	/** Returns the index of the root node within the static node pool. */
 	FORCEINLINE int32 GetRootNodeIndex() const { return RootNodeIndex; }
 
-	/** Returns the configured maximum depth of the octree. */
-	FORCEINLINE int32 GetMaxOctreeDepth() const { return MaxOctreeDepth; }
 
 	/** Returns a thread-safe copy of the bitmask used for dynamic obstacles. */
 	FORCEINLINE TArray<F128BitChunk> GetDynamicObstacleBitmask() const { return DynamicObstacleBitmask; }
@@ -97,6 +95,9 @@ public:
 	 * @param Depth The new maximum depth.
 	 */
 	void SetMaxOctreeDepth(int32 Depth) { MaxOctreeDepth = Depth; }
+
+	/** Returns the configured maximum depth of the octree. */
+	FORCEINLINE int32 GetMaxOctreeDepth() const { return static_cast<int>(std::log2(GetMapSize().X));; }
 
 	/**
 	 * Sets the filter used to identify static objects during the baking process.
@@ -295,12 +296,6 @@ public:
 	// Properties
 	//~======================================================================
 
-	/**
-	 * The maximum depth of the octree. Determines the smallest possible node size.
-	 * For a 128x128x128 volume, a depth of 7 (2^7=128) is appropriate for voxel-level precision.
-	 */
-	UPROPERTY()
-	int32 MaxOctreeDepth;
 
 	/**
 	 * The data asset containing the pre-baked octree for static geometry.
@@ -327,6 +322,12 @@ private:
 	//~======================================================================
 	// Runtime Data Members
 	//~======================================================================
+	/**
+	 * The maximum depth of the octree. Determines the smallest possible node size.
+	 * For a 128x128x128 volume, a depth of 7 (2^7=128) is appropriate for voxel-level precision.
+	 */
+	UPROPERTY()
+	int32 MaxOctreeDepth=1;
 
 	/** The runtime pool of nodes for the static octree, loaded from BakedOctreeData. */
 	/** 로드된 데이터 에셋의 노드 풀을 가리키는 포인터. LoadedDataAsset이 소유권을 가짐. */

@@ -429,7 +429,7 @@ bool UPathfindingEditorSubsystem::BakeAndCreateVolumesInGrid(
 				NewVolume->SetFolderPath(FName("/NavVolumes"));
 				NewVolume->VolumeBox->SetBoxExtent(VolumeBounds.GetExtent(), true);
 				NewVolume->VoxelExtent = InSettings->WorldBake_VoxelExtent;
-				NewVolume->MapSize = FIntVector(FMath::RoundToInt(VolumeSize / NewVolume->VoxelExtent));
+				NewVolume->SetMapSize(FIntVector(FMath::RoundToInt(VolumeSize / NewVolume->VoxelExtent)));
 				NewVolume->SetMaxOctreeDepth(InSettings->WorldBake_MaxOctreeDepth);
 				NewVolume->SetStaticObstacleProfile(ObstacleProfile);
 				NewVolume->BakedDataSaveDirectory.Path = InSettings->WorldBake_SaveDirectory.Path;
