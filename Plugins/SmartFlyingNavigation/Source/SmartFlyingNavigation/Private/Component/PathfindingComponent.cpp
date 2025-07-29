@@ -110,11 +110,9 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		}
 	}
 	
-	if (!IsValid(AvoidanceSubsystem) || !AvoidanceSubsystem->GetbUseAvoidance())
-	{
-		UpdateSteering(DeltaTime);
-		ApplyMovement(PreferredVelocity, DeltaTime);
-	}
+	UpdateSteering(DeltaTime);
+	ApplyMovement(PreferredVelocity, DeltaTime);
+	CurrentVelocity = PreferredVelocity;
 	
 	UpdateAgentRadiusFromScale();
 }
@@ -390,6 +388,8 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 		return;
 	}
 
+	UE_LOG(LogTemp, Warning, TEXT("%s Velocity: %f %f %f"), *Owner->GetClass()->GetName(), FinalVelocity.X, FinalVelocity.Y, FinalVelocity.Z);	
+	
 	// 1. 단순하게 이동: 예측이나 계산 없이, 주어진 속도로 그냥 움직입니다.
 	const FVector MoveDelta = FinalVelocity * DeltaTime;
 	FHitResult HitResult;
