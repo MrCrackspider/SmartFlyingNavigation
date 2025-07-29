@@ -31,7 +31,7 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     SolverIterations = 5;
     SideBiasMagnitude = 4.f;
     InterpSpeed = 10.f;
-    bUseAvoidance = false;
+    bUseAvoidance = true;
     bShowVelocityDebugLine = true;
 }
 
@@ -91,65 +91,59 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
             if (UPathfindingComponent* Agent = AgentMap.FindRef(ResultPair.Key))
             {
                 FVector FinalVelocity;
-                if (!bUseAvoidance)
+
+                const TArray<FPlane>& AgentConstraints = ResultPair.Value.AgentConstraints;
+                const TArray<FPlane>& VoxelConstraints = ResultPair.Value.VoxelConstraints;
+                const FVector& ActualPreferredVelocity = ResultPair.Value.ActualPreferredVelocity;
+
+                const FVector SafeVelocity = SolveOptimalVelocity(VoxelConstraints, ActualPreferredVelocity);
+                const FVector FinalOptimalVelocity = SolveOptimalVelocity(AgentConstraints, SafeVelocity);
+
+                const FVector CurrentVelocity = Agent->GetCurrentVelocity();
+                FVector InterpolatedVelocity = FMath::VInterpTo(CurrentVelocity, FinalOptimalVelocity, DeltaTime, InterpSpeed);
+                FinalVelocity = InterpolatedVelocity;
+
+                FHitResult HitResult;
+                const FVector AgentLocation = Agent->GetOwner()->GetActorLocation();
+                const FVector MoveDelta = FinalVelocity * DeltaTime;
+
+                FCollisionShape OverlapSphere = FCollisionShape::MakeSphere(Agent->GetAvoidanceRadius());
+                FCollisionQueryParams OverlapParams(TEXT("PenetrationCheck"), false);
+                if (Agent->GetOwner())
                 {
-                    FinalVelocity = Agent->GetPreferredVelocity();
+                    OverlapParams.AddIgnoredActor(Agent->GetOwner());
                 }
-                else
+
+                if (MoveDelta.SizeSquared() > KINDA_SMALL_NUMBER)
                 {
-                    const TArray<FPlane>& AgentConstraints = ResultPair.Value.AgentConstraints;
-                    const TArray<FPlane>& VoxelConstraints = ResultPair.Value.VoxelConstraints;
-                    const FVector& ActualPreferredVelocity = ResultPair.Value.ActualPreferredVelocity;
+                    bool bWillCollide = GetWorld()->SweepSingleByChannel(
+                        HitResult,
+                        AgentLocation,
+                        AgentLocation + MoveDelta,
+                        FQuat::Identity,
+                        ECC_WorldStatic,
+                        OverlapSphere,
+                        OverlapParams
+                    );
 
-                    const FVector SafeVelocity = SolveOptimalVelocity(VoxelConstraints, ActualPreferredVelocity);
-                    const FVector FinalOptimalVelocity = SolveOptimalVelocity(AgentConstraints, SafeVelocity);
-
-                    const FVector CurrentVelocity = Agent->GetCurrentVelocity();
-                    FVector InterpolatedVelocity = FMath::VInterpTo(CurrentVelocity, FinalOptimalVelocity, DeltaTime, InterpSpeed);
-                    FinalVelocity = InterpolatedVelocity;
-
-                    FHitResult HitResult;
-                    const FVector AgentLocation = Agent->GetOwner()->GetActorLocation();
-                    const FVector MoveDelta = FinalVelocity * DeltaTime;
-
-                    FCollisionShape OverlapSphere = FCollisionShape::MakeSphere(Agent->GetAvoidanceRadius());
-                    FCollisionQueryParams OverlapParams(TEXT("PenetrationCheck"), false);
-                    if (Agent->GetOwner())
+                    if (bWillCollide)
                     {
-                        OverlapParams.AddIgnoredActor(Agent->GetOwner());
-                    }
-
-                    if (MoveDelta.SizeSquared() > KINDA_SMALL_NUMBER)
-                    {
-                        bool bWillCollide = GetWorld()->SweepSingleByChannel(
-                            HitResult,
-                            AgentLocation,
-                            AgentLocation + MoveDelta,
-                            FQuat::Identity,
-                            ECC_WorldStatic,
-                            OverlapSphere,
-                            OverlapParams
-                        );
-
-                        if (bWillCollide)
+                        if (FMath::IsNearlyZero(HitResult.Time))
                         {
-                            if (FMath::IsNearlyZero(HitResult.Time))
-                            {
-                                FinalVelocity = SafeVelocity;
-                            }
-                            else
-                            {
-                                const float TimeOfImpact = HitResult.Time;
-                                const FVector MovementToImpact = MoveDelta * TimeOfImpact;
-                                const float RemainingTime = DeltaTime * (1.f - TimeOfImpact);
-                                const FVector RemainingVelocity = FVector::VectorPlaneProject(FinalVelocity, HitResult.ImpactNormal);
-                                const FVector FinalMoveDelta = MovementToImpact + RemainingVelocity * RemainingTime;
-                                FinalVelocity = FinalMoveDelta / DeltaTime;
-                            }
+                            FinalVelocity = SafeVelocity;
+                        }
+                        else
+                        {
+                            const float TimeOfImpact = HitResult.Time;
+                            const FVector MovementToImpact = MoveDelta * TimeOfImpact;
+                            const float RemainingTime = DeltaTime * (1.f - TimeOfImpact);
+                            const FVector RemainingVelocity = FVector::VectorPlaneProject(FinalVelocity, HitResult.ImpactNormal);
+                            const FVector FinalMoveDelta = MovementToImpact + RemainingVelocity * RemainingTime;
+                            FinalVelocity = FinalMoveDelta / DeltaTime;
                         }
                     }
-
                 }
+
                 Agent->ApplyMovement(FinalVelocity.GetClampedToMaxSize(Agent->GetMovementSpeed()), DeltaTime);
 
                 if (Agent->GetMovementMode() == EPathMovementMode::Spline && !Agent->IsOnSplineLine() && Agent->FoundPath.Num() > 0)
@@ -201,7 +195,6 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
                     });
             }
         }
-
         {
             FScopeLock Lock(&ResultsCriticalSection);
             AvoidanceResults.Empty();
@@ -474,17 +467,17 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
     bool bShouldYield = false;
     if (ObstacleAgent)
     {
-        if (CurrentAgent.AvoidanceRadius <= ObstacleAgent->AvoidanceRadius)
+        if (CurrentAgent.AvoidanceRadius < ObstacleAgent->AvoidanceRadius)
         {
             bShouldYield = true;
         }
         else if (FMath::IsNearlyEqual(CurrentAgent.AvoidanceRadius, ObstacleAgent->AvoidanceRadius))
         {
-            if (CurrentAgent.PreferredVelocity.SizeSquared() > ObstacleAgent->PreferredVelocity.SizeSquared())
+            if (CurrentAgent.MovementSpeed > ObstacleAgent->MovementSpeed)
             {
                 bShouldYield = true;
             }
-            else if (FMath::IsNearlyEqual(CurrentAgent.PreferredVelocity.SizeSquared(), ObstacleAgent->PreferredVelocity.SizeSquared()))
+            else if (FMath::IsNearlyEqual(CurrentAgent.MovementSpeed, ObstacleAgent->MovementSpeed))
             {
                 if (CurrentAgent.AgentId > ObstacleAgent->AgentId)
                 {
@@ -496,28 +489,44 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
 
     if (bShouldYield)
     {
-        const FVector ForwardVec = PreferredVelocity.GetSafeNormal();
-        const FVector UpVector = CurrentAgent.UpVector;
-
-        FVector SideVector = FVector::CrossProduct(ForwardVec, UpVector);
-        SideVector.Normalize();
-
-        if (ObstacleAgent)
+        // (방법 1)
+        //
         {
-            const FVector ToObstacle = ObstacleAgent->Position - CurrentAgent.Position;
-            const float DotWithSide = FVector::DotProduct(ToObstacle, SideVector);
+            const FVector ForwardVec = PreferredVelocity.GetSafeNormal();
+            const FVector UpVector = CurrentAgent.UpVector;
 
-            if (DotWithSide > 0.0f)
+            FVector SideVector = FVector::CrossProduct(ForwardVec, UpVector);
+            SideVector.Normalize();
+
+            if (ObstacleAgent)
             {
-                SideVector *= -1.0f;
+                const FVector ToObstacle = ObstacleAgent->Position - CurrentAgent.Position;
+                const float DotWithSide = FVector::DotProduct(ToObstacle, SideVector);
+
+                if (DotWithSide > 0.0f)
+                {
+                    SideVector *= -1.0f;
+                }
             }
+
+            FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
+            return ActualPreferredVelocity.GetSafeNormal() * CurrentAgent.MovementSpeed;
         }
 
-        //FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
-        //return ActualPreferredVelocity.GetSafeNormal() * CurrentAgent.MovementSpeed;
-        FVector ActualPreferredVelocity = SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
-        return ActualPreferredVelocity;
+        // (방법 2)
+        //
+        {
+            //const FVector ForwardVec = PreferredVelocity.GetSafeNormal();
+            //const FVector UpVector = ObstacleAgent->UpVector;
+
+            //FVector SideVector = FVector::CrossProduct(ForwardVec, UpVector);
+            //SideVector.Normalize();
+
+            //FVector ActualPreferredVelocity = SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
+            //return ActualPreferredVelocity;
+        }
     }
+
     return PreferredVelocity;
 }
 
@@ -551,7 +560,7 @@ void UAvoidanceSubsystem::DebugVisualizeVelocities(const UPathfindingComponent* 
     const FVector LineStart = Agent->GetOwner()->GetActorLocation() + FVector(0, 0, 10.f);
     const float LineLengthMultiplier = 0.2f;
 
-    // DrawDebugLine(World, LineStart, LineStart + Result.PreferredVelocity * LineLengthMultiplier, FColor::Blue, false, -1, 0, 2.f);
-    // DrawDebugLine(World, LineStart, LineStart + Result.ActualPreferredVelocity * LineLengthMultiplier, FColor::Yellow, false, -1, 0, 3.f);
-    // DrawDebugLine(World, LineStart, LineStart + FinalOptimalVelocity * LineLengthMultiplier, FColor::Red, false, -1, 0, 5.f);
+     DrawDebugLine(World, LineStart, LineStart + Result.PreferredVelocity * LineLengthMultiplier, FColor::Blue, false, -1, 0, 2.f);
+     DrawDebugLine(World, LineStart, LineStart + Result.ActualPreferredVelocity * LineLengthMultiplier, FColor::Yellow, false, -1, 0, 3.f);
+     DrawDebugLine(World, LineStart, LineStart + FinalOptimalVelocity * LineLengthMultiplier, FColor::Red, false, -1, 0, 5.f);
 }
