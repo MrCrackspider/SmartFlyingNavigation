@@ -218,6 +218,6 @@ private:
 	UPROPERTY()
 	TMap<int32, TObjectPtr<APathfindingStreamingProbe>> ActiveStreamingProbes;
 
-	void CreateStreamingProbeForRequest(const UObject* WorldContextObject, int32 RequestID, const FVector& Location);
+	void CreateStreamingProbeForRequest(const UObject* WorldContextObject, int32 RequestID, const FVector& Location, float Radius);
 	void DestroyStreamingProbeForRequest(const UObject* WorldContextObject, int32 RequestID);
 };

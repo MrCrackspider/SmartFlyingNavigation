@@ -483,43 +483,47 @@ bool AOctreeVoxelVolume::BakeStaticData(UWorld* World, TArray<FOctreeNode>& OutN
 
 void AOctreeVoxelVolume::ConnectPortals_Bake(
 	TArray<FOctreeNode>& InOutMyNodePool,
-	TMap<int32, FVolumePortalLink>& OutPortalNodes,
+	TMap<int32, FVolumePortalLinks>& OutPortalNodes,
 	const TMap<AOctreeVoxelVolume*, TArray<FOctreeNode>>& AllVolumeData,
 	const TArray<AOctreeVoxelVolume*>& AllCreatedVolumes)
 {
-	UE_LOG(LogTemp, Log, TEXT("===[%s] ConnectPortals_Bake 시작. (총 노드 수: %d) ==="), *GetName(), InOutMyNodePool.Num());
+#if WITH_EDITOR
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		UE_LOG(LogTemp, Error, TEXT("ConnectPortals_Bake: Debug drawing failed because World is null."));
+		return;
+	}
 
-	// Epsilon 값은 테스트 지점이 경계면을 확실히 넘어가도록 보장합니다.
+	// Epsilon: 경계면을 살짝 넘어가기 위한 아주 작은 값입니다.
 	constexpr float Epsilon = 1.0f;
 	int32 BoundaryNodeCount = 0;
 	int32 CreatedPortalCount = 0;
 
-	// 1. 현재 볼륨의 모든 노드를 순회합니다.
+	// 현재 볼륨의 모든 노드를 순회합니다.
 	for (int32 MyNodeIndex = 0; MyNodeIndex < InOutMyNodePool.Num(); ++MyNodeIndex)
 	{
 		FOctreeNode& MyNode = InOutMyNodePool[MyNodeIndex];
 
-		// 2. 포털은 비어있는(Empty) 노드에만 생성될 수 있습니다.
+		// 포털은 비어있는(Empty) 노드에서만 생성될 수 있습니다.
 		if (MyNode.State != EOctreeNodeState::Empty)
 		{
 			continue;
 		}
 
-		// 3. 6방향의 이웃을 모두 확인합니다.
+		// 6방향(위, 아래, 앞, 뒤, 좌, 우)을 모두 검사합니다.
 		for (int32 DirIndex = 0; DirIndex < static_cast<int32>(ENeighborDirection::MAX); ++DirIndex)
 		{
-			// 내부적으로 이미 이웃이 연결된 경우는 건너뜁니다. 
-			// -1은 볼륨의 경계면임을 의미합니다.
+			// 이미 내부 이웃이 있는 경우는 건너뜁니다. (볼륨 경계면의 노드만 처리)
 			if (MyNode.Neighbors[DirIndex] != -1)
 			{
 				continue;
 			}
 
 			BoundaryNodeCount++;
-
-			// 4. 경계면 너머의 이웃을 탐색할 테스트 지점을 계산합니다.
-			FVector TestPoint = MyNode.Bounds.GetCenter();
 			const ENeighborDirection Direction = static_cast<ENeighborDirection>(DirIndex);
+
+			FVector TestPoint = MyNode.Bounds.GetCenter();
 			switch (Direction)
 			{
 			case ENeighborDirection::Right: TestPoint.X = MyNode.Bounds.Max.X + Epsilon; break;
@@ -530,31 +534,62 @@ void AOctreeVoxelVolume::ConnectPortals_Bake(
 			case ENeighborDirection::Down:  TestPoint.Z = MyNode.Bounds.Min.Z - Epsilon; break;
 			}
 
-			// 5. 이웃 볼륨 찾기: NavSubsystem 대신 전달받은 전체 볼륨 목록을 직접 순회합니다.
-			// 이것이 이 로직의 핵심적인 수정 사항입니다.
+			// 이웃 볼륨 찾기: NavSubsystem 대신 전달받은 전체 볼륨 목록을 직접 순회합니다.
 			AOctreeVoxelVolume* NeighborVolume = nullptr;
+			float MinDistanceSq = TNumericLimits<float>::Max();
+
+			// 생성된 모든 볼륨을 순회하며 가장 적합한 이웃을 찾습니다.
 			for (AOctreeVoxelVolume* PotentialNeighbor : AllCreatedVolumes)
 			{
-				if (PotentialNeighbor && PotentialNeighbor != this && PotentialNeighbor->GetVolumeBounds().IsInside(TestPoint))
+				if (!PotentialNeighbor || PotentialNeighbor == this) continue;
+
+				const FBox NeighborBounds = PotentialNeighbor->GetVolumeBounds();
+
+				// 1. 테스트 지점이 잠재적 이웃 볼륨 내에 있는지 먼저 확인합니다.
+				if (NeighborBounds.IsInsideOrOn(TestPoint))
 				{
-					NeighborVolume = PotentialNeighbor;
-					break; // 첫 번째로 찾은 이웃이 우리가 찾는 이웃입니다.
+					// 2. 테스트 지점과 잠재적 이웃 볼륨의 중심점 사이의 거리를 계산합니다.
+					const float DistSq = FVector::DistSquared(TestPoint, NeighborBounds.GetCenter());
+
+					// 3. 가장 중심점이 가까운 볼륨을 이웃으로 선택합니다.
+					//    동일 크기 볼륨 그리드에서는 이 방식이 가장 직관적이고 안정적입니다.
+					if (DistSq < MinDistanceSq)
+					{
+						MinDistanceSq = DistSq;
+						NeighborVolume = PotentialNeighbor;
+					}
 				}
 			}
 
-			// 6. 유효한 이웃 볼륨을 찾았을 경우, 포털 생성을 시도합니다.
+			// 만약 찾은 이웃이 너무 멀리 있다면(즉, 엉뚱한 이웃을 찾았다면) 무시합니다.
+			// 이는 여러 볼륨이 겹쳐있거나 할 때, 잘못된 이웃이 선택되는 것을 방지하는 중요한 방어 로직입니다.
 			if (NeighborVolume)
 			{
-				// 6a. 이웃 볼륨의 데이터 에셋 경로를 가져옵니다. 이것이 포털 연결의 고유 식별자가 됩니다.
+				// 볼륨의 크기는 모든 축에서 동일하다고 가정하고, 한 축의 Extent(반지름)를 가져옵니다.
+				const float VolumeHalfExtent = NeighborVolume->GetVolumeBounds().GetExtent().X;
+				// 합리적인 거리 임계값. (반지름의 1.5배 거리 제곱)
+				// TestPoint는 경계면 근처에 있으므로, 중심까지의 거리는 반지름과 비슷해야 합니다.
+				const float DistanceThresholdSq = FMath::Square(VolumeHalfExtent * 1.5f);
+
+				if (MinDistanceSq > DistanceThresholdSq)
+				{
+					// 찾은 이웃이 너무 멀리 떨어져 있으므로, 유효한 이웃이 없는 것으로 간주하고 연결을 포기합니다.
+					UE_LOG(LogTemp, Warning, TEXT("Neighbor '%s' for '%s' was found, but it's too far (DistSq: %.f, ThresholdSq: %.f). Discarding connection."),
+						*NeighborVolume->GetName(), *GetName(), MinDistanceSq, DistanceThresholdSq);
+					NeighborVolume = nullptr;
+				}
+			}
+
+			// 가장 적합하고 유효한 이웃 볼륨을 찾았다면, 포털 생성을 시도합니다.
+			if (NeighborVolume)
+			{
 				TSoftObjectPtr<UOctreeDataAsset> NeighborDataAssetPtr = NeighborVolume->GetBakedOctreeData();
 				if (NeighborDataAssetPtr.IsNull())
 				{
-					// 이 에러는 BakeEntireWorld의 로직 순서가 잘못되었을 때 발생할 수 있습니다. (에셋 할당이 포털 연결보다 늦을 경우)
-					UE_LOG(LogTemp, Error, TEXT("ConnectPortals_Bake CRITICAL: 이웃 볼륨 '%s'가 유효한 BakedOctreeData 에셋을 가지고 있지 않습니다! 포털을 생성할 수 없습니다."), *NeighborVolume->GetName());
+					UE_LOG(LogTemp, Error, TEXT("ConnectPortals_Bake CRITICAL: 이웃 볼륨 '%s'가 유효한 BakedOctreeData 에셋을 가지고 있지 않습니다!"), *NeighborVolume->GetName());
 					continue;
 				}
 
-				// 6b. 전체 데이터 맵에서 이웃 볼륨의 노드 풀(NodePool)을 가져옵니다.
 				const TArray<FOctreeNode>* NeighborNodePoolPtr = AllVolumeData.Find(NeighborVolume);
 				if (!NeighborNodePoolPtr)
 				{
@@ -562,88 +597,115 @@ void AOctreeVoxelVolume::ConnectPortals_Bake(
 					continue;
 				}
 
-				// 6c. 이웃 볼륨에서 테스트 지점에 해당하는 리프 노드를 찾습니다.
+				// 이웃 볼륨에서 테스트 지점에 해당하는 리프 노드를 찾습니다.
 				const int32 NeighborNodeIndex = NeighborVolume->FindLeafNode_Internal(*NeighborNodePoolPtr, 0, TestPoint, NeighborVolume->GetMaxOctreeDepth());
 
-				// 6d. 찾은 이웃 노드가 유효하고, 비어있는 노드인지 최종 확인합니다.
 				if (NeighborNodePoolPtr->IsValidIndex(NeighborNodeIndex))
 				{
 					const FOctreeNode& NeighborNode = (*NeighborNodePoolPtr)[NeighborNodeIndex];
+
+					// 이웃 노드도 비어있어야만 포털을 생성할 수 있습니다.
 					if (NeighborNode.State == EOctreeNodeState::Empty)
 					{
-						// 7. 성공! 연결 가능한 포털을 찾았으므로 링크 정보를 생성하고 저장합니다.
-						UE_LOG(LogTemp, Log, TEXT("ConnectPortals_Bake SUCCESS: '%s'의 노드 %d에서 -> '%s'의 노드 %d (에셋: %s)로 가는 유효한 포털을 찾았습니다."),
-							*GetName(), MyNodeIndex, *NeighborVolume->GetName(), NeighborNodeIndex, *NeighborDataAssetPtr.ToString());
-
-						// 포털을 통과할 수 있는 최대 에이전트 크기는 두 노드 중 더 작은 쪽을 따릅니다.
 						const float PortalClearance = FMath::Min(MyNode.MaxAllowedRadius, NeighborNode.MaxAllowedRadius);
 
 						FVolumePortalLink PortalLink;
 						PortalLink.TargetVolume = NeighborDataAssetPtr;
 						PortalLink.TargetNodeIndex = NeighborNodeIndex;
 						PortalLink.MaxAllowedRadius = PortalClearance;
+						FVolumePortalLinks& LinksContainer = OutPortalNodes.FindOrAdd(MyNodeIndex);
+						LinksContainer.Links.Add(PortalLink);
 
-						OutPortalNodes.Add(MyNodeIndex, PortalLink);
 						CreatedPortalCount++;
 					}
 					else
 					{
-						// 이웃 노드가 있지만 장애물(Solid) 또는 혼합(Mixed) 상태라 연결할 수 없습니다.
-						UE_LOG(LogTemp, Verbose, TEXT("ConnectPortals_Bake: 노드 %d의 이웃 노드(%d in '%s')가 Empty 상태가 아니므로 포털을 생성하지 않습니다."), MyNodeIndex, NeighborNodeIndex, *NeighborVolume->GetName());
+						FString StateString = (NeighborNode.State == EOctreeNodeState::Solid) ? TEXT("Solid") : TEXT("Mixed");
+						UE_LOG(LogTemp, Warning, TEXT(">>> FAILED: '%s'(노드 %d)의 포털 생성 실패. 이웃 볼륨 '%s'의 노드 %d가 비어있지 않음 (상태: %s)."),
+							*GetName(), MyNodeIndex, *NeighborVolume->GetName(), NeighborNodeIndex, *StateString);
+
+#if WITH_EDITOR
+						DrawDebugBox(World, NeighborNode.Bounds.GetCenter(), NeighborNode.Bounds.GetExtent(), FColor::Red, false, 30.0f, 0, 10.0f);
+#endif
 					}
 				}
 				else
 				{
-					// 이웃 볼륨에서 유효한 리프 노드를 찾지 못했습니다. (이론적으로 발생하기 힘든 경우)
-					UE_LOG(LogTemp, Warning, TEXT("ConnectPortals_Bake: 이웃 볼륨 '%s'에서 TestPoint(%s)에 해당하는 유효한 리프 노드를 찾지 못했습니다."), *NeighborVolume->GetName(), *TestPoint.ToString());
+					UE_LOG(LogTemp, Warning, TEXT(">>> FAILED: 이웃 볼륨 '%s'에서 TestPoint(%s)에 해당하는 유효한 리프 노드를 찾지 못했습니다."), *GetActorLabel(), *TestPoint.ToString());
 				}
 			}
-			// 이웃 볼륨을 찾지 못했다면, 월드의 실제 경계면이므로 아무 작업도 하지 않습니다.
 		}
 	}
 
-	// 최종 결과를 로그로 남깁니다.
-	UE_LOG(LogTemp, Log, TEXT("===[%s] ConnectPortals_Bake 종료. (경계면 노드 %d개 확인, 포털 %d개 생성) ==="), *GetName(), BoundaryNodeCount, CreatedPortalCount);
+	if (CreatedPortalCount > 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("ConnectPortals_Bake SUCCESS for '%s': Found %d boundary nodes and created %d portals."), *GetActorLabel(), BoundaryNodeCount, CreatedPortalCount);
+	}
+#endif
 }
-void AOctreeVoxelVolume::SaveOctreeToAsset(const TArray<FOctreeNode>& NodePoolToSave, const TMap<int32, FVolumePortalLink>& PortalsToSave)
+
+void AOctreeVoxelVolume::SaveOctreeToAsset(const TArray<FOctreeNode>& NodePoolToSave, const TMap<int32, FVolumePortalLinks>& PortalsToSave)
 {
+#if WITH_EDITOR
 	FString PackageName, AssetName;
 	if (!GetBakedAssetPath(PackageName, AssetName))
 	{
-		UE_LOG(LogTemp, Error, TEXT("SaveOctreeToAsset 실패: '%s'의 데이터 에셋 경로를 결정할 수 없습니다."), *GetName());
+		UE_LOG(LogTemp, Error, TEXT("SaveOctreeToAsset failed for '%s': Could not determine the data asset path."), *GetActorLabel());
 		return;
 	}
 
-	// GetBakedOctreeData()를 통해 미리 생성/할당된 데이터 에셋을 가져옵니다.
 	UOctreeDataAsset* DataAssetToSave = GetBakedOctreeData().Get();
 	if (!DataAssetToSave)
 	{
-		UE_LOG(LogTemp, Error, TEXT("SaveOctreeToAsset 실패: '%s'에 할당된 데이터 에셋이 없습니다. 베이크 순서를 확인하세요."), *GetName());
+		UE_LOG(LogTemp, Error, TEXT("SaveOctreeToAsset failed for '%s': The assigned data asset is missing."), *GetActorLabel());
 		return;
 	}
 
-	// --- 저장 직전 데이터 검증 로그 ---
-	UE_LOG(LogTemp, Log, TEXT("'%s'의 데이터 에셋(%s)을 저장합니다. %d개의 포털 데이터를 확인합니다..."), *GetName(), *AssetName, PortalsToSave.Num());
-	for (const auto& PortalPair : PortalsToSave)
+	// 검증 로그
+	int32 TotalPortalLinkCount = 0;
+	if (PortalsToSave.Num() == 0)
 	{
-		const FVolumePortalLink& PortalLink = PortalPair.Value;
-		if (PortalLink.TargetVolume.IsNull())
+		UE_LOG(LogTemp, Warning, TEXT(">>> VALIDATION WARNING for '%s': Saving asset with ZERO portals."), *GetActorLabel());
+	}
+	else
+	{
+		for (const auto& PortalNodePair : PortalsToSave)
 		{
-			// 이 로그가 찍힌다면, ConnectPortals_Bake에서 문제가 있었음을 의미합니다.
-			UE_LOG(LogTemp, Error, TEXT("SaveOctreeToAsset CRITICAL: 노드 %d를 위한 포털의 TargetVolume이 NULL입니다! 이 데이터는 런타임에서 실패를 유발합니다."), PortalPair.Key);
-		}
-		else
-		{
-			UE_LOG(LogTemp, Verbose, TEXT("SaveOctreeToAsset: 노드 %d -> 대상 에셋 '%s' (유효)"), PortalPair.Key, *PortalLink.TargetVolume.ToString());
+			const int32 MyNodeIndex = PortalNodePair.Key;
+			const FVolumePortalLinks& LinksContainer = PortalNodePair.Value;
+			TotalPortalLinkCount += LinksContainer.Links.Num();
+
+			for (const FVolumePortalLink& PortalLink : LinksContainer.Links)
+			{
+				if (PortalLink.TargetVolume.IsNull())
+				{
+					UE_LOG(LogTemp, Error, TEXT(">>> VALIDATION FAILED for '%s': Portal for Node %d has a NULL TargetVolume!"), *GetActorLabel(), MyNodeIndex);
+				}
+			}
 		}
 	}
-	// --- 로그 끝 ---
+	UE_LOG(LogTemp, Log, TEXT("Saving data for '%s': %d nodes, %d nodes with portals, %d total portal links."), *GetActorLabel(), NodePoolToSave.Num(), PortalsToSave.Num(), TotalPortalLinkCount);
 
 	DataAssetToSave->Modify();
+
+	// 1. PortalNodes는 UPROPERTY이므로, 데이터 에셋의 멤버 변수에 직접 할당
+	//    엔진의 표준 직렬화 시스템이 이 데이터를 올바르게 저장
 	DataAssetToSave->PortalNodes = PortalsToSave;
+
+	// NodePool은 커스텀 압축 함수를 호출하여 처리
 	DataAssetToSave->SetAndCompressBakedData(NodePoolToSave, this->MapSize, this->GetMaxOctreeDepth());
 
-	UE_LOG(LogTemp, Log, TEXT("'%s'의 데이터 에셋 저장을 위해 패키지를 Dirty로 표시했습니다."), *GetName());
+	// 변경된 에셋 데이터를 디스크에 확실히 저장
+	TArray<UObject*> AssetsToSave;
+	AssetsToSave.Add(DataAssetToSave);
+
+	const bool bSaved = UEditorAssetLibrary::SaveLoadedAssets(AssetsToSave, true);
+
+	if (!bSaved)
+	{
+		UE_LOG(LogTemp, Error, TEXT("Failed to save UOctreeDataAsset '%s' to disk."), *AssetName);
+	}
+#endif
 }
 
 void AOctreeVoxelVolume::VoxelizeComponent(const FBox& ComponentBounds, const FCollisionObjectQueryParams& ObjectQueryParams, TSet<FIntVector>& OutStaticObstacles) const

@@ -6,48 +6,42 @@
 
 const FName UOctreeDataAsset::OctreeAssetType = TEXT("OctreeData");
 
-
 #if WITH_EDITOR
+// 이 함수는 이제 오직 FOctreeNode 데이터만 직렬화하고 압축합니다.
 void UOctreeDataAsset::SetAndCompressBakedData(const TArray<FOctreeNode>& InNodePool, const FIntVector& InMapSize, int32 InMaxDepth)
 {
-	// 1. Store all metadata first to ensure consistency.
 	this->BakedVolumeSize = InMapSize;
 	this->BakedMaxOctreeDepth = InMaxDepth;
 
-	// 2. Serialize the node pool into a raw byte array.
 	TArray<uint8> RawData;
 	FMemoryWriter Ar(RawData, true);
-	Ar << const_cast<TArray<FOctreeNode>&>(InNodePool); // FMemoryWriter requires non-const ref
+	Ar << const_cast<TArray<FOctreeNode>&>(InNodePool);
 
 	if (RawData.Num() == 0)
 	{
-		this->CompressedData.Empty();
-		this->UncompressedSize = 0;
+		this->CompressedNodePool.Empty();
+		this->UncompressedNodePoolSize = 0;
 		return;
 	}
 
-	// 3. Store the original size for decompression.
-	this->UncompressedSize = RawData.Num();
+	this->UncompressedNodePoolSize = RawData.Num();
 
-	// 4. Compress the raw data using Zlib.
 	const FName CompressionFormat = FName(TEXT("Zlib"));
 	const int32 MaxCompressedSize = FCompression::CompressMemoryBound(CompressionFormat, RawData.Num());
 
-	this->CompressedData.Empty(); // Clear any previous data.
-	this->CompressedData.SetNumUninitialized(MaxCompressedSize);
+	this->CompressedNodePool.Empty();
+	this->CompressedNodePool.SetNumUninitialized(MaxCompressedSize);
 
 	int32 ActualCompressedSize = MaxCompressedSize;
-	if (FCompression::CompressMemory(CompressionFormat, this->CompressedData.GetData(), ActualCompressedSize, RawData.GetData(), RawData.Num()))
+	if (FCompression::CompressMemory(CompressionFormat, this->CompressedNodePool.GetData(), ActualCompressedSize, RawData.GetData(), RawData.Num()))
 	{
-		// Shrink the array to the actual compressed size to save space.
-		this->CompressedData.SetNum(ActualCompressedSize, false);
+		this->CompressedNodePool.SetNum(ActualCompressedSize, false);
 	}
 	else
 	{
-		// On failure, clear all data to prevent corruption.
-		this->CompressedData.Empty();
-		this->UncompressedSize = 0;
-		UE_LOG(LogTemp, Error, TEXT("UOctreeDataAsset: Failed to compress navigation data!"));
+		this->CompressedNodePool.Empty();
+		this->UncompressedNodePoolSize = 0;
+		UE_LOG(LogTemp, Error, TEXT("UOctreeDataAsset: Failed to compress node pool data!"));
 	}
 }
 #endif
@@ -55,43 +49,36 @@ void UOctreeDataAsset::SetAndCompressBakedData(const TArray<FOctreeNode>& InNode
 
 void UOctreeDataAsset::DecompressAndInitialize()
 {
-    // --- Decompression logic starts here ---
+	// 이 함수는 이제 오직 NodePool 데이터만 압축 해제합니다.
+	// PortalNodes는 엔진이 에셋을 로드할 때 표준 직렬화 시스템을 통해 자동으로 채워줍니다.
+	if (NodePool.Num() > 0 || CompressedNodePool.Num() == 0)
+	{
+		return;
+	}
 
-    // 1. Pre-check: Do not run if the NodePool is already populated or if there's no data to decompress.
+	TArray<uint8> RawData;
+	RawData.SetNumUninitialized(this->UncompressedNodePoolSize);
 
-	if (NodePool.Num() > 0 || CompressedData.Num() == 0)
-    {
-        return;
-    }
+	const FName CompressionFormat = FName(TEXT("Zlib"));
+	const bool bDecompressionSuccess = FCompression::UncompressMemory(
+		CompressionFormat,
+		RawData.GetData(),
+		this->UncompressedNodePoolSize,
+		this->CompressedNodePool.GetData(),
+		this->CompressedNodePool.Num()
+	);
 
-    // A temporary array to hold the decompressed raw byte data.
-    TArray<uint8> RawData;
-    RawData.SetNumUninitialized(this->UncompressedSize);
-
-    // 3. Perform the actual decompression from CompressedData into the RawData buffer.
-    const FName CompressionFormat = FName(TEXT("Zlib"));
-    const bool bDecompressionSuccess = FCompression::UncompressMemory(
-        CompressionFormat,
-        RawData.GetData(),
-        this->UncompressedSize,
-        this->CompressedData.GetData(),
-        this->CompressedData.Num()
-    );
-
-    if (bDecompressionSuccess)
-    {
-        // 4. If decompression was successful, deserialize the raw byte data back into the TArray<FOctreeNode>.
-    	FMemoryReader Ar(RawData, true);
-        Ar << this->NodePool;
-    	CompressedData.Empty();
-    }
-    else
-    {
-        // If decompression fails, log an error and ensure the NodePool is empty to signify failure.
-        this->NodePool.Empty();
-        UE_LOG(LogTemp, Error, TEXT("UOctreeDataAsset: Failed to decompress navigation data!"));
-    }
-    // --- Decompression logic ends ---
+	if (bDecompressionSuccess)
+	{
+		FMemoryReader Ar(RawData, true);
+		Ar << this->NodePool;
+		CompressedNodePool.Empty();
+	}
+	else
+	{
+		this->NodePool.Empty();
+		UE_LOG(LogTemp, Error, TEXT("UOctreeDataAsset: Failed to decompress node pool data!"));
+	}
 }
 
 FPrimaryAssetId UOctreeDataAsset::GetPrimaryAssetId() const

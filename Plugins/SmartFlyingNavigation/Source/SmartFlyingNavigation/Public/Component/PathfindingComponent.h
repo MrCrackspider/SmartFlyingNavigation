@@ -196,7 +196,7 @@ protected:
 	/** When the path is invalid, the current movement is stopped and a retracing timer is started. */
 	void InvalidatePathAndRequestRepath();
 
-	bool IsPathObstructed(const FVector& Start, const FVector& End) const;
+	bool IsPathObstructed(const FVector& Start, const FVector& End, bool bIsPortalApproach = false) const;
 	
 	void DrawDebugPath();
 	

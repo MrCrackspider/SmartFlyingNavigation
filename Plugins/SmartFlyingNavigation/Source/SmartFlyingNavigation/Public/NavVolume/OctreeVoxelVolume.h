@@ -151,7 +151,7 @@ public:
 
 	void ConnectPortals_Bake(
 		TArray<FOctreeNode>& InOutMyNodePool,
-		TMap<int32, FVolumePortalLink>& OutPortalNodes,
+		TMap<int32, FVolumePortalLinks>& OutPortalNodes,
 		const TMap<AOctreeVoxelVolume*, TArray<FOctreeNode>>& AllVolumeData,
 		const TArray<AOctreeVoxelVolume*>& AllCreatedVolumes
 	);
@@ -266,7 +266,7 @@ public:
 	bool GetBakedAssetPath(FString& OutPackagePath, FString& OutAssetName) const;
 
 	/** Handles the creation, saving, and assignment of the UOctreeDataAsset. */
-	void SaveOctreeToAsset(const TArray<FOctreeNode>& NodePoolToSave, const TMap<int32, FVolumePortalLink>& PortalsToSave);
+	void SaveOctreeToAsset(const TArray<FOctreeNode>& NodePoolToSave, const TMap<int32, FVolumePortalLinks>& PortalsToSave);
 
 	/** Recursively inserts a single obstacle voxel into the octree during the baking process. */
 	void InsertObstacleRecursive_Internal(

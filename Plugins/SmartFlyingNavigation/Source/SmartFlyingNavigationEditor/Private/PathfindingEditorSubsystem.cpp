@@ -184,7 +184,9 @@ void UPathfindingEditorSubsystem::BakeEntireWorld(const UPathfindingTunerSetting
 		UE_LOG(LogTemp, Error, TEXT("월드 내비게이션 데이터 명세 '%s' 저장에 실패했습니다."), *ManifestPackagePath);
 	}
 }
+// PathfindingEditorSubsystem.cpp
 
+#if WITH_EDITOR
 void UPathfindingEditorSubsystem::BakeAndConnectVolumes_Internal(const TArray<AOctreeVoxelVolume*>& VolumesToProcess, UWorld* InWorld)
 {
 	if (VolumesToProcess.IsEmpty() || !InWorld)
@@ -192,46 +194,12 @@ void UPathfindingEditorSubsystem::BakeAndConnectVolumes_Internal(const TArray<AO
 		return;
 	}
 
-	// 처리할 볼륨들의 내부 Octree 데이터(NodePool)를 먼저 베이크
-	TMap<AOctreeVoxelVolume*, TArray<FOctreeNode>> BakedVolumeData;
-	for (AOctreeVoxelVolume* Volume : VolumesToProcess)
-	{
-		if (!IsValid(Volume)) continue;
-		TArray<FOctreeNode> NodePool;
-		if (Volume->BakeStaticData(InWorld, NodePool))
-		{
-			BakedVolumeData.Add(Volume, NodePool);
-		}
-	}
-
-	// 포털 연결을 위한 전체 컨텍스트를 수집
-	// "처리할 볼륨들" + "월드에 이미 존재하는 다른 모든 볼륨들"
-	TArray<AOctreeVoxelVolume*> AllRelevantVolumes;
-	TMap<AOctreeVoxelVolume*, TArray<FOctreeNode>> AllVolumeNodeData;
-
-	// 현재 처리 중인 볼륨들을 추가
-	AllRelevantVolumes.Append(VolumesToProcess);
-	AllVolumeNodeData.Append(BakedVolumeData);
-
-	// 월드에 존재하는 다른 모든 OctreeVoxelVolume을 찾아서 추가
-	for (TActorIterator<AOctreeVoxelVolume> It(InWorld); It; ++It)
-	{
-		AOctreeVoxelVolume* ExistingVolume = *It;
-		if (IsValid(ExistingVolume) && !AllRelevantVolumes.Contains(ExistingVolume))
-		{
-			AllRelevantVolumes.Add(ExistingVolume);
-
-			// 이미 존재하는 볼륨의 데이터는 데이터 에셋에서 로드
-			if (UOctreeDataAsset* DataAsset = ExistingVolume->GetBakedOctreeData().LoadSynchronous())
-			{
-				DataAsset->DecompressAndInitialize();
-				AllVolumeNodeData.Add(ExistingVolume, DataAsset->NodePool);
-			}
-		}
-	}
-
-	// 처리할 볼륨들의 데이터 에셋을 미리 생성하고 할당
 	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+
+	// ==================================================================
+	// 단계 1: 모든 볼륨에 대한 데이터 에셋을 먼저 생성하고 할당합니다.
+	// ==================================================================
+	UE_LOG(LogTemp, Log, TEXT("--- 단계 1: 모든 데이터 에셋 생성 및 할당 시작 ---"));
 	for (AOctreeVoxelVolume* Volume : VolumesToProcess)
 	{
 		if (!IsValid(Volume)) continue;
@@ -252,33 +220,86 @@ void UPathfindingEditorSubsystem::BakeAndConnectVolumes_Internal(const TArray<AO
 
 			Volume->SetBakedOctreeData(NewDataAsset);
 			FAssetRegistryModule::AssetCreated(NewDataAsset);
+			UE_LOG(LogTemp, Verbose, TEXT("'%s'에 대한 데이터 에셋 '%s' 생성 완료."), *Volume->GetName(), *AssetName);
+		}
+	}
+	UE_LOG(LogTemp, Log, TEXT("--- 단계 1: 모든 데이터 에셋 생성 및 할당 완료 ---"));
+
+
+	// ==================================================================
+	// 단계 2: 각 볼륨의 내부 Octree 데이터를 베이크합니다.
+	// ==================================================================
+	UE_LOG(LogTemp, Log, TEXT("--- 단계 2: 내부 Octree 데이터 베이크 시작 ---"));
+	TMap<AOctreeVoxelVolume*, TArray<FOctreeNode>> BakedVolumeData;
+	for (AOctreeVoxelVolume* Volume : VolumesToProcess)
+	{
+		if (!IsValid(Volume)) continue;
+		TArray<FOctreeNode> NodePool;
+		if (Volume->BakeStaticData(InWorld, NodePool))
+		{
+			BakedVolumeData.Add(Volume, NodePool);
+		}
+	}
+	UE_LOG(LogTemp, Log, TEXT("--- 단계 2: 내부 Octree 데이터 베이크 완료 ---"));
+
+
+	// ==================================================================
+	// 단계 3: 포털 연결을 위한 전체 컨텍스트를 수집합니다.
+	// ==================================================================
+	TArray<AOctreeVoxelVolume*> AllRelevantVolumes;
+	TMap<AOctreeVoxelVolume*, TArray<FOctreeNode>> AllVolumeNodeData;
+	AllRelevantVolumes.Append(VolumesToProcess);
+	AllVolumeNodeData.Append(BakedVolumeData);
+
+	for (TActorIterator<AOctreeVoxelVolume> It(InWorld); It; ++It)
+	{
+		AOctreeVoxelVolume* ExistingVolume = *It;
+		if (IsValid(ExistingVolume) && !AllRelevantVolumes.Contains(ExistingVolume))
+		{
+			AllRelevantVolumes.Add(ExistingVolume);
+			if (UOctreeDataAsset* DataAsset = ExistingVolume->GetBakedOctreeData().LoadSynchronous())
+			{
+				DataAsset->DecompressAndInitialize();
+				AllVolumeNodeData.Add(ExistingVolume, DataAsset->NodePool);
+			}
 		}
 	}
 
-	// 포털을 연결
-	TMap<AOctreeVoxelVolume*, TMap<int32, FVolumePortalLink>> AllPortalData;
+	// ==================================================================
+	// 단계 4: 포털을 연결합니다.
+	// ==================================================================
+	UE_LOG(LogTemp, Log, TEXT("--- 단계 4: 포털 연결 시작 ---"));
+	// [수정] AllPortalData의 타입을 새로운 데이터 구조에 맞게 변경합니다.
+	TMap<AOctreeVoxelVolume*, TMap<int32, FVolumePortalLinks>> AllPortalData;
 	for (AOctreeVoxelVolume* Volume : VolumesToProcess)
 	{
 		TArray<FOctreeNode>* MyNodePool = BakedVolumeData.Find(Volume);
 		if (MyNodePool)
 		{
-			TMap<int32, FVolumePortalLink> PortalNodes;
-			// AllRelevantVolumes를 전달하여 포털을 연결
+			// [수정] 지역 변수 PortalNodes의 타입도 새로운 데이터 구조에 맞게 변경합니다.
+			TMap<int32, FVolumePortalLinks> PortalNodes;
 			Volume->ConnectPortals_Bake(*MyNodePool, PortalNodes, AllVolumeNodeData, AllRelevantVolumes);
 			AllPortalData.Add(Volume, PortalNodes);
 		}
 	}
+	UE_LOG(LogTemp, Log, TEXT("--- 단계 4: 포털 연결 완료 ---"));
 
-	// 최종 데이터를 에셋에 저장
+
+	// ==================================================================
+	// 단계 5: 최종 데이터를 에셋에 할당하고 저장할 패키지 목록을 만듭니다.
+	// ==================================================================
+	UE_LOG(LogTemp, Log, TEXT("--- 단계 5: 최종 데이터 저장 준비 ---"));
 	TArray<UPackage*> PackagesToSave;
 	for (AOctreeVoxelVolume* Volume : VolumesToProcess)
 	{
 		UOctreeDataAsset* DataAsset = Volume->GetBakedOctreeData().Get();
 		TArray<FOctreeNode>* NodePoolToSave = BakedVolumeData.Find(Volume);
-		TMap<int32, FVolumePortalLink>* PortalsToSave = AllPortalData.Find(Volume);
+		// [수정] PortalsToSave의 타입도 이제 올바른 TMap<int32, FVolumePortalLinks>* 가 됩니다.
+		TMap<int32, FVolumePortalLinks>* PortalsToSave = AllPortalData.Find(Volume);
 
 		if (DataAsset && NodePoolToSave && PortalsToSave)
 		{
+			// 이제 SaveOctreeToAsset 함수 호출 시 타입이 일치합니다.
 			Volume->SaveOctreeToAsset(*NodePoolToSave, *PortalsToSave);
 			if (UPackage* Package = DataAsset->GetPackage())
 			{
@@ -287,12 +308,20 @@ void UPathfindingEditorSubsystem::BakeAndConnectVolumes_Internal(const TArray<AO
 		}
 	}
 
-	// 패키지를 디스크에 저장
+	// ==================================================================
+	// 단계 6: 모든 패키지를 한 번에 디스크에 저장합니다.
+	// ==================================================================
 	if (PackagesToSave.Num() > 0)
 	{
+		UE_LOG(LogTemp, Log, TEXT("--- 단계 6: %d개의 데이터 에셋 패키지를 디스크에 저장합니다. ---"), PackagesToSave.Num());
 		UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, true);
 	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("--- 단계 6: 저장할 데이터 에셋 패키지가 없습니다. ---"));
+	}
 }
+#endif
 
 void UPathfindingEditorSubsystem::CleanupPreviousAssets(UWorld* InWorld, const FString& InSavePath) const
 {
