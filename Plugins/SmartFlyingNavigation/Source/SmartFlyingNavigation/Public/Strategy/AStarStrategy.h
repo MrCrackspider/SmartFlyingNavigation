@@ -14,22 +14,27 @@ class FAstarPathfinder
 {
 public:
 	FAstarPathfinder(const FOctreePathfindingData& InOctreeData, int32 InStartIndex, int32 InEndIndex,
-	                 const FVector& InStartLocation, const FVector& InEndLocation, float InAgentRadius,
-	                 TNodeMemoryPool<FAstarPathNode>& InMemoryPool);
+								   const FVector& InOriginalStartLocation, const FVector& InEffectiveStartLocation,
+								   const FVector& InEndLocation, float InAgentRadius,
+								   TNodeMemoryPool<FAstarPathNode>& InMemoryPool);
+	
 	EPathfindingResult FindPath(TArray<FVector>& OutPath);
 
+	bool HasClearPath(const FVector& Start, const FVector& End) const;
 private:
 	void IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPathNode*>& OutSuccessors);
 	bool TryToRepairPartialPath(FAstarPathNode* PartialEndNode, TArray<FVector>& OutPath);
 	int64 CalculateBoundHeuristic(int32 NodeIndex) const;
 	int64 GetMoveCost(const FVector& A, const FVector& B) const;
 	void ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<FVector>& OutPath);
-	bool HasClearPath(const FVector& Start, const FVector& End) const;
 	const FOctreePathfindingData& OctreeData;
 	const int32 StartNodeIndex;
 	const int32 GoalNodeIndex;
 	const float AgentRadius;
-	const FVector ActualStartLocation;
+
+	const FVector OriginalStartLocation;
+	const FVector EffectiveStartLocation;
+
 	const FVector ActualGoalLocation;
 	TNodeMemoryPool<FAstarPathNode>& MemoryPool;
 
@@ -57,8 +62,8 @@ public:
 
 public:
 	UPROPERTY(EditDefaultsOnly, Category = "A* | Fallback Search", meta=(ClampMin="50.0"))
-	float NearbyGoalSearchRadius = 500.f;
+	float NearbyGoalSearchRadius = 2000.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "A* | Fallback Search", meta=(ClampMin="1"))
-	int32 NearbyGoalSearchIterations = 5;
+	int32 NearbyGoalSearchIterations = 100;
 };

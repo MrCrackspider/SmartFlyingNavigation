@@ -17,40 +17,50 @@ struct FOctreePathfindingData
 	FIntVector MapSize;
 	float VoxelSize = 100.0f;
 
-	int32 FindNearestValidLeafForAgent(const FVector& Origin, float AgentRadius, float InitialSearchRadius,
-	                                   int32 MaxIterations) const
-	{
-		if (RootNodeIndex == -1 || !StaticNodePoolPtr) return -1;
+int32 FindNearestValidLeafForAgent(const FVector& Origin, float AgentRadius, float InitialSearchRadius,
+                                   int32 MaxIterations) const
+{
+    if (RootNodeIndex == -1 || !StaticNodePoolPtr) return -1;
 
-		const float MaxSearchRadius = InitialSearchRadius * MaxIterations;
-		const FBox SearchBox(Origin - FVector(MaxSearchRadius), Origin + FVector(MaxSearchRadius));
+    const float MaxSearchRadius = InitialSearchRadius * MaxIterations;
+    const FBox SearchBox(Origin - FVector(MaxSearchRadius), Origin + FVector(MaxSearchRadius));
 
-		TArray<int32> CandidateLeaves;
-		FindLeavesInBoxRecursive(CandidateLeaves, RootNodeIndex, SearchBox);
+    TArray<int32> CandidateLeaves;
+    FindLeavesInBoxRecursive(CandidateLeaves, RootNodeIndex, SearchBox);
 
-		int32 BestNodeIndex = -1;
-		float MinDistSq = TNumericLimits<float>::Max();
+    int32 BestNodeIndex = -1;
+    float MinDistSq = TNumericLimits<float>::Max();
 
-		for (const int32 LeafIndex : CandidateLeaves)
-		{
-			if (StaticNodePoolPtr->IsValidIndex(LeafIndex))
-			{
-				const FOctreeNode& LeafNode = (*StaticNodePoolPtr)[LeafIndex];
+    for (const int32 LeafIndex : CandidateLeaves)
+    {
+        if (StaticNodePoolPtr->IsValidIndex(LeafIndex))
+        {
+            const FOctreeNode& LeafNode = (*StaticNodePoolPtr)[LeafIndex];
 
-				if (LeafNode.State == EOctreeNodeState::Empty && LeafNode.MaxAllowedRadius > AgentRadius && !IsRegionDynamicallyBlocked(LeafNode.Bounds))
-				{
-					const float DistSq = FVector::DistSquared(Origin, LeafNode.Bounds.GetCenter());
-					if (DistSq < MinDistSq)
-					{
-						MinDistSq = DistSq;
-						BestNodeIndex = LeafIndex;
-					}
-				}
-			}
-		}
+            if (LeafNode.State != EOctreeNodeState::Empty)
+            {
+                continue;
+            }
 
-		return BestNodeIndex;
-	}
+            const FVector CandidateCenter = LeafNode.Bounds.GetCenter();
+            
+            const bool bIsStaticallySafe = !CheckForSolidNodesInCapsule(CandidateCenter, CandidateCenter, AgentRadius);
+            const bool bIsDynamicallySafe = !IsRegionDynamicallyBlocked(FBox::BuildAABB(CandidateCenter, FVector(AgentRadius)));
+
+            if (bIsStaticallySafe && bIsDynamicallySafe)
+            {
+                const float DistSq = FVector::DistSquared(Origin, CandidateCenter);
+                if (DistSq < MinDistSq)
+                {
+                    MinDistSq = DistSq;
+                    BestNodeIndex = LeafIndex;
+                }
+            }
+        }
+    }
+
+    return BestNodeIndex;
+}
 
 private:
 	int32 GetOctantContainingPosition(const FBox& NodeBounds, const FVector& Position) const
@@ -95,13 +105,7 @@ private:
 			return FVector::DistSquared(SegStart, PointOnBox);
 		}
 
-		// --- 2. 반복 최적화: 가장 가까운 점 찾기 ---
-		// 핵심 원리:
-		// 1. 선분 위의 한 점(P_seg)을 잡습니다.
-		// 2. 박스에서 P_seg와 가장 가까운 점(P_box)을 찾습니다. (Box.GetClosestPointTo)
-		// 3. 다시 선분에서 P_box와 가장 가까운 점(P_seg)을 찾습니다. (FMath::ClosestPointOnSegment)
-		// 4. 이 과정을 반복하면 P_seg와 P_box는 서로에게 가장 가까운 지점으로 빠르게 수렴합니다.
-
+	
 		FVector PointOnSegment = (SegStart + SegEnd) * 0.5f; // 시작점으로 선분의 중앙을 사용
 		FVector PointOnBox;
 
@@ -178,12 +182,12 @@ public:
 
 		if (RootNodeIndex == -1 || !StaticNodePoolPtr) return true;
 
-		const int32 StartLeaf = FindLeafNodeAt(Start);
-		if (StartLeaf != -1 && (*StaticNodePoolPtr)[StartLeaf].State == EOctreeNodeState::Solid) return true;
-
-
-		const int32 EndLeaf = FindLeafNodeAt(End);
-		if (EndLeaf != -1 && (*StaticNodePoolPtr)[EndLeaf].State == EOctreeNodeState::Solid) return true;
+		// const int32 StartLeaf = FindLeafNodeAt(Start);
+		// if (StartLeaf != -1 && (*StaticNodePoolPtr)[StartLeaf].State == EOctreeNodeState::Solid) return true;
+		//
+		//
+		// const int32 EndLeaf = FindLeafNodeAt(End);
+		// if (EndLeaf != -1 && (*StaticNodePoolPtr)[EndLeaf].State == EOctreeNodeState::Solid) return true;
 
 
 		const FBox CapsuleAABB(FVector::Min(Start, End) - FVector(Radius), FVector::Max(Start, End) + FVector(Radius));
@@ -304,7 +308,7 @@ public:
 
 		const FVector Direction = PathVector / TotalDistance;
 
-		const float StepSize = AgentRadius;
+		const float StepSize = AgentRadius *.1f;
 
 		for (float Distance = 0; Distance < TotalDistance; Distance += StepSize)
 		{

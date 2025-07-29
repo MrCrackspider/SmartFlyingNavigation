@@ -179,11 +179,9 @@ protected:
 	 */
 	virtual void UpdateDebugObstacleVisualization() override;
 #endif
-
-private:
-
-	// --- Query Helpers ---
 	
+	// --- Query Helpers ---
+public:
 	FIntVector WorldToVoxelIndex(const FVector& WorldLocation) const;
 
 	FVector VoxelIndexToWorld(const FIntVector& VoxelIndex) const;
@@ -194,6 +192,8 @@ private:
 
 	int32 FindLeafNodeAt(const FVector& WorldPos) const;
 
+	void DrawDebugDynamicObstaclesWithBoxes();
+private:
 	
 	//~======================================================================
 	// Dynamic Obstacle Internals

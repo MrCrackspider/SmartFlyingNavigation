@@ -64,6 +64,23 @@ void AOctreeVoxelVolume::BeginPlay()
 
 	RequestAsyncLoad();
 
+
+	{
+		const FVector TotalSize = GetVolumeBounds().GetSize();
+		const FIntVector CalculatedMapSize(
+			FMath::RoundToInt(TotalSize.X / VoxelExtent),
+			FMath::RoundToInt(TotalSize.Y / VoxelExtent),
+			FMath::RoundToInt(TotalSize.Z / VoxelExtent)
+		);
+
+		if (MapSize != CalculatedMapSize)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("AOctreeVoxelVolume '%s': Baked MapSize %s differs from current volume size %s. Overwriting with current size to ensure correct dynamic obstacle indexing."),
+				*GetName(), *MapSize.ToString(), *CalculatedMapSize.ToString());
+			MapSize = CalculatedMapSize;
+		}
+	}
+	
 	InitializeDynamicLayer();
 	GetWorldTimerManager().SetTimer(DynamicObstacleTimer, this, &AOctreeVoxelVolume::UpdateDynamicObstacles, 0.01f, true, 0.1f);
 }
@@ -108,6 +125,7 @@ void AOctreeVoxelVolume::PostInitializeComponents()
 void AOctreeVoxelVolume::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	//DrawDebugDynamicObstaclesWithBoxes();
 	// Main logic is handled by BeginPlay initialization and the DynamicObstacleTimer.
 }
 
@@ -910,6 +928,64 @@ int32 AOctreeVoxelVolume::FindLeafNodeAt(const FVector& WorldPos) const
 	}
 
 	return -1;
+}
+
+void AOctreeVoxelVolume::DrawDebugDynamicObstaclesWithBoxes()
+{
+    if (DynamicObstacleBitmask.IsEmpty() || !GetWorld())
+    {
+        return;
+    }
+
+    const UWorld* World = GetWorld();
+    const FBox VolumeWorldBounds = GetVolumeBounds();
+    const FVector TotalSize = VolumeWorldBounds.GetSize();
+    const float MinNodeSize = TotalSize.X / FMath::Pow(2.f, GetMaxOctreeDepth());
+    const FVector VoxelSize(100);
+	
+    const FIntVector CalculatedMapSize( // 'MapSize'를 'CalculatedMapSize'로 변경
+        FMath::RoundToInt(TotalSize.X / VoxelSize.X),
+        FMath::RoundToInt(TotalSize.Y / VoxelSize.Y),
+        FMath::RoundToInt(TotalSize.Z / VoxelSize.Z)
+    );
+
+    if (CalculatedMapSize.X == 0 || CalculatedMapSize.Y == 0 || CalculatedMapSize.Z == 0) return;
+
+    constexpr int32 BITS_PER_CHUNK = 128;
+
+    for (int32 ChunkIndex = 0; ChunkIndex < DynamicObstacleBitmask.Num(); ++ChunkIndex)
+    {
+        const F128BitChunk& Chunk = DynamicObstacleBitmask[ChunkIndex];
+
+        for (int32 BitInChunkIndex = 0; BitInChunkIndex < BITS_PER_CHUNK; ++BitInChunkIndex)
+        {
+            if (Chunk.GetBit(BitInChunkIndex))
+            {
+                const int32 FlatIndex = (ChunkIndex * BITS_PER_CHUNK) + BitInChunkIndex;
+                
+                const FIntVector VoxelIndex(
+                    FlatIndex % CalculatedMapSize.X,
+                    (FlatIndex / CalculatedMapSize.X) % CalculatedMapSize.Y,
+                    FlatIndex / (CalculatedMapSize.X * CalculatedMapSize.Y)
+                );
+
+                const FVector VoxelWorldCenter = VolumeWorldBounds.Min + 
+                                                 (FVector(VoxelIndex) * VoxelSize) + 
+                                                 (VoxelSize * 0.5f);
+
+                DrawDebugBox(
+                    World,
+                    VoxelWorldCenter,
+                    VoxelSize * 0.5f,
+                    FColor::Yellow,
+                    false,
+                    0.0f,
+                    0,
+                    2.0f
+                );
+            }
+        }
+    }
 }
 
 void AOctreeVoxelVolume::GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex, const FBox& NodeBounds, int32 CurrentDepth) const

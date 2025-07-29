@@ -12,80 +12,95 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_FindPathWithStrategy);
 
 	const FOctreePathfindingData& OctreeData = InRequest.NavigationData;
-	const TArray<FOctreeNode>& PoolRef = *(OctreeData.StaticNodePoolPtr);
+	if (!OctreeData.StaticNodePoolPtr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("AStarStrategy: StaticNodePoolPtr is null. Pathfinding aborted."));
+		return false;
+	}
+	const TArray<FOctreeNode>& PoolRef = *OctreeData.StaticNodePoolPtr;
 
-	int32 StartNodeIndex = OctreeData.FindLeafNodeAt(InRequest.StartLocation);
+	//----------------------------------------------------------------
+	// 1. 시작점 처리 (재설계된 로직)
+	//----------------------------------------------------------------
+	int32 StartNodeIndex = -1;
 	FVector EffectiveStartLocation = InRequest.StartLocation;
 	
-	bool bIsStartNodeInvalid = false;
-	if (StartNodeIndex == -1 || !PoolRef.IsValidIndex(StartNodeIndex) || PoolRef[StartNodeIndex].State != EOctreeNodeState::Empty)
+	// 1a. 먼저, 에이전트가 물리적으로 장애물에 박혔는지 확인합니다.
+	const bool bIsTrulyObstructed = 
+		OctreeData.CheckForSolidNodesInCapsule(InRequest.StartLocation, InRequest.StartLocation, InRequest.AgentRadius) ||
+		OctreeData.IsPathDynamicallyBlocked_Sweep(InRequest.StartLocation, InRequest.StartLocation, InRequest.AgentRadius);
+
+	if (bIsTrulyObstructed)
 	{
-		bIsStartNodeInvalid = true;
+		// CASE A: 에이전트가 정말로 벽에 박혔습니다.
+		UE_LOG(LogTemp, Warning, TEXT("AStarStrategy: Start location is truly obstructed. Finding a safe spot to start the path from."));
+		
+		StartNodeIndex = OctreeData.FindNearestValidLeafForAgent(
+			InRequest.StartLocation, InRequest.AgentRadius, NearbyGoalSearchRadius, NearbyGoalSearchIterations);
+
+		if (!PoolRef.IsValidIndex(StartNodeIndex))
+		{
+			UE_LOG(LogTemp, Error, TEXT("AStarStrategy: Start is obstructed AND no safe alternative was found. Pathfinding failed."));
+			return false;
+		}
+		EffectiveStartLocation = PoolRef[StartNodeIndex].Bounds.GetCenter();
 	}
 	else
 	{
-		FBox StartQueryBox = AStarStrategyUtils::MakeAgentQueryBox(InRequest.StartLocation, InRequest.AgentRadius);
-		if (OctreeData.IsRegionDynamicallyBlocked(StartQueryBox))
+		// CASE B: 에이전트가 물리적으로 안전한 공간에 있습니다. (정상적인 상황)
+
+		StartNodeIndex = OctreeData.FindLeafNodeAt(InRequest.StartLocation);
+
+		if (!PoolRef.IsValidIndex(StartNodeIndex))
 		{
-			bIsStartNodeInvalid = true;
+			UE_LOG(LogTemp, Log, TEXT("AStarStrategy: Start is safe but on a boundary. Finding nearest reference node (start location will NOT be moved)."));
+			
+			StartNodeIndex = OctreeData.FindNearestValidLeafForAgent(
+				InRequest.StartLocation, InRequest.AgentRadius, NearbyGoalSearchRadius, 1);
+
+			if (!PoolRef.IsValidIndex(StartNodeIndex))
+			{
+				UE_LOG(LogTemp, Error, TEXT("AStarStrategy: Could not find any reference node near the boundary start. Pathfinding failed."));
+				return false;
+			}
 		}
 	}
 
-	if (bIsStartNodeInvalid)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("AStarStrategy: Start location is inside a blocked voxel. Searching for a nearby valid start node."));
-		const int32 NewStartNodeIndex = OctreeData.FindNearestValidLeafForAgent(
-			InRequest.StartLocation,
-			InRequest.AgentRadius,
-			NearbyGoalSearchRadius,
-			NearbyGoalSearchIterations);
-
-		if (NewStartNodeIndex == -1)
-		{
-			UE_LOG(LogTemp, Error, TEXT("AStarStrategy: Could not find any valid start node near the agent. Pathfinding failed."));
-			return false;
-		}
-		
-		StartNodeIndex = NewStartNodeIndex;
-		
-		EffectiveStartLocation = PoolRef[StartNodeIndex].Bounds.GetCenter();
-	}
-
-	
 	int32 GoalNodeIndex = OctreeData.FindLeafNodeAt(InRequest.EndLocation);
-
-	bool bIsGoalNodeInvalid = (GoalNodeIndex == -1) ||
-		(PoolRef[GoalNodeIndex].State != EOctreeNodeState::Empty);
-
-
-	if (bIsGoalNodeInvalid)
+	if (!PoolRef.IsValidIndex(GoalNodeIndex) || PoolRef[GoalNodeIndex].State != EOctreeNodeState::Empty)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("AStarStrategy: Goal location is inside a blocked voxel. A* will attempt to find the closest possible path."));
 	}
-
+	
 	FBox GoalQueryBox = AStarStrategyUtils::MakeAgentQueryBox(InRequest.EndLocation, InRequest.AgentRadius);
 	if (OctreeData.IsRegionDynamicallyBlocked(GoalQueryBox))
 	{
+		UE_LOG(LogTemp, Error, TEXT("AStarStrategy: Goal location is blocked by a dynamic obstacle. Pathfinding failed."));
 		return false;
 	}
 
+	//----------------------------------------------------------------
+	// 3. 경로 탐색기(Pathfinder) 생성 및 실행
+	//----------------------------------------------------------------
 	FPathNodeMemoryPoolBase* BasePool = InRequest.MemoryPool;
 	if (!BasePool)
 	{
+		UE_LOG(LogTemp, Error, TEXT("AStarStrategy: MemoryPool is NULL! Pathfinding aborted."));
 		return false;
 	}
 	auto& NodePool = *static_cast<TNodeMemoryPool<FAstarPathNode>*>(BasePool);
 
+	// 최종 안전장치: 이 시점에서 StartNodeIndex는 절대로 유효하지 않은 값이 될 수 없습니다.
+	checkf(PoolRef.IsValidIndex(StartNodeIndex), TEXT("AStarStrategy: StartNodeIndex (%d) is invalid right before creating Pathfinder! Logic is flawed."), StartNodeIndex);
+
 	FAstarPathfinder Pathfinder(OctreeData, StartNodeIndex, GoalNodeIndex,
-	                            EffectiveStartLocation, InRequest.EndLocation,
+	                            InRequest.StartLocation, EffectiveStartLocation, InRequest.EndLocation,
 	                            InRequest.AgentRadius, NodePool);
 
 	const EPathfindingResult Result = Pathfinder.FindPath(OutPath);
 
-	
 	return (Result == EPathfindingResult::Success || Result == EPathfindingResult::Success_Partial);
 }
-
 bool UAStarStrategy::ShouldRepathForOptimization(const FIntVector& CurrentAgentVoxel,
                                                  const TArray<FIntVector>& CurrentPathVoxels,
                                                  int32 CurrentPathIndex,
@@ -106,13 +121,15 @@ FName UAStarStrategy::GetStrategyName() const
 // =======================================================================
 
 FAstarPathfinder::FAstarPathfinder(const FOctreePathfindingData& InOctreeData, int32 InStartIndex, int32 InEndIndex,
-                                   const FVector& InStartLocation, const FVector& InEndLocation, float InAgentRadius,
+                                   const FVector& InOriginalStartLocation, const FVector& InEffectiveStartLocation,
+                                   const FVector& InEndLocation, float InAgentRadius,
                                    TNodeMemoryPool<FAstarPathNode>& InMemoryPool)
 	: OctreeData(InOctreeData)
 	  , StartNodeIndex(InStartIndex)
 	  , GoalNodeIndex(InEndIndex)
 	  , AgentRadius(InAgentRadius)
-	  , ActualStartLocation(InStartLocation)
+	  , OriginalStartLocation(InOriginalStartLocation)
+	  , EffectiveStartLocation(InEffectiveStartLocation)
 	  , ActualGoalLocation(InEndLocation)
 	  , MemoryPool(InMemoryPool)
 {
@@ -135,10 +152,8 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 	FAstarPathNode* StartNode = MemoryPool.NewNode();
 	if (!StartNode) return EPathfindingResult::Failed_OutOfMemory;
 
-	const TArray<FOctreeNode>& PoolRef = *(OctreeData.StaticNodePoolPtr);
-
 	StartNode->NodeIndex = StartNodeIndex;
-	StartNode->WorldPosition = ActualStartLocation;
+	StartNode->WorldPosition = EffectiveStartLocation;
 	StartNode->HCost = CalculateBoundHeuristic(StartNode->NodeIndex);
 	StartNode->CalculateAndSetFCost();
 
@@ -219,21 +234,12 @@ EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 			}
 			else
 			{
-				const float HeuristicWeight = 2.f; // 1.0보다 큰 값 (예: 1.5 ~ 2.0)
-				Successor->SetParent(ParentNode, NewGCost, CalculateBoundHeuristic(SuccIdx) * HeuristicWeight);
+				Successor->SetParent(ParentNode, NewGCost, CalculateBoundHeuristic(SuccIdx));
 				OpenSet.HeapPush(Successor, Predicate);
 				OpenSetLookup.Add(Successor->NodeIndex, Successor);
-				
-				
 			}
 		}
 	}
-	// const bool bSolid = OctreeData.CheckForSolidNodesInCapsule(BestPartialNode->WorldPosition, ActualGoalLocation, AgentRadius);
-	// UE_LOG(LogTemp, Error, TEXT("Partial Path - Anchor=(%.2f,%.2f,%.2f) Goal=(%.2f,%.2f,%.2f) CapsuleBlocked=%d"),
-	// 	BestPartialNode->WorldPosition.X, BestPartialNode->WorldPosition.Y, BestPartialNode->WorldPosition.Z, 
-	// 	ActualGoalLocation.X, ActualGoalLocation.Y, ActualGoalLocation.Z, 
-	// 	bSolid ? 1 : 0
-	// );
 
 	if (BestPartialNode)
 	{
@@ -259,12 +265,15 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 	}
 	Algo::Reverse(RawPath);
 
+	OutPath.Empty();
+	OutPath.Add(OriginalStartLocation);
+	
 	// --- Step 2: Handle trivial cases (path is too short) ---
 	if (RawPath.Num() < 2)
 	{
 		OutPath.Empty();
-		OutPath.Add(ActualStartLocation);
-		if (HasClearPath(ActualStartLocation, ActualGoalLocation))
+		OutPath.Add(OriginalStartLocation);
+		if (HasClearPath(OriginalStartLocation, ActualGoalLocation))
 		{
 			OutPath.Add(ActualGoalLocation);
 		}
@@ -276,9 +285,9 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 		return;
 	}
 	// --- Step 3: Safely tether the actual start and end locations to the raw path. ---
-	if (HasClearPath(ActualStartLocation, RawPath[1]))
+	if (HasClearPath(OriginalStartLocation, RawPath[1]))
 	{
-		RawPath[0] = ActualStartLocation;
+		RawPath[0] = OriginalStartLocation;
 	}
 
 	// 2. Connect the End Point:
@@ -286,7 +295,7 @@ void FAstarPathfinder::ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<
 	{
 		RawPath.Add(ActualGoalLocation);
 	}
-	
+
 	// --- Step 4: Perform the "String Pulling" algorithm ---
 	// Now, perform the smoothing on the safely-modified path.
 	OutPath.Empty();
@@ -324,7 +333,7 @@ bool FAstarPathfinder::HasClearPath(const FVector& Start, const FVector& End) co
 {
 	if (OctreeData.CheckForSolidNodesInCapsule(Start, End, AgentRadius))
 	{
-		return false; 
+		return false;
 	}
 
 	if (OctreeData.IsPathDynamicallyBlocked_Sweep(Start, End, AgentRadius))
@@ -355,7 +364,7 @@ void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPat
 		if (PoolRef.IsValidIndex(NeighborNodeIndex) && PoolRef[NeighborNodeIndex].State == EOctreeNodeState::Empty)
 		{
 			const FOctreeNode& NeighborNode = PoolRef[NeighborNodeIndex];
-			
+
 			FVector PortalCenter;
 			const FBox& CurrentBounds = CurrentNode.Bounds;
 			const FBox& NeighborBounds = NeighborNode.Bounds;
@@ -367,9 +376,9 @@ void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPat
 			{
 				FAstarPathNode* Successor = MemoryPool.NewNode();
 				Successor->NodeIndex = NeighborNodeIndex;
-				
+
 				Successor->WorldPosition = PortalCenter;
-				
+
 				OutSuccessors.Add(Successor);
 			}
 		}
@@ -389,7 +398,7 @@ int64 FAstarPathfinder::CalculateBoundHeuristic(int32 NodeIndex) const
 	const FVector NodeCenter = Bounds.GetCenter();
 	const float RawDist = (NodeCenter - ActualGoalLocation).Size();
 	const float EffectiveDist = FMath::Max(0.0f, RawDist - AgentRadius);
-	return static_cast<int64>(EffectiveDist * 100.0f); 
+	return static_cast<int64>(EffectiveDist * 100.0f);
 }
 
 bool FAstarPathfinder::TryToRepairPartialPath(FAstarPathNode* PartialEndNode, TArray<FVector>& OutPath)
@@ -402,7 +411,7 @@ bool FAstarPathfinder::TryToRepairPartialPath(FAstarPathNode* PartialEndNode, TA
 	{
 		FVector Dir = FMath::VRand();
 		FVector Candidate = PartialPos + Dir * FMath::FRandRange(0, Radius);
-		if(HasClearPath(PartialPos, Candidate) && HasClearPath(Candidate, ActualGoalLocation))
+		if (HasClearPath(PartialPos, Candidate) && HasClearPath(Candidate, ActualGoalLocation))
 		{
 			BestPoint = Candidate;
 			OutPath.Empty();
