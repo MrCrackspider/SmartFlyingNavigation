@@ -144,7 +144,8 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
                     }
                 }
 
-                Agent->ApplyMovement(FinalVelocity.GetClampedToMaxSize(Agent->GetMovementSpeed()), DeltaTime);
+                // Agent->ApplyMovement(FinalVelocity.GetClampedToMaxSize(Agent->GetMovementSpeed()), DeltaTime);
+                Agent->ApplyMovement(FinalVelocity, DeltaTime);
 
                 if (Agent->GetMovementMode() == EPathMovementMode::Spline && !Agent->IsOnSplineLine() && Agent->FoundPath.Num() > 0)
                 {

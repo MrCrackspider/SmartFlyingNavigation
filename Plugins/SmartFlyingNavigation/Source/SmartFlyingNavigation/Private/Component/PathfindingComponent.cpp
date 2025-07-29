@@ -374,7 +374,7 @@ void UPathfindingComponent::PostEditChangeProperty(FPropertyChangedEvent& Proper
 
 FVector UPathfindingComponent::GetPreferredVelocity() const
 {
-	if (CurrentState != EPathfindingState::FollowPath || !GetOwner() || bIsReachDestination)
+	if (!GetOwner() || bIsReachDestination)
 	{
 		return FVector::ZeroVector;
 	}
@@ -460,24 +460,10 @@ void UPathfindingComponent::ProgressNextPoint()
 		{
 			UE_LOG(LogTemp, Log, TEXT("Reached the final destination. Stopping movement."));
 			OnDestinationReached.Broadcast();
-			bIsReachDestination = true;
-			FoundPath.Empty();
 			StopMovement();
 			return;
 		}
-		else
-		{
-			UE_LOG(LogTemp, Warning, TEXT("Reached end of a partial path. Requesting next path segment immediately."));
-
-			FoundPath.Empty();
-			PreferredVelocity = FVector::ZeroVector;
-			CurrentVelocity = FVector::ZeroVector;
-			
-			RequestPathToLocation(CurrentTargetLocation);
-			return;
-		}
 	}
-
 
 	DetermineMovementModeForNextPath();
 }
@@ -683,17 +669,15 @@ void UPathfindingComponent::InvalidatePathAndRequestRepath()
 
 	UE_LOG(LogTemp, Warning, TEXT("Path Invalidated! Stopping movement and scheduling a repath..."));
 
-	// Begin Test
-	FoundPath.Empty();
-	PreferredVelocity = FVector::ZeroVector;
-	CurrentVelocity = FVector::ZeroVector;
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(RepathCooldownTimer);
 	}
-	CurrentState = EPathfindingState::PathInvalidated;
-	RequestPathToLocation(CurrentTargetLocation);
 
+	// Begin Test
+
+	//float movement에서 어짜피 못가게해줄거니까 그냥 비비도록 다른 조치 안취하기
+	RequestPathToLocation(CurrentTargetLocation);
 	// End Test
 }
 
