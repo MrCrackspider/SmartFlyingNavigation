@@ -65,8 +65,9 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 			}
 		}
 	}
-
+	
 	int32 GoalNodeIndex = OctreeData.FindLeafNodeAt(InRequest.EndLocation);
+
 	if (!PoolRef.IsValidIndex(GoalNodeIndex) || PoolRef[GoalNodeIndex].State != EOctreeNodeState::Empty)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("AStarStrategy: Goal location is inside a blocked voxel. A* will attempt to find the closest possible path."));

@@ -97,6 +97,9 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
                                           FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	
+	UpdateSteering(DeltaTime);
+	ApplyMovement(PreferredVelocity, DeltaTime);
 
 
 	if (!IsValid(AvoidanceSubsystem) || !AvoidanceSubsystem->GetbUseAvoidance())
@@ -200,7 +203,7 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	// 시작 볼륨과 끝 볼륨이 동일하고, 유효하며, 준비된 상태입니다.
 	if (EndVolume && StartVolume == EndVolume)
 	{
-		UE_LOG(LogTemp, Log, TEXT("Requesting LOCAL path within volume '%s'."), *StartVolume->GetName());
+		// UE_LOG(LogTemp, Log, TEXT("Requesting LOCAL path within volume '%s'."), *StartVolume->GetName());
 		// 단일 볼륨 내 길찾기는 더 간단한 FPathfindingRequest를 직접 사용합니다.
 		// 이 경우 HandleWorldPathResult가 아닌 다른 콜백을 사용하거나, HandleWorldPathResult를 수정해야 합니다.
 		// 여기서는 기존 구조를 최대한 활용하기 위해 RequestLocalPath_Internal을 사용합니다.
@@ -384,6 +387,7 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 	{
 		return;
 	}
+
 	
 	// 1. 단순하게 이동: 예측이나 계산 없이, 주어진 속도로 그냥 움직입니다.
 	const FVector MoveDelta = FinalVelocity * DeltaTime;
@@ -455,8 +459,6 @@ void UPathfindingComponent::ProgressNextPoint()
 		{
 			UE_LOG(LogTemp, Log, TEXT("Reached the final destination. Stopping movement."));
 			OnDestinationReached.Broadcast();
-			bIsReachDestination = true;
-			FoundPath.Empty();
 			StopMovement();
 			return;
 		}
@@ -687,15 +689,10 @@ void UPathfindingComponent::InvalidatePathAndRequestRepath()
 
 	UE_LOG(LogTemp, Warning, TEXT("Path Invalidated! Stopping movement and scheduling a repath..."));
 
-	// Begin Test
-	//FoundPath.Empty();
-	//PreferredVelocity = FVector::ZeroVector;
-	//CurrentVelocity = FVector::ZeroVector;
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(RepathCooldownTimer);
 	}
-	//CurrentState = EPathfindingState::PathInvalidated;
 
 	RequestPathToLocation(CurrentTargetLocation);
 	// End Test
