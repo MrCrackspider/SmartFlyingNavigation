@@ -457,7 +457,7 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 	while (bAdvanced && !bIsReachDestination); // 경로의 끝에 도달하면 루프를 멈춥니다.
 }
 
-void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
+void UPathfindingComponent::AdjustProgressToSpline(const FVector& FinalVelocity)
 {
 	if (!IsValid(PathSplinePtr) || PathSplinePtr->GetNumberOfSplinePoints() < 2)
 	{
@@ -476,8 +476,6 @@ void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 
 void UPathfindingComponent::ProgressNextPoint()
 {
-	UE_LOG(LogTemp, Log, TEXT("Go To Next Point"));
-	
 	// Linear로 가도 partialSplineUpdate는 해야해서 if문으로 감싸지 마세요
 	PartialSplinePointUpdate(CurrentPathDestinationIndex);
 	

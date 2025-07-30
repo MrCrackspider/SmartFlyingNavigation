@@ -167,7 +167,7 @@ public:
 	bool IsSplinePathSafe() const;
 	bool IsOnSplineLine() const;
 	
-	void AdjustProgressToSpline(FVector FinalVelocity); // const?
+	void AdjustProgressToSpline(const FVector& MoveDelta);
 	void ProgressNextPoint();
 	void DetermineMovementModeForNextPath();
 

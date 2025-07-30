@@ -879,7 +879,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
 					.Font(
 						FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
 					.ToolTipText(LOCTEXT("AvoidanceRadiusTooltip",
-					                     "The radius used by the ORCA algorithm for agent-to-agent avoidance.\nThis defines the agent's personal space for collision prediction.\n\nRecommendation: For stable avoidance, set this to approximately 1.5x the 'Final Radius'."))
+					                     "The radius used by the ORCA algorithm for agent-to-agent avoidance.\nThis defines the agent's personal space for collision prediction.\n\nRecommendation: For stable avoidance, set this to the same as the Pathfinding Radius'."))
 				]
 				+ SHorizontalBox::Slot().FillWidth(0.6f)
 				[
