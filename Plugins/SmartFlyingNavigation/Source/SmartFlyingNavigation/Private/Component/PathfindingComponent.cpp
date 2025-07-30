@@ -37,10 +37,6 @@ UPathfindingComponent::UPathfindingComponent()
 
 	StreamingSourceComponent = CreateDefaultSubobject<UWorldPartitionStreamingSourceComponent>(TEXT("StreamingSourceComponent"));
 	StreamingSourceComponent->DisableStreamingSource();
-	FStreamingSourceShape NewShape;
-	NewShape.bIsSector = false;
-	NewShape.Location = FVector::ZeroVector;
-	NewShape.Radius = 55000;
 }
 
 void UPathfindingComponent::BeginPlay()
@@ -100,11 +96,12 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
                                           FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	const UEnum* EnumPtr = StaticEnum<EPathMovementMode>();
+	FString EnumName = EnumPtr->GetNameStringByValue(static_cast<int64>(MovementMode));
 	
-	UpdateSteering(DeltaTime);
-	ApplyMovement(PreferredVelocity, DeltaTime);
-
-
+	UE_LOG(LogTemp, Warning, TEXT("MovementMode: %s"), *EnumName)
+	
 	if (!IsValid(AvoidanceSubsystem) || !AvoidanceSubsystem->GetbUseAvoidance())
 	{
 		UpdateSteering(DeltaTime);
@@ -430,7 +427,7 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 	FHitResult HitResult;
 	Owner->AddActorWorldOffset(MoveDelta, true, &HitResult);
 
-	// FIX-ME: Rotation
+	AdjustProgressToSpline(MoveDelta);
 	
 	Owner->SetActorRotation(MoveDelta.ToOrientationQuat());
 	
@@ -469,28 +466,25 @@ void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 {
 	if (!IsValid(PathSplinePtr) || PathSplinePtr->GetNumberOfSplinePoints() < 2)
 	{
-		PreferredVelocity = FVector::ZeroVector;
 		return;
 	}
-
-	// "굴러가는" 스플라인을 따라가는 가장 단순하고 확실한 방법은,
-	// 언제나 그 스플라인의 맨 앞(거리 0)의 방향을 따라가는 것입니다.
-	const FVector SplineDirection = PathSplinePtr->GetDirectionAtDistanceAlongSpline(0.0f, ESplineCoordinateSpace::World);
-
-	PreferredVelocity = SplineDirection * MovementSpeed;
+		
+	DistanceAlongSpline += FinalVelocity.Length();
+	
+	// const FVector SplineDirection = PathSplinePtr->GetDirectionAtDistanceAlongSpline(
+	// 		DistanceAlongSpline, ESplineCoordinateSpace::World);
+	// const float ForwardDistance = FVector::DotProduct(FinalVelocity, SplineDirection);
+	// DistanceAlongSpline += ForwardDistance;
+	// const float SplineLength = PathSplinePtr->GetSplineLength();
+	// DistanceAlongSpline = FMath::Clamp(DistanceAlongSpline, 0.f, SplineLength);
 }
 
 void UPathfindingComponent::ProgressNextPoint()
 {
-	if (GetMovementMode() == EPathMovementMode::Spline)
-	{
-		PartialSplinePointUpdate(CurrentPathDestinationIndex);
-	}
-
+	// Linear로 가도 partialSplineUpdate는 해야해서 if문으로 감싸지 마세요
+	PartialSplinePointUpdate(CurrentPathDestinationIndex);
 	
-	++CurrentPathDestinationIndex;
-
-	if (CurrentPathDestinationIndex >= FoundPath.Num())
+	if (CurrentPathDestinationIndex + 1 >= FoundPath.Num())
 	{
 		const FVector LastPathPoint = FoundPath.Last();
 		const float DistanceToFinalGoalSq = FVector::DistSquared(LastPathPoint, CurrentTargetLocation);
@@ -514,9 +508,10 @@ void UPathfindingComponent::ProgressNextPoint()
 			return;
 		}
 	}
-
-
+	
 	DetermineMovementModeForNextPath();
+
+	++CurrentPathDestinationIndex;
 }
 
 bool UPathfindingComponent::IsOnSplineLine() const
@@ -585,9 +580,16 @@ void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 		return;
 	}
 
-	DistanceAlongSpline = 0;
+	// DistanceAlongSpline = 0;
+	// PathSplinePtr->RemoveSplinePoint(0);
 
-	PathSplinePtr->RemoveSplinePoint(0);
+	
+	DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(1);
+
+	if (StartIndex > 1)
+	{
+		PathSplinePtr->RemoveSplinePoint(0);
+	}
 
 	int32 AddIndex = StartIndex + PartialPointSplineNum - 1;
 
@@ -1043,7 +1045,10 @@ bool UPathfindingComponent::IsSplinePathSafe() const
 		return true;
 	}
 
-	for (float Distance = 0.f; Distance <= SplineLength; Distance += SafetyCheckStepSize)
+	const float CurrentDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex - 1);
+	const float NextDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex);
+
+	for (float Distance = CurrentDistance; Distance <= NextDistance; Distance += SafetyCheckStepSize)
 	{
 		const FVector CenterLocation = PathSplinePtr->GetLocationAtDistanceAlongSpline(
 			Distance, ESplineCoordinateSpace::World);
