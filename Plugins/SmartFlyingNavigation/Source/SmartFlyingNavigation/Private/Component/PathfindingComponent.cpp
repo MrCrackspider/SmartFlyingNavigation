@@ -424,7 +424,8 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 
 	AdjustProgressToSpline(MoveDelta);
 	
-	Owner->SetActorRotation(MoveDelta.ToOrientationQuat());
+	FRotator InterpolatedRotation = FMath::RInterpTo(CurrentVelocity.ToOrientationRotator(), MoveDelta.ToOrientationRotator(), DeltaTime, 5.f);
+	Owner->SetActorRotation(InterpolatedRotation);
 	
 	// 2. 물리적 충돌 처리: 실제로 부딪혔을 때만 비상 상황을 선포합니다.
 	if (HitResult.bBlockingHit)

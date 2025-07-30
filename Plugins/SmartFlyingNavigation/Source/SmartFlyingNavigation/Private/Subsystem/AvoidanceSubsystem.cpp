@@ -26,10 +26,10 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
     TimeHorizon = 1.f;
     MaxNeighbors = 8;
-    GridCellSize = 100.f;
+    GridCellSize = 200.f;
     SymmetryBreakingRangeMultiplier = 8.f;
     SolverIterations = 5;
-    SideBiasMagnitude = 4.f;
+    SideBiasMagnitude = 90.f;
     InterpSpeed = 10.f;
     bUseAvoidance = true;
     bShowVelocityDebugLine = true;
@@ -77,7 +77,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
     {
         return;
     }
-    
+
     if (bIsTaskRunning && AsyncTask && AsyncTask->IsWorkDone())
     {
         TMap<uint32, FThreadAvoidanceResult> LocalResults;
@@ -144,8 +144,8 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
                     }
                 }
 
-                // Agent->ApplyMovement(FinalVelocity.GetClampedToMaxSize(Agent->GetMovementSpeed()), DeltaTime);
-                Agent->ApplyMovement(FinalVelocity, DeltaTime);
+                 Agent->ApplyMovement(FinalVelocity.GetClampedToMaxSize(Agent->GetMovementSpeed()), DeltaTime);
+                //Agent->ApplyMovement(FinalVelocity, DeltaTime);
 
                 if (Agent->GetMovementMode() == EPathMovementMode::Spline && !Agent->IsOnSplineLine() && Agent->FoundPath.Num() > 0)
                 {
@@ -394,7 +394,6 @@ static void GenerateAgentConstraints_ThreadSafe(const FAgentThreadData& CurrentA
             const float DotProduct_RelPos_RelVel = FVector::DotProduct(RelativePosition, RelativeVelocity);
             const float Discriminant = FMath::Square(DotProduct_RelPos_RelVel) - RelativeVelSq * (DistSq - CombinedRadiusSq);
 
-            //if (Discriminant >= 0.f && DotProduct_RelPos_RelVel < 0.f)
             if (Discriminant >= 0.f)
             {
                 const float TTC = (-DotProduct_RelPos_RelVel - FMath::Sqrt(Discriminant)) / RelativeVelSq;
@@ -454,7 +453,6 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
         const float DistToAgentBSq = ToAgentB.SizeSquared();
         const float CombinedRadius = CurrentAgent.AvoidanceRadius + AgentB->AvoidanceRadius;
 
-        //if (DistToAgentBSq < FMath::Square(CombinedRadius * SymmetryBreakingRangeMultiplier) && FVector::DotProduct(PreferredVelocity, ToAgentB) > 0)
         if (DistToAgentBSq < FMath::Square(CombinedRadius * SymmetryBreakingRangeMultiplier))
         {
             if (DistToAgentBSq < MinThreatDistSq)
@@ -488,47 +486,14 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
         }
     }
 
-    if (bShouldYield)
-    {
-        // (방법 1)
-        //
-        {
-            const FVector ForwardVec = PreferredVelocity.GetSafeNormal();
-            const FVector UpVector = CurrentAgent.UpVector;
+    const FVector ForwardVec = PreferredVelocity.GetSafeNormal();
+    const FVector UpVector = CurrentAgent.UpVector;
 
-            FVector SideVector = FVector::CrossProduct(ForwardVec, UpVector);
-            SideVector.Normalize();
+    FVector SideVector = FVector::CrossProduct(ForwardVec, UpVector);
+    SideVector.Normalize();
 
-            if (ObstacleAgent)
-            {
-                const FVector ToObstacle = ObstacleAgent->Position - CurrentAgent.Position;
-                const float DotWithSide = FVector::DotProduct(ToObstacle, SideVector);
-
-                if (DotWithSide > 0.0f)
-                {
-                    SideVector *= -1.0f;
-                }
-            }
-
-            FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
-            return ActualPreferredVelocity.GetSafeNormal() * CurrentAgent.MovementSpeed;
-        }
-
-        // (방법 2)
-        //
-        {
-            //const FVector ForwardVec = PreferredVelocity.GetSafeNormal();
-            //const FVector UpVector = ObstacleAgent->UpVector;
-
-            //FVector SideVector = FVector::CrossProduct(ForwardVec, UpVector);
-            //SideVector.Normalize();
-
-            //FVector ActualPreferredVelocity = SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
-            //return ActualPreferredVelocity;
-        }
-    }
-
-    return PreferredVelocity;
+    FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
+    return ActualPreferredVelocity;
 }
 
 FVector UAvoidanceSubsystem::SolveOptimalVelocity(const TArray<FPlane>& Constraints, const FVector& PreferredVelocity) const
@@ -561,7 +526,9 @@ void UAvoidanceSubsystem::DebugVisualizeVelocities(const UPathfindingComponent* 
     const FVector LineStart = Agent->GetOwner()->GetActorLocation() + FVector(0, 0, 10.f);
     const float LineLengthMultiplier = 0.2f;
 
-     DrawDebugLine(World, LineStart, LineStart + Result.PreferredVelocity * LineLengthMultiplier, FColor::Blue, false, -1, 0, 2.f);
-     DrawDebugLine(World, LineStart, LineStart + Result.ActualPreferredVelocity * LineLengthMultiplier, FColor::Yellow, false, -1, 0, 3.f);
-     DrawDebugLine(World, LineStart, LineStart + FinalOptimalVelocity * LineLengthMultiplier, FColor::Red, false, -1, 0, 5.f);
+    DrawDebugLine(World, LineStart, LineStart + Result.PreferredVelocity * LineLengthMultiplier, FColor::Blue, false, -1, 0, 2.f);
+    DrawDebugLine(World, LineStart, LineStart + Result.ActualPreferredVelocity * LineLengthMultiplier, FColor::Yellow, false, -1, 0, 3.f);
+    DrawDebugLine(World, LineStart, LineStart + FinalOptimalVelocity * LineLengthMultiplier, FColor::Red, false, -1, 0, 5.f);
 }
+
+
