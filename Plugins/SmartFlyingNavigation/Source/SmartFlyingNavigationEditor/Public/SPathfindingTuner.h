@@ -38,6 +38,7 @@ private:
     TSharedRef<SWidget> BuildVoxelDebugSettingsSection();
     TSharedRef<SWidget> BuildAgentDebugSection();
     TSharedRef<SWidget> BuildWorldBakeSection();
+    
     //=================================================================================================
     // Actor Selection Handling
     //=================================================================================================
@@ -122,6 +123,7 @@ private:
     void OnTargetActorChanged(const FAssetData& AssetData);
         
     TOptional<float> GetAgentRadius() const;
+    FText GetFinalAgentRadiusAsText() const;
     void OnAgentRadiusCommitted(float NewValue, ETextCommit::Type CommitType);
     
     TOptional<float> GetMovementSpeed() const;
@@ -171,7 +173,7 @@ private:
     
     TOptional<int32> EstimatedTotalVolumes;
 
-    float MinCoolDown =0.5f;
+    float MinCoolDown =0.0001f;
     //=================================================================================================
     // Internal Functions
     //=================================================================================================

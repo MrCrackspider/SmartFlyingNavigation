@@ -101,6 +101,14 @@ void SPathfindingTuner::Construct(const FArguments& InArgs)
 				BuildOctreeVolumeSettingsSection()
 			]
 
+			// Debug Section
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(2)
+			[
+				BuildVoxelDebugSettingsSection()
+			]
+			
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			.Padding(2)
@@ -114,14 +122,6 @@ void SPathfindingTuner::Construct(const FArguments& InArgs)
 			.Padding(2)
 			[
 				BuildBakedDataSettingsSection()
-			]
-
-			// Debug Section
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(2)
-			[
-				BuildVoxelDebugSettingsSection()
 			]
 
 			// Agent Settings Section
@@ -162,91 +162,92 @@ TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
 		.HeaderContent()
 		[
 			SNew(STextBlock)
-				.Text(LOCTEXT("PerformanceSettingsCategory", "Performance Settings"))
-				.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
-				.ShadowOffset(FVector2D(1.0f, 1.0f))
+			.Text(LOCTEXT("PerformanceSettingsCategory", "Performance Settings"))
+			.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
+			.ShadowOffset(FVector2D(1.0f, 1.0f))
 		]
 		.BodyContent()
 		[
 			SNew(SVerticalBox)
-				// --- Number of Worker Threads (이 부분은 변경 없음) ---
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(8.0f, 5.0f)
+			// --- Number of Worker Threads (이 부분은 변경 없음) ---
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(8.0f, 5.0f)
+			[
+				SNew(SHorizontalBox)
+				.ToolTipText(LOCTEXT("NumThreadsTooltip",
+				                     "Sets the number of worker threads for pathfinding calculations.\nHigher values can process more requests simultaneously but will increase CPU usage."))
+
+				+ SHorizontalBox::Slot()
+				.FillWidth(0.4f)
+				.VAlign(VAlign_Center)
+				.Padding(0, 0, 10, 0)
 				[
-					SNew(SHorizontalBox)
-						.ToolTipText(LOCTEXT("NumThreadsTooltip",
-							"Sets the number of worker threads for pathfinding calculations.\nHigher values can process more requests simultaneously but will increase CPU usage."))
-
-						+ SHorizontalBox::Slot()
-						.FillWidth(0.4f)
-						.VAlign(VAlign_Center)
-						.Padding(0, 0, 10, 0)
-						[
-							SNew(STextBlock)
-								.Text(LOCTEXT("NumThreadsLabel", "Number of Worker Threads"))
-								.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-						]
-
-						+ SHorizontalBox::Slot()
-						.FillWidth(0.6f)
-						.VAlign(VAlign_Center)
-						[
-							SNew(SNumericEntryBox<int32>)
-								.Value(this, &SPathfindingTuner::GetCurrentNumThreads)
-								.OnValueCommitted(this, &SPathfindingTuner::OnNumThreadsCommitted)
-								.MinValue(1)
-								.MaxValue(64)
-								.MinSliderValue(1)
-								.MaxSliderValue(16)
-						]
+					SNew(STextBlock)
+					.Text(LOCTEXT("NumThreadsLabel", "Number of Worker Threads"))
+					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
 				]
+
+				+ SHorizontalBox::Slot()
+				.FillWidth(0.6f)
+				.VAlign(VAlign_Center)
+				[
+					SNew(SNumericEntryBox<int32>)
+					.Value(this, &SPathfindingTuner::GetCurrentNumThreads)
+					.OnValueCommitted(this, &SPathfindingTuner::OnNumThreadsCommitted)
+					.MinValue(1)
+					.MaxValue(64)
+					.MinSliderValue(1)
+					.MaxSliderValue(16)
+				]
+			]
 
 			// --- Use Agent Avoidance 
 			+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(8.0f, 5.0f)
+			.AutoHeight()
+			.Padding(8.0f, 5.0f)
+			[
+				SNew(SHorizontalBox)
+				.ToolTipText(LOCTEXT("UseAvoidanceTooltip", "Enables or disables agent avoidance behavior globally."))
+
+				+ SHorizontalBox::Slot()
+				.FillWidth(0.4f)
+				.VAlign(VAlign_Center)
+				.Padding(0, 0, 10, 0)
 				[
-					SNew(SHorizontalBox)
-						.ToolTipText(LOCTEXT("UseAvoidanceTooltip", "Enables or disables agent avoidance behavior globally."))
-
-						+ SHorizontalBox::Slot()
-						.FillWidth(0.4f)
-						.VAlign(VAlign_Center)
-						.Padding(0, 0, 10, 0)
-						[
-							SNew(STextBlock)
-								.Text(LOCTEXT("UseAvoidanceLabel", "Use Agent Avoidance"))
-								.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-						]
-
-						+ SHorizontalBox::Slot()
-						.FillWidth(0.6f)
-						.VAlign(VAlign_Center)
-						[
-							SNew(SCheckBox)
-								// [핵심 수정] IsChecked_Lambda가 GetDefault를 직접 호출하도록 변경
-								.IsChecked_Lambda([this]() -> ECheckBoxState
-									{
-										// UAvoidanceSubsystem의 Class Default Object(CDO)를 가져옵니다.
-										if (const UAvoidanceSubsystem* AvoidanceCDO = GetDefault<UAvoidanceSubsystem>())
-										{
-											// CDO의 프로퍼티 값을 직접 읽어 체크 상태를 반환합니다.
-											// UAvoidanceSubsystem::GetbUseAvoidance()는 const 함수여야 합니다.
-											return AvoidanceCDO->GetbUseAvoidance()
-												? ECheckBoxState::Checked
-												: ECheckBoxState::Unchecked;
-										}
-										// CDO를 가져올 수 없는 경우 (매우 드묾)
-										return ECheckBoxState::Undetermined;
-									})
-								.OnCheckStateChanged(this, &SPathfindingTuner::OnbAvoidanceComitted)
-						]
+					SNew(STextBlock)
+					.Text(LOCTEXT("UseAvoidanceLabel", "Use Agent Avoidance"))
+					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
 				]
+
+				+ SHorizontalBox::Slot()
+				.FillWidth(0.6f)
+				.VAlign(VAlign_Center)
+				[
+					SNew(SCheckBox)
+								// [핵심 수정] IsChecked_Lambda가 GetDefault를 직접 호출하도록 변경
+					               .IsChecked_Lambda([this]() -> ECheckBoxState
+					               {
+						               // UAvoidanceSubsystem의 Class Default Object(CDO)를 가져옵니다.
+						               if (const UAvoidanceSubsystem* AvoidanceCDO = GetDefault<UAvoidanceSubsystem>())
+						               {
+							               // CDO의 프로퍼티 값을 직접 읽어 체크 상태를 반환합니다.
+							               // UAvoidanceSubsystem::GetbUseAvoidance()는 const 함수여야 합니다.
+							               return AvoidanceCDO->GetbUseAvoidance()
+								                      ? ECheckBoxState::Checked
+								                      : ECheckBoxState::Unchecked;
+						               }
+						               // CDO를 가져올 수 없는 경우 (매우 드묾)
+						               return ECheckBoxState::Undetermined;
+					               })
+					               .OnCheckStateChanged(this, &SPathfindingTuner::OnbAvoidanceComitted)
+				]
+			]
 		]
-	.InitiallyCollapsed(!TunerSettings->bIsPerformanceCategoryExpanded)
+		.InitiallyCollapsed(!TunerSettings->bIsPerformanceCategoryExpanded)
 		.OnAreaExpansionChanged(this, &SPathfindingTuner::OnPerformanceCategoryExpansionChanged);
 }
+
 TSharedRef<SWidget> SPathfindingTuner::BuildOctreeVolumeSettingsSection()
 {
 	const UPathfindingTunerSettings* TunerSettings = GetDefault<UPathfindingTunerSettings>();
@@ -821,7 +822,31 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
 					.MaxSliderValue(200.0f)
 				]
 			]
-
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 0.0f, 8.0f, 5.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("FinalAgentRadiusLabel", "Pathfinding Radius (Scaled):"))
+					.ToolTipText(LOCTEXT("FinalRadiusTooltip",
+					                     "The actual radius used for pathfinding, calculated from Base Radius and the agent's scale. This is a read-only value."))
+					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+					.ColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.7f, 0.f)))
+				]
+				+ SHorizontalBox::Slot()
+				.FillWidth(0.6f)
+				.VAlign(VAlign_Center)
+				.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+				[
+					SNew(STextBlock)
+					.Text(this, &SPathfindingTuner::GetFinalAgentRadiusAsText)
+					.Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont"))
+					.ToolTipText(LOCTEXT("FinalRadiusTooltip",
+					                     "The actual radius used for pathfinding, calculated from Base Radius and the agent's scale. This is a read-only value."))
+					.ColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.7f, 0.f)))
+				]
+			]
 			// Movement Speed
 			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
 			[
@@ -849,8 +874,12 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
 				[
-					SNew(STextBlock).Text(LOCTEXT("Avoidance Radius Label", "Avoidance Radius:")).Font(
+					SNew(STextBlock)
+					.Text(LOCTEXT("Avoidance Radius Label", "Avoidance Radius:"))
+					.Font(
 						FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+					.ToolTipText(LOCTEXT("AvoidanceRadiusTooltip",
+					                     "The radius used by the ORCA algorithm for agent-to-agent avoidance.\nThis defines the agent's personal space for collision prediction.\n\nRecommendation: For stable avoidance, set this to approximately 1.5x the 'Final Radius'."))
 				]
 				+ SHorizontalBox::Slot().FillWidth(0.6f)
 				[
@@ -906,7 +935,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
 				[
-					
+
 					SNew(STextBlock).Text(LOCTEXT("RepathCooldownLabel", "Repath Cooldown:")).Font(
 						FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
 				]
@@ -915,13 +944,13 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
 					SNew(SNumericEntryBox<float>)
 					.Value(this, &SPathfindingTuner::GetRepathCooldown)
 					.OnValueCommitted(this, &SPathfindingTuner::OnRepathCooldownCommitted)
-					.MinValue(0.0f)      
-					.MaxValue(600.0f)     
-					.MinSliderValue(0.0f)  
-					.MaxSliderValue(10.0f) 
+					.MinValue(0.0f)
+					.MaxValue(600.0f)
+					.MinSliderValue(0.0f)
+					.MaxSliderValue(10.0f)
 				]
 			]
-			
+
 		]
 
 		.InitiallyCollapsed(!TunerSettings->bIsAgentSettingsCategoryExpanded)
@@ -1211,7 +1240,6 @@ void SPathfindingTuner::OnNumThreadsCommitted(int32 NewValue, ETextCommit::Type 
 		Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 	}
 }
-
 
 
 //=================================================================================================
@@ -1728,6 +1756,33 @@ TOptional<float> SPathfindingTuner::GetAgentRadius() const
 	                                                            });
 }
 
+FText SPathfindingTuner::GetFinalAgentRadiusAsText() const
+{
+	const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
+
+	if (SelectedComponents.IsEmpty())
+	{
+		return FText::FromString(TEXT("---"));
+	}
+
+	const TOptional<float> CommonFinalRadius = GetCommonPropertyValue<UPathfindingComponent, float>(SelectedComponents,
+		[](const UPathfindingComponent* C)
+		{
+			return C->AgentRadius;
+		});
+
+	if (CommonFinalRadius.IsSet())
+	{
+		const float RadiusInUnits = CommonFinalRadius.GetValue() / 100.0f;
+
+		FString FormattedString = FString::Printf(TEXT("%.1f (%.2f unit)"), CommonFinalRadius.GetValue(), RadiusInUnits);
+		
+		return FText::FromString(FormattedString);
+	}
+
+	return LOCTEXT("MultipleValues", "Multiple Values");
+}
+
 void SPathfindingTuner::OnAgentRadiusCommitted(float NewValue, ETextCommit::Type CommitType)
 {
 	const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
@@ -1786,25 +1841,25 @@ void SPathfindingTuner::OnAvoidanceRadiusCommitted(float NewValue,
 TOptional<float> SPathfindingTuner::GetRepathCooldown() const
 {
 	const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
-	
+
 	return GetCommonPropertyValue<UPathfindingComponent, float>(SelectedComponents,
-																[](const UPathfindingComponent* C)
-																{
-																	return C->GetRepathCooldown();
-																});
+	                                                            [](const UPathfindingComponent* C)
+	                                                            {
+		                                                            return C->GetRepathCooldown();
+	                                                            });
 }
 
 void SPathfindingTuner::OnRepathCooldownCommitted(float NewCooldownValue, ETextCommit::Type CommitType)
 {
 	NewCooldownValue = FMath::Max(MinCoolDown, NewCooldownValue);
-	
+
 	const auto SelectedComponents = GetSelectedComponentsOfType<UPathfindingComponent>();
 	SetCommonPropertyValue<UPathfindingComponent, float>(SelectedComponents, NewCooldownValue,
-														 LOCTEXT("SetRepathCooldown", "Set Repath Cooldown"),
-														 [](UPathfindingComponent* C, float NewCooldown)
-														 {
-															 C->SetRepathCooldown(NewCooldown);
-														 });
+	                                                     LOCTEXT("SetRepathCooldown", "Set Repath Cooldown"),
+	                                                     [](UPathfindingComponent* C, float NewCooldown)
+	                                                     {
+		                                                     C->SetRepathCooldown(NewCooldown);
+	                                                     });
 }
 
 
@@ -1839,7 +1894,7 @@ FReply SPathfindingTuner::OnBakeButtonClicked()
 	{
 		FText ConfirmationMessage = FText::Format(
 			LOCTEXT("MultiBakeConfirmation",
-				"You have selected {0} volumes to bake.\nThis process could take a long time and may cause the editor to become unresponsive.\n\nDo you want to continue?"),
+			        "You have selected {0} volumes to bake.\nThis process could take a long time and may cause the editor to become unresponsive.\n\nDo you want to continue?"),
 			FText::AsNumber(SelectedVolumes.Num())
 		);
 
@@ -1853,7 +1908,8 @@ FReply SPathfindingTuner::OnBakeButtonClicked()
 	if (UPathfindingEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UPathfindingEditorSubsystem>())
 	{
 		EditorSubsystem->BakeSpecificVolumes(SelectedVolumes);
-		ShowWarningMessage(LOCTEXT("BakeSelectedComplete", "Bake process for selected volumes completed successfully!"));
+		ShowWarningMessage(LOCTEXT("BakeSelectedComplete",
+		                           "Bake process for selected volumes completed successfully!"));
 	}
 	else
 	{
@@ -1876,11 +1932,13 @@ FReply SPathfindingTuner::OnBakeWorldButtonClicked()
 	if (UPathfindingEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UPathfindingEditorSubsystem>())
 	{
 		EditorSubsystem->BakeEntireWorld(TunerSettings);
-		ShowWarningMessage(LOCTEXT("WorldBakeStarted", "World Bake process has started. Check the Output Log for progress."));
+		ShowWarningMessage(LOCTEXT("WorldBakeStarted",
+		                           "World Bake process has started. Check the Output Log for progress."));
 	}
 	else
 	{
-		ShowWarningMessage(LOCTEXT("NoEditorSubsystem", "Pathfinding Editor Subsystem not found. Cannot start world bake."));
+		ShowWarningMessage(LOCTEXT("NoEditorSubsystem",
+		                           "Pathfinding Editor Subsystem not found. Cannot start world bake."));
 	}
 
 	return FReply::Handled();
@@ -1895,18 +1953,20 @@ bool SPathfindingTuner::ValidateSettingsAndConfirm_Internal(const UPathfindingTu
 	}
 	if (InSettings->WorldBake_SaveDirectory.Path.IsEmpty())
 	{
-		ShowWarningMessage(LOCTEXT("WorldBakeSaveDirNotSet", "World Bake failed. Please set the 'Save Directory' in the World Bake Settings first."));
+		ShowWarningMessage(LOCTEXT("WorldBakeSaveDirNotSet",
+		                           "World Bake failed. Please set the 'Save Directory' in the World Bake Settings first."));
 		return false;
 	}
 	if (!InSettings->WorldBake_ObstacleProfile.IsValid())
 	{
-		ShowWarningMessage(LOCTEXT("WorldBakeProfileNotSet", "World Bake failed. Please set the 'Obstacle Profile' in the World Bake Settings first."));
+		ShowWarningMessage(LOCTEXT("WorldBakeProfileNotSet",
+		                           "World Bake failed. Please set the 'Obstacle Profile' in the World Bake Settings first."));
 		return false;
 	}
 
 	const FText DialogTitle = LOCTEXT("ConfirmWorldBakeTitle", "Confirm World Bake");
 	const FText DialogText = LOCTEXT("ConfirmWorldBakeText",
-		"This will DELETE all previously baked navigation Volumes in the target directory and regenerate everything from scratch.\nThis process can take a very long time and cannot be undone.\n\nAre you sure you want to continue?");
+	                                 "This will DELETE all previously baked navigation Volumes in the target directory and regenerate everything from scratch.\nThis process can take a very long time and cannot be undone.\n\nAre you sure you want to continue?");
 	return FMessageDialog::Open(EAppMsgType::YesNo, DialogText, &DialogTitle) == EAppReturnType::Yes;
 }
 
