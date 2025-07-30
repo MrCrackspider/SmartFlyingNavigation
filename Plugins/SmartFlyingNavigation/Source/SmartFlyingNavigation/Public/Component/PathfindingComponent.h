@@ -98,6 +98,7 @@ public:
 
 	bool HasReachedDestination() const { return CurrentPathDestinationIndex >= FoundPath.Num(); }
 
+	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
 	void StopMovement();
 
 	void SetRepathCooldown(float NewCoolDown) { RepathCooldown = NewCoolDown; }
@@ -208,10 +209,10 @@ public:
 	UPROPERTY()
 	TSubclassOf<UPathfindingStrategy> PathfindingStrategyClass;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding", meta = (AllowPrivateAccess = true))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pathfinding", meta = (AllowPrivateAccess = true), DisplayName="Pathfinding Radius")
 	float AgentRadius = 50.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding", meta = (ClampMin = "0.0", AllowPrivateAccess = true))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Pathfinding", meta=(ClampMin="0.0", DisplayName="Base Radius"))
 	float BaseAgentRadius = 50.0f;
 	
 	UPROPERTY(EditAnywhere,Category = "Pathfinding|Configuration", BlueprintReadWrite,
