@@ -19,22 +19,15 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	}
 	const TArray<FOctreeNode>& PoolRef = *OctreeData.StaticNodePoolPtr;
 
-	//----------------------------------------------------------------
-	// 1. 시작점 처리 (재설계된 로직)
-	//----------------------------------------------------------------
 	int32 StartNodeIndex = -1;
 	FVector EffectiveStartLocation = InRequest.StartLocation;
 	
-	// 1a. 먼저, 에이전트가 물리적으로 장애물에 박혔는지 확인합니다.
 	const bool bIsTrulyObstructed = 
 		OctreeData.CheckForSolidNodesInCapsule(InRequest.StartLocation, InRequest.StartLocation, InRequest.AgentRadius) ||
 		OctreeData.IsPathDynamicallyBlocked_Sweep(InRequest.StartLocation, InRequest.StartLocation, InRequest.AgentRadius);
 
 	if (bIsTrulyObstructed)
 	{
-		// CASE A: 에이전트가 정말로 벽에 박혔습니다.
-		UE_LOG(LogTemp, Warning, TEXT("AStarStrategy: Start location is truly obstructed. Finding a safe spot to start the path from."));
-		
 		StartNodeIndex = OctreeData.FindNearestValidLeafForAgent(
 			InRequest.StartLocation, InRequest.AgentRadius, NearbyGoalSearchRadius, NearbyGoalSearchIterations);
 
