@@ -437,7 +437,7 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 	// 3. [핵심] 도착 판단: 이동이 끝난 '현재' 위치를 기준으로, 목표에 충분히 가까워졌는지 확인합니다.
 	//    루프를 사용하여, 한 프레임에 여러 웨이포인트를 통과하는 경우도 완벽하게 처리합니다.
 	bool bAdvanced;
-	float AcceptanceRadius = 50.0f;
+	float AcceptanceRadius = 100.0f;
 	do
 	{
 		bAdvanced = false;
@@ -450,7 +450,7 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 			{
 				// 도착했으므로, 다음 목표 지점으로 넘어갑니다.
 				ProgressNextPoint();
-				bAdvanced = true; // 경로가 바뀌었으니, 새 목표에 대해서도 바로 도착했는지 확인하기 위해 루프를 한 번 더 돕니다.
+				bAdvanced = true; // 경로가 바뀌었으니, 새 목표에 대해서도 바로 도착했는지 확인하기 위해 루프를 한 번 더 돕니다. 
 			}
 		}
 	}
@@ -476,6 +476,8 @@ void UPathfindingComponent::AdjustProgressToSpline(FVector FinalVelocity)
 
 void UPathfindingComponent::ProgressNextPoint()
 {
+	UE_LOG(LogTemp, Log, TEXT("Go To Next Point"));
+	
 	// Linear로 가도 partialSplineUpdate는 해야해서 if문으로 감싸지 마세요
 	PartialSplinePointUpdate(CurrentPathDestinationIndex);
 	
@@ -575,16 +577,12 @@ void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 		return;
 	}
 
-	// DistanceAlongSpline = 0;
-	// PathSplinePtr->RemoveSplinePoint(0);
-
-	
-	DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(1);
-
 	if (StartIndex > 1)
 	{
 		PathSplinePtr->RemoveSplinePoint(0);
 	}
+	
+	DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(1);
 
 	int32 AddIndex = StartIndex + PartialPointSplineNum - 1;
 
