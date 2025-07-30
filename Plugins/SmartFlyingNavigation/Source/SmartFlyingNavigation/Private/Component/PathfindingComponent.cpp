@@ -96,11 +96,6 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
                                           FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-	const UEnum* EnumPtr = StaticEnum<EPathMovementMode>();
-	FString EnumName = EnumPtr->GetNameStringByValue(static_cast<int64>(MovementMode));
-	
-	UE_LOG(LogTemp, Warning, TEXT("MovementMode: %s"), *EnumName)
 	
 	if (!IsValid(AvoidanceSubsystem) || !AvoidanceSubsystem->GetbUseAvoidance())
 	{
