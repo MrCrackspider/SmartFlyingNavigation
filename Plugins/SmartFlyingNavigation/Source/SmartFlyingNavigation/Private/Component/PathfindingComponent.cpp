@@ -444,6 +444,9 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 		bAdvanced = false;
 		if (FoundPath.IsValidIndex(CurrentPathDestinationIndex))
 		{
+			// Begin Test 
+			FVector TestActorLocation = Owner->GetActorLocation();
+			FVector TestPathLocation = FoundPath[CurrentPathDestinationIndex];
 			const float DistToTargetSq = FVector::DistSquared(Owner->GetActorLocation(), FoundPath[CurrentPathDestinationIndex]);
 
 			// 현재 위치가 목표 지점의 허용 반경 안에 있는가?
@@ -539,14 +542,15 @@ bool UPathfindingComponent::IsOnSplineLine() const
 
 void UPathfindingComponent::DetermineMovementModeForNextPath()
 {
-	if (IsSplinePathSafe())
-	{
-		SetMovementMode(EPathMovementMode::Spline);
-	}
-	else
-	{
-		SetMovementMode(EPathMovementMode::Linear);
-	}
+	SetMovementMode(EPathMovementMode::Linear);
+	//if (IsSplinePathSafe())
+	//{
+	//	SetMovementMode(EPathMovementMode::Spline);
+	//}
+	//else
+	//{
+	//	SetMovementMode(EPathMovementMode::Linear);
+	//}
 }
 
 void UPathfindingComponent::PeriodicRepath()
@@ -568,32 +572,33 @@ void UPathfindingComponent::UpdateSteering(float DeltaTime)
 	UpdatePreferredVelocity(DeltaTime);
 }
 
-
 void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 {
 	if (PathSplinePtr->GetNumberOfSplinePoints() <= 2)
 	{
 		return;
 	}
-
+	// DistanceAlongSpline = 0;
+	// PathSplinePtr->RemoveSplinePoint(0);
+	// DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(1);
 	if (StartIndex > 1)
 	{
-		PathSplinePtr->RemoveSplinePoint(0);
+		const float RemovedSegmentLength = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(1);
+		DistanceAlongSpline -= RemovedSegmentLength;
+		PathSplinePtr->RemoveSplinePoint(0, false);
 	}
-	
-	DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(1);
-
+	// if (StartIndex > 1)
+	// {
+	//    PathSplinePtr->RemoveSplinePoint(0);
+	// }
 	int32 AddIndex = StartIndex + PartialPointSplineNum - 1;
-
 	if (AddIndex >= FoundPath.Num())
 	{
 		return;
 	}
-
 	PathSplinePtr->AddSplinePoint(FoundPath[AddIndex], ESplineCoordinateSpace::World, false);
 	PathSplinePtr->UpdateSpline();
 }
-
 /**
  * 
 void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess)

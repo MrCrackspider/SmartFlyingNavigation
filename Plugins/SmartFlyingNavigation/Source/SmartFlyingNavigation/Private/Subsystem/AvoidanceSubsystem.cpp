@@ -29,7 +29,7 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     GridCellSize = 200.f;
     SymmetryBreakingRangeMultiplier = 8.f;
     SolverIterations = 5;
-    SideBiasMagnitude = 90.f;
+    SideBiasMagnitude = 10.f;
     InterpSpeed = 10.f;
     bUseAvoidance = true;
     bShowVelocityDebugLine = true;
@@ -144,7 +144,7 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
                     }
                 }
 
-                 Agent->ApplyMovement(FinalVelocity.GetClampedToMaxSize(Agent->GetMovementSpeed()), DeltaTime);
+                Agent->ApplyMovement(FinalVelocity.GetClampedToMaxSize(Agent->GetMovementSpeed()), DeltaTime);
                 //Agent->ApplyMovement(FinalVelocity, DeltaTime);
 
                 if (Agent->GetMovementMode() == EPathMovementMode::Spline && !Agent->IsOnSplineLine() && Agent->FoundPath.Num() > 0)
@@ -307,6 +307,118 @@ void UAvoidanceSubsystem::RunAvoidanceCalculation(
     }
 }
 
+static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadData& CurrentAgent, const FVector& PreferredVelocity, const TArray<const FAgentThreadData*>& NearbyAgents, float SymmetryBreakingRangeMultiplier, float SideBiasMagnitude)
+{
+    if (NearbyAgents.IsEmpty() || PreferredVelocity.IsNearlyZero())
+    {
+        return PreferredVelocity;
+    }
+
+    const FAgentThreadData* ObstacleAgent = nullptr;
+    float MinThreatDistSq = TNumericLimits<float>::Max();
+
+    for (const FAgentThreadData* AgentB : NearbyAgents)
+    {
+        const FVector ToAgentB = AgentB->Position - CurrentAgent.Position;
+        const float DistToAgentBSq = ToAgentB.SizeSquared();
+        const float CombinedRadius = CurrentAgent.AvoidanceRadius + AgentB->AvoidanceRadius;
+
+        if (DistToAgentBSq < FMath::Square(CombinedRadius * SymmetryBreakingRangeMultiplier))
+        {
+            if (DistToAgentBSq < MinThreatDistSq)
+            {
+                MinThreatDistSq = DistToAgentBSq;
+                ObstacleAgent = AgentB;
+            }
+        }
+    }
+
+    if (ObstacleAgent)
+    {
+        const FVector ForwardVector = PreferredVelocity.GetSafeNormal();
+        const FVector UpVector = CurrentAgent.UpVector;
+        FVector SideVector = FVector::CrossProduct(ForwardVector, UpVector);
+
+        const FVector ToObstacleAgent = ObstacleAgent->Position - CurrentAgent.Position;
+        SideVector.Normalize();
+        const float DotWithSide = FVector::DotProduct(ToObstacleAgent, SideVector);
+        if (DotWithSide > 0.0f)
+        {
+            SideVector *= -1.0f;
+        }
+
+        UE_LOG(LogTemp, Display, TEXT("%f, %f, %f"), SideVector.X, SideVector.Y, SideVector.Z);
+
+        FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
+        return ActualPreferredVelocity;
+    }
+    return PreferredVelocity;
+}
+
+static void GenerateAgentConstraints_ThreadSafe(const FAgentThreadData& CurrentAgent, const FVector& ActualPreferredVelocity, const TArray<const FAgentThreadData*>& NearbyAgents, TArray<FPlane>& OutConstraints, float TimeHorizon)
+{
+    for (const FAgentThreadData* AgentB : NearbyAgents)
+    {
+        const FVector RelativePosition = AgentB->Position - CurrentAgent.Position;
+        const FVector RelativeVelocity = ActualPreferredVelocity - AgentB->CurrentVelocity;
+        const float DistSq = RelativePosition.SizeSquared();
+        const float CombinedRadius = CurrentAgent.AvoidanceRadius + AgentB->AvoidanceRadius;
+        const float CombinedRadiusSq = FMath::Square(CombinedRadius);
+
+        float EffectiveTimeHorizon = TimeHorizon;
+        bool bIsCollidingOrApproaching = false;
+
+        const float RelativeVelSq = RelativeVelocity.SizeSquared();
+
+        if (RelativeVelSq > KINDA_SMALL_NUMBER)
+        {
+            const float DotProduct_RelPos_RelVel = FVector::DotProduct(RelativePosition, RelativeVelocity);
+            const float Discriminant = FMath::Square(DotProduct_RelPos_RelVel) - RelativeVelSq * (DistSq - CombinedRadiusSq);
+
+            if (Discriminant >= 0.f)
+            {
+                const float TTC = (-DotProduct_RelPos_RelVel - FMath::Sqrt(Discriminant)) / RelativeVelSq;
+                if (TTC > 0.f)
+                {
+                    EffectiveTimeHorizon = FMath::Min(TimeHorizon, TTC);
+                    bIsCollidingOrApproaching = true;
+                }
+            }
+        }
+
+        if (DistSq > CombinedRadiusSq && !bIsCollidingOrApproaching) continue;
+
+        const float InverseEffectiveTimeHorizon = 1.0f / EffectiveTimeHorizon;
+        FVector u = FVector::ZeroVector;
+
+        if (DistSq > CombinedRadiusSq)
+        {
+            const FVector w = RelativeVelocity - RelativePosition * InverseEffectiveTimeHorizon;
+            const float w_sq = w.SizeSquared();
+            const float VOptRadius = CombinedRadius * InverseEffectiveTimeHorizon;
+            const float VOptRadiusSq = FMath::Square(VOptRadius);
+
+            if (FVector::DotProduct(w, RelativePosition) < 0.0f && FMath::Square(FVector::DotProduct(w, RelativePosition)) > w_sq * VOptRadiusSq)
+            {
+                const float w_len = FMath::Sqrt(w_sq);
+                const FVector n_w = w / w_len;
+                u = (n_w * VOptRadius - w);
+            }
+        }
+
+        if (!u.IsNearlyZero(KINDA_SMALL_NUMBER))
+        {
+            float Responsibility = 0.5f;
+            const FVector w_correction = u * Responsibility;
+            const FVector n_correction = u.GetSafeNormal();
+            if (!n_correction.IsNearlyZero(KINDA_SMALL_NUMBER))
+            {
+                OutConstraints.Emplace(ActualPreferredVelocity + w_correction, n_correction);
+            }
+        }
+    }
+}
+
 static void GenerateVoxelConstraints_ThreadSafe(const UWorld* World, const FAgentThreadData& CurrentAgent, const FVector& DesiredVelocity, TArray<FPlane>& OutConstraints, float TimeHorizon)
 {
     if (!World) return;
@@ -372,128 +484,6 @@ static void GenerateVoxelConstraints_ThreadSafe(const UWorld* World, const FAgen
             }
         }
     }
-}
-
-static void GenerateAgentConstraints_ThreadSafe(const FAgentThreadData& CurrentAgent, const FVector& ActualPreferredVelocity, const TArray<const FAgentThreadData*>& NearbyAgents, TArray<FPlane>& OutConstraints, float TimeHorizon)
-{
-    for (const FAgentThreadData* AgentB : NearbyAgents)
-    {
-        const FVector RelativePosition = AgentB->Position - CurrentAgent.Position;
-        const FVector RelativeVelocity = ActualPreferredVelocity - AgentB->CurrentVelocity;
-        const float DistSq = RelativePosition.SizeSquared();
-        const float CombinedRadius = CurrentAgent.AvoidanceRadius + AgentB->AvoidanceRadius;
-        const float CombinedRadiusSq = FMath::Square(CombinedRadius);
-
-        float EffectiveTimeHorizon = TimeHorizon;
-        bool bIsCollidingOrApproaching = false;
-
-        const float RelativeVelSq = RelativeVelocity.SizeSquared();
-
-        if (RelativeVelSq > KINDA_SMALL_NUMBER)
-        {
-            const float DotProduct_RelPos_RelVel = FVector::DotProduct(RelativePosition, RelativeVelocity);
-            const float Discriminant = FMath::Square(DotProduct_RelPos_RelVel) - RelativeVelSq * (DistSq - CombinedRadiusSq);
-
-            if (Discriminant >= 0.f)
-            {
-                const float TTC = (-DotProduct_RelPos_RelVel - FMath::Sqrt(Discriminant)) / RelativeVelSq;
-                if (TTC > 0.f)
-                {
-                    EffectiveTimeHorizon = FMath::Min(TimeHorizon, TTC);
-                    bIsCollidingOrApproaching = true;
-                }
-            }
-        }
-
-        if (DistSq > CombinedRadiusSq && !bIsCollidingOrApproaching) continue;
-
-        const float InverseEffectiveTimeHorizon = 1.0f / EffectiveTimeHorizon;
-        FVector u = FVector::ZeroVector;
-
-        if (DistSq > CombinedRadiusSq)
-        {
-            const FVector w = RelativeVelocity - RelativePosition * InverseEffectiveTimeHorizon;
-            const float w_sq = w.SizeSquared();
-            const float VOptRadius = CombinedRadius * InverseEffectiveTimeHorizon;
-            const float VOptRadiusSq = FMath::Square(VOptRadius);
-
-            if (FVector::DotProduct(w, RelativePosition) < 0.0f && FMath::Square(FVector::DotProduct(w, RelativePosition)) > w_sq * VOptRadiusSq)
-            {
-                const float w_len = FMath::Sqrt(w_sq);
-                const FVector n_w = w / w_len;
-                u = (n_w * VOptRadius - w);
-            }
-        }
-
-        if (!u.IsNearlyZero(KINDA_SMALL_NUMBER))
-        {
-            const FVector w_correction = u * 0.5f;
-            const FVector n_correction = u.GetSafeNormal();
-            if (!n_correction.IsNearlyZero(KINDA_SMALL_NUMBER))
-            {
-                OutConstraints.Emplace(ActualPreferredVelocity + w_correction, n_correction);
-            }
-        }
-    }
-}
-
-static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadData& CurrentAgent, const FVector& PreferredVelocity, const TArray<const FAgentThreadData*>& NearbyAgents, float SymmetryBreakingRangeMultiplier, float SideBiasMagnitude)
-{
-    if (NearbyAgents.IsEmpty() || PreferredVelocity.IsNearlyZero())
-    {
-        return PreferredVelocity;
-    }
-
-    const FAgentThreadData* ObstacleAgent = nullptr;
-    float MinThreatDistSq = TNumericLimits<float>::Max();
-
-    for (const FAgentThreadData* AgentB : NearbyAgents)
-    {
-        const FVector ToAgentB = AgentB->Position - CurrentAgent.Position;
-        const float DistToAgentBSq = ToAgentB.SizeSquared();
-        const float CombinedRadius = CurrentAgent.AvoidanceRadius + AgentB->AvoidanceRadius;
-
-        if (DistToAgentBSq < FMath::Square(CombinedRadius * SymmetryBreakingRangeMultiplier))
-        {
-            if (DistToAgentBSq < MinThreatDistSq)
-            {
-                MinThreatDistSq = DistToAgentBSq;
-                ObstacleAgent = AgentB;
-            }
-        }
-    }
-
-    bool bShouldYield = false;
-    if (ObstacleAgent)
-    {
-        if (CurrentAgent.AvoidanceRadius < ObstacleAgent->AvoidanceRadius)
-        {
-            bShouldYield = true;
-        }
-        else if (FMath::IsNearlyEqual(CurrentAgent.AvoidanceRadius, ObstacleAgent->AvoidanceRadius))
-        {
-            if (CurrentAgent.MovementSpeed > ObstacleAgent->MovementSpeed)
-            {
-                bShouldYield = true;
-            }
-            else if (FMath::IsNearlyEqual(CurrentAgent.MovementSpeed, ObstacleAgent->MovementSpeed))
-            {
-                if (CurrentAgent.AgentId > ObstacleAgent->AgentId)
-                {
-                    bShouldYield = true;
-                }
-            }
-        }
-    }
-
-    const FVector ForwardVec = PreferredVelocity.GetSafeNormal();
-    const FVector UpVector = CurrentAgent.UpVector;
-
-    FVector SideVector = FVector::CrossProduct(ForwardVec, UpVector);
-    SideVector.Normalize();
-
-    FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
-    return ActualPreferredVelocity;
 }
 
 FVector UAvoidanceSubsystem::SolveOptimalVelocity(const TArray<FPlane>& Constraints, const FVector& PreferredVelocity) const
