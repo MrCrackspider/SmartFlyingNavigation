@@ -41,8 +41,10 @@ AOctreeVoxelVolume::AOctreeVoxelVolume()
 {
 	PrimaryActorTick.bCanEverTick = true;
 
+#if WITH_EDITOR
 	SetIsSpatiallyLoaded(true);
-
+#endif
+	
 	// Default value for octree depth. For a 128^3 volume, a depth of 7 provides voxel-level precision (2^7 = 128
 }
 
@@ -1058,20 +1060,25 @@ void AOctreeVoxelVolume::GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNo
 	{
 		return;
 	}
-	const FOctreeNode& Node = (*StaticNodePoolPtr)[NodeIndex];
 
-	// Add node info if it's a leaf or if we've reached the desired debug draw depth.
-	if (Node.State != EOctreeNodeState::Mixed || CurrentDepth == GetMaxOctreeDepth())
 	{
-		OutNodes.Add({ NodeIndex, NodeBounds, Node.State });
-	}
-	else // If mixed, recurse into children.
-	{
-		for (int i = 0; i < 8; ++i)
+		FScopeLock Lock(&NodePoolCS);
+	
+		const FOctreeNode& Node = (*StaticNodePoolPtr)[NodeIndex];
+
+		// Add node info if it's a leaf or if we've reached the desired debug draw depth.
+		if (Node.State != EOctreeNodeState::Mixed || CurrentDepth == GetMaxOctreeDepth())
 		{
-			if (Node.ChildrenIndices[i] != -1)
+			OutNodes.Add({ NodeIndex, NodeBounds, Node.State });
+		}
+		else // If mixed, recurse into children.
+		{
+			for (int i = 0; i < 8; ++i)
 			{
-				GetDebugNodeInfoRecursive(OutNodes, Node.ChildrenIndices[i], CalculateChildBounds(NodeBounds, i), CurrentDepth + 1);
+				if (Node.ChildrenIndices[i] != -1)
+				{
+					GetDebugNodeInfoRecursive(OutNodes, Node.ChildrenIndices[i], CalculateChildBounds(NodeBounds, i), CurrentDepth + 1);
+				}
 			}
 		}
 	}
@@ -1253,6 +1260,7 @@ void AOctreeVoxelVolume::OptimizeAndCollapse_Internal(TArray<FOctreeNode>& InOut
 	}
 }
 
+#if WITH_EDITOR
 void AOctreeVoxelVolume::PrecomputeNeighbors_Internal(TArray<FOctreeNode>& InOutNodePool, const FBox& TotalVolumeBounds, int32 MaxDepth)
 {
 	FScopedSlowTask NeighborTask(InOutNodePool.Num(), FText::FromString(TEXT("Precomputing Neighbors...")));
@@ -1303,3 +1311,4 @@ void AOctreeVoxelVolume::PrecomputeNeighbors_Internal(TArray<FOctreeNode>& InOut
 		}
 	}
 }
+#endif

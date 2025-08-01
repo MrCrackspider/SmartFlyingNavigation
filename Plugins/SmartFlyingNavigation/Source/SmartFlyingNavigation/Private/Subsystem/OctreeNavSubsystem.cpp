@@ -53,7 +53,9 @@ AOctreeVoxelVolume* UOctreeNavSubsystem::GetVolumeChunkAt(const FVector& WorldLo
 		//	}
 		//}
 
-		if (Volume && Volume->GetIsSpatiallyLoaded() && Volume->IsReadyForNavigation() && Volume->GetVolumeBounds().IsInside(WorldLocation))
+		// GetIsSpatiallyLoaded is Editor-only function But Get VolumeChunkAt is runtime function so we need to not use GetIsSpatiallyLoaded
+		// if (Volume && Volume->GetIsSpatiallyLoaded() && Volume->IsReadyForNavigation() && Volume->GetVolumeBounds().IsInside(WorldLocation))
+		if (Volume && Volume->IsReadyForNavigation() && Volume->GetVolumeBounds().IsInside(WorldLocation))
 		{
 			return Volume;
 		}

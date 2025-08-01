@@ -15,8 +15,10 @@ AVoxelVolumeBase::AVoxelVolumeBase()
 	// Allow this actor to be ticked every frame.
 	PrimaryActorTick.bCanEverTick = true;
 
+#if WITH_EDITORONLY_DATA
 	bIsSpatiallyLoaded = true;
-
+#endif
+	
 	// Create the volume box component for editor visualization.
 	VolumeBox = CreateDefaultSubobject<UBoxComponent>(TEXT("SelectionVolume"));
 	RootComponent = VolumeBox;
@@ -53,9 +55,11 @@ AVoxelVolumeBase::AVoxelVolumeBase()
 void AVoxelVolumeBase::BeginPlay()
 {
 	Super::BeginPlay();
-	
-	UE_LOG(LogTemp, Warning, TEXT("CHUNK LOADED: %s at %s"), *GetActorLabel(), *GetActorLocation().ToString());
 
+#if WITH_EDITOR
+	UE_LOG(LogTemp, Warning, TEXT("CHUNK LOADED: %s at %s"), *GetActorLabel(), *GetActorLocation().ToString());
+#endif
+	
 	// If debug drawing is enabled, set a timer to update the visualization.
 	if (bDrawDebugBox)
 	{
@@ -139,8 +143,11 @@ void AVoxelVolumeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	case EEndPlayReason::Quit: ReasonString = TEXT("Quit"); break;
 	default: ReasonString = TEXT("Unknown"); break;
 	}
+	
+#if WITH_EDITOR 
 	UE_LOG(LogTemp, Error, TEXT("CHUNK UNLOADED: %s (Reason: %s)"), *GetActorLabel(), *ReasonString);
-
+#endif
+	
 	// Clear the debug update timer.
 	GetWorldTimerManager().ClearTimer(DebugUpdateTimer);
 #if WITH_EDITOR 

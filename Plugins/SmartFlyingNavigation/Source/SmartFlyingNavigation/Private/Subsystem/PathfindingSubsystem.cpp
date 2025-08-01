@@ -9,6 +9,9 @@
 #include "HAL/ThreadManager.h"
 #include "NavData/WorldNavigationDataAsset.h"
 #include "Utility/PathfindingStreamingProbe.h"
+#include "Engine/World.h"
+#include "Engine/Engine.h"
+#include "Misc/Paths.h"
 
 #include "WorldPartition/WorldPartitionSubsystem.h"
 
@@ -131,9 +134,12 @@ void UPathfindingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 			this->CurrentNumWorkerThreads = 0;
 		}
 	}
-
-	const FString OriginalMapName = UWorld::RemovePIEPrefix(World->GetMapName());
-	const FString ManifestAssetName = TEXT("DA_WorldNav_") + OriginalMapName;
+	
+#if WITH_EDITOR
+	const FString MapName = UWorld::RemovePIEPrefix(World->GetMapName());
+	// FString MapName = GetWorld()->GetMapName();
+	// MapName.RemoveFromStart(GetWorld()->StreamingLevelsPrefix);
+	const FString ManifestAssetName = TEXT("DA_WorldNav_") + MapName;
 	const FString ManifestAssetPath = FPaths::Combine(TEXT("/Game/Data/Navigation/"), ManifestAssetName);
 
 	CurrentWorldNavData = LoadObject<UWorldNavigationDataAsset>(nullptr, *ManifestAssetPath);
@@ -146,7 +152,8 @@ void UPathfindingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("World Navigation Data Manifest '%s' could not be found. Long-range hierarchical pathfinding may be disabled."), *ManifestAssetPath);
 	}
-
+#endif
+	
 	NextRequestID.Set(0);
 }
 
@@ -637,13 +644,13 @@ bool UPathfindingSubsystem::FindHighLevelPath(const UObject* WorldContextObject,
 
 	const float HCost = FVector::Dist(StartVolumeBounds.GetCenter(), EndVolumeBounds.GetCenter());
 	FDataAssetNode StartNode = { StartDataAsset, StartVolumeBounds, 0.f, HCost };
-	OpenSet.HeapPush(StartNode, TGreater<FDataAssetNode>());
+	OpenSet.HeapPush(StartNode, TLess<FDataAssetNode>());
 	GCostMap.Add(StartDataAsset, 0.f);
 
 	while (OpenSet.Num() > 0)
 	{
 		FDataAssetNode CurrentNode;
-		OpenSet.HeapPop(CurrentNode, TGreater<FDataAssetNode>());
+		OpenSet.HeapPop(CurrentNode, TLess<FDataAssetNode>());
 
 		if (CurrentNode.DataAsset == EndDataAsset)
 		{
@@ -708,7 +715,7 @@ bool UPathfindingSubsystem::FindHighLevelPath(const UObject* WorldContextObject,
 					GCostMap.Add(NeighborDataAsset, NewGCost);
 					const float NeighborHCost = FVector::Dist(NeighborBounds.GetCenter(), EndVolumeBounds.GetCenter());
 					FDataAssetNode NeighborNode = { NeighborDataAsset, NeighborBounds, NewGCost, NeighborHCost };
-					OpenSet.HeapPush(NeighborNode, TGreater<FDataAssetNode>());
+					OpenSet.HeapPush(NeighborNode, TLess<FDataAssetNode>());
 
 					// 경로 추적 정보(CameFrom)를 기록합니다.
 					// NeighborDataAsset으로 가기 위해서는,

@@ -31,7 +31,6 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     SolverIterations = 5;
     SideBiasMagnitude = 10.f;
     InterpSpeed = 10.f;
-    bUseAvoidance = true;
     bShowVelocityDebugLine = true;
 }
 
@@ -520,5 +519,3 @@ void UAvoidanceSubsystem::DebugVisualizeVelocities(const UPathfindingComponent* 
     DrawDebugLine(World, LineStart, LineStart + Result.ActualPreferredVelocity * LineLengthMultiplier, FColor::Yellow, false, -1, 0, 3.f);
     DrawDebugLine(World, LineStart, LineStart + FinalOptimalVelocity * LineLengthMultiplier, FColor::Red, false, -1, 0, 5.f);
 }
-
-

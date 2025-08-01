@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <cmath>
+
 #include "CoreMinimal.h"
 #include "NavVolume/VoxelVolumeBase.h"
 #include "NavData/StaticVoxelChunkData.h"
@@ -166,6 +168,8 @@ public:
 	 */
 	void ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticObstacles, UObject* WorldContextObject, const FBox& ScanWorldBounds) const;
 #endif
+	
+	FVector VoxelIndexToWorld(const FIntVector& VoxelIndex) const;
 
 #if WITH_EDITORONLY_DATA
 
@@ -184,7 +188,6 @@ protected:
 public:
 	FIntVector WorldToVoxelIndex(const FVector& WorldLocation) const;
 
-	FVector VoxelIndexToWorld(const FIntVector& VoxelIndex) const;
 
 	bool IsIndexValid(const FIntVector& Index) const;
 
@@ -246,6 +249,19 @@ private:
 	/** Calculates the bounding box for one of the 8 children of a parent node. */
 	FBox CalculateChildBounds(const FBox& ParentBounds, int32 ChildIndex) const;
 
+	/** Determines which of the 8 octants a given voxel belongs to within a node's bounds. */
+	int32 GetOctantContainingVoxel(const FBox& NodeBounds, const FVector& VoxelWorldPos) const;
+
+public:
+	/** Traverses the octree to find the leaf node containing a specific world position. For bake-time use only. */
+	int32 FindLeafNode_Internal(
+		const TArray<FOctreeNode>& InNodePool,
+		int32 CurrentNodeIndex,
+		const FVector& WorldPos,
+		int32 MaxDepth,
+		int32 CurrentDepth = 0
+	);
+	
 #if WITH_EDITOR
 private:
 	
@@ -255,8 +271,6 @@ private:
 		FBox Bounds;
 		EOctreeNodeState State; 
 	};
-	/** Determines which of the 8 octants a given voxel belongs to within a node's bounds. */
-	int32 GetOctantContainingVoxel(const FBox& NodeBounds, const FVector& VoxelWorldPos) const;
 		
 	/** Recursively gathers information about octree nodes for debug visualization. */
 	void GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex, const FBox& NodeBounds, int32 CurrentDepth) const;
@@ -268,6 +282,13 @@ public:
 	/** Handles the creation, saving, and assignment of the UOctreeDataAsset. */
 	void SaveOctreeToAsset(const TArray<FOctreeNode>& NodePoolToSave, const TMap<int32, FVolumePortalLinks>& PortalsToSave);
 
+	/** After building the tree, this pre-calculates and stores neighbors for each leaf node to accelerate pathfinding. */
+	void PrecomputeNeighbors_Internal(TArray<FOctreeNode>& InOutNodePool, const FBox& TotalVolumeBounds, int32 MaxDepth);
+
+#endif
+	/** Traverses the octree bottom-up to merge child nodes that have the same state, optimizing memory usage. */
+	void OptimizeAndCollapse_Internal(TArray<FOctreeNode>& InOutNodePool, int32 NodeIndex);
+
 	/** Recursively inserts a single obstacle voxel into the octree during the baking process. */
 	void InsertObstacleRecursive_Internal(
 		TArray<FOctreeNode>& InOutNodePool,
@@ -276,21 +297,8 @@ public:
 		int32 CurrentDepth,
 		int32 MaxDepth
 	);
-	/** Traverses the octree to find the leaf node containing a specific world position. For bake-time use only. */
-	int32 FindLeafNode_Internal(
-		const TArray<FOctreeNode>& InNodePool,
-		int32 CurrentNodeIndex,
-		const FVector& WorldPos,
-		int32 MaxDepth,
-		int32 CurrentDepth = 0
-	);
-	/** Traverses the octree bottom-up to merge child nodes that have the same state, optimizing memory usage. */
-	void OptimizeAndCollapse_Internal(TArray<FOctreeNode>& InOutNodePool, int32 NodeIndex);
-	/** After building the tree, this pre-calculates and stores neighbors for each leaf node to accelerate pathfinding. */
-	void PrecomputeNeighbors_Internal(TArray<FOctreeNode>& InOutNodePool, const FBox& TotalVolumeBounds, int32 MaxDepth);
 
-#endif
-
+	
 public:
 	//~======================================================================
 	// Properties
@@ -331,8 +339,10 @@ private:
 
 	/** The runtime pool of nodes for the static octree, loaded from BakedOctreeData. */
 	/** 로드된 데이터 에셋의 노드 풀을 가리키는 포인터. LoadedDataAsset이 소유권을 가짐. */
-	TArray<FOctreeNode>* StaticNodePoolPtr = nullptr; 
+	TArray<FOctreeNode>* StaticNodePoolPtr = nullptr;
 
+	mutable FCriticalSection NodePoolCS;
+	
 	/** The index of the root node in the StaticNodePool array. Initialized to -1. */
 	int32 RootNodeIndex = -1;
 

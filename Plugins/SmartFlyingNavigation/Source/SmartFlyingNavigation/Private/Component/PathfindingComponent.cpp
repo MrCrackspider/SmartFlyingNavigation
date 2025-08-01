@@ -444,9 +444,6 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 		bAdvanced = false;
 		if (FoundPath.IsValidIndex(CurrentPathDestinationIndex))
 		{
-			// Begin Test 
-			FVector TestActorLocation = Owner->GetActorLocation();
-			FVector TestPathLocation = FoundPath[CurrentPathDestinationIndex];
 			const float DistToTargetSq = FVector::DistSquared(Owner->GetActorLocation(), FoundPath[CurrentPathDestinationIndex]);
 
 			// 현재 위치가 목표 지점의 허용 반경 안에 있는가?
@@ -541,16 +538,15 @@ bool UPathfindingComponent::IsOnSplineLine() const
 }
 
 void UPathfindingComponent::DetermineMovementModeForNextPath()
-{
-	SetMovementMode(EPathMovementMode::Linear);
-	//if (IsSplinePathSafe())
-	//{
-	//	SetMovementMode(EPathMovementMode::Spline);
-	//}
-	//else
-	//{
-	//	SetMovementMode(EPathMovementMode::Linear);
-	//}
+{	
+	if (IsSplinePathSafe())
+	{
+		SetMovementMode(EPathMovementMode::Spline);
+	}
+	else
+	{
+		SetMovementMode(EPathMovementMode::Linear);
+	}
 }
 
 void UPathfindingComponent::PeriodicRepath()
@@ -578,24 +574,21 @@ void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 	{
 		return;
 	}
-	// DistanceAlongSpline = 0;
-	// PathSplinePtr->RemoveSplinePoint(0);
-	// DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(1);
+
 	if (StartIndex > 1)
 	{
-		const float RemovedSegmentLength = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(1);
-		DistanceAlongSpline -= RemovedSegmentLength;
-		PathSplinePtr->RemoveSplinePoint(0, false);
+		PathSplinePtr->RemoveSplinePoint(0);
 	}
-	// if (StartIndex > 1)
-	// {
-	//    PathSplinePtr->RemoveSplinePoint(0);
-	// }
+	
+	DistanceAlongSpline = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(1);
+
 	int32 AddIndex = StartIndex + PartialPointSplineNum - 1;
+
 	if (AddIndex >= FoundPath.Num())
 	{
 		return;
 	}
+
 	PathSplinePtr->AddSplinePoint(FoundPath[AddIndex], ESplineCoordinateSpace::World, false);
 	PathSplinePtr->UpdateSpline();
 }
@@ -931,7 +924,7 @@ void UPathfindingComponent::DrawDebugPath()
 		return;
 	}
 
-	const float Duration = 1.0f;
+	const float Duration = 10.0f;
 	const float LineThickness = 5.0f;
 	const float BoxThickness = AgentRadius * 0.7;
 	const FVector BoxHalfSize(AgentRadius * 0.05);
@@ -1041,35 +1034,35 @@ bool UPathfindingComponent::IsSplinePathSafe() const
 		}
 		return true;
 	}
-
-	const float CurrentDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex - 1);
-	const float NextDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex);
-
-	for (float Distance = CurrentDistance; Distance <= NextDistance; Distance += SafetyCheckStepSize)
-	{
-		const FVector CenterLocation = PathSplinePtr->GetLocationAtDistanceAlongSpline(
-			Distance, ESplineCoordinateSpace::World);
-
-		const TArray<FVector> TestOffsets = {
-			FVector::ZeroVector,
-			FVector(AgentRadius, 0.f, 0.f),
-			FVector(-AgentRadius, 0.f, 0.f),
-			FVector(0.f, AgentRadius, 0.f),
-			FVector(0.f, -AgentRadius, 0.f),
-			FVector(0.f, 0.f, AgentRadius),
-			FVector(0.f, 0.f, -AgentRadius)
-		};
-
-		for (const FVector& Offset : TestOffsets)
-		{
-			const FVector TestLocation = CenterLocation + Offset;
-
-			if (VoxelVolume->IsLocationInBlockedVoxel(TestLocation))
-			{
-				return false;
-			}
-		}
-	}
+	
+	// const float CurrentDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex - 1);
+	// const float NextDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex);
+	//
+	// for (float Distance = CurrentDistance; Distance <= NextDistance; Distance += SafetyCheckStepSize)
+	// {
+	// 	const FVector CenterLocation = PathSplinePtr->GetLocationAtDistanceAlongSpline(
+	// 		Distance, ESplineCoordinateSpace::World);
+	//
+	// 	const TArray<FVector> TestOffsets = {
+	// 		FVector::ZeroVector,
+	// 		FVector(AgentRadius, 0.f, 0.f),
+	// 		FVector(-AgentRadius, 0.f, 0.f),
+	// 		FVector(0.f, AgentRadius, 0.f),
+	// 		FVector(0.f, -AgentRadius, 0.f),
+	// 		FVector(0.f, 0.f, AgentRadius),
+	// 		FVector(0.f, 0.f, -AgentRadius)
+	// 	};
+	//
+	// 	for (const FVector& Offset : TestOffsets)
+	// 	{
+	// 		const FVector TestLocation = CenterLocation + Offset;
+	//
+	// 		if (VoxelVolume->IsLocationInBlockedVoxel(TestLocation))
+	// 		{
+	// 			return false;
+	// 		}
+	// 	} 
+	// }
 
 	return true;
 }
