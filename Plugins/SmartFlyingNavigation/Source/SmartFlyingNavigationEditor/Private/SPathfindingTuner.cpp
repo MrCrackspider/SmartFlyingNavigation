@@ -822,10 +822,12 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
 					.MaxSliderValue(200.0f)
 				]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 0.0f, 8.0f, 5.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 4.0f, 8.0f, 5.0f)
 			[
 				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
+				+ SHorizontalBox::Slot()
+				.FillWidth(0.4f)
+				.VAlign(VAlign_Center)
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("FinalAgentRadiusLabel", "Pathfinding Radius (Scaled):"))
@@ -837,11 +839,11 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
 				+ SHorizontalBox::Slot()
 				.FillWidth(0.6f)
 				.VAlign(VAlign_Center)
-				.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+				.Padding(6.f,0.f,0.f,0.f)
 				[
 					SNew(STextBlock)
 					.Text(this, &SPathfindingTuner::GetFinalAgentRadiusAsText)
-					.Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont"))
+					.Font(FAppStyle::GetFontStyle("LargeFont")) 
 					.ToolTipText(LOCTEXT("FinalRadiusTooltip",
 					                     "The actual radius used for pathfinding, calculated from Base Radius and the agent's scale. This is a read-only value."))
 					.ColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.7f, 0.f)))
