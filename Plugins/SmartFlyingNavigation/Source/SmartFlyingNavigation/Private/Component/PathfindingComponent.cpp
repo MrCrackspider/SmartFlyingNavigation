@@ -423,7 +423,7 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
    float RemainingMoveDistance = FinalVelocity.Size() * DeltaTime;
     FVector CurrentLocation = Owner->GetActorLocation();
 
-    while (RemainingMoveDistance > KINDA_SMALL_NUMBER && !bIsReachDestination)
+	while (RemainingMoveDistance > KINDA_SMALL_NUMBER && !bIsReachDestination && FoundPath.IsValidIndex(CurrentPathDestinationIndex))
     {
         if (!FoundPath.IsValidIndex(CurrentPathDestinationIndex))
         {
