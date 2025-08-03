@@ -158,6 +158,10 @@ SPathfindingTuner::~SPathfindingTuner()
 TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
 {
 	const UPathfindingTunerSettings* TunerSettings = GetDefault<UPathfindingTunerSettings>();
+	
+	// UAvoidanceSubsystem의 Class Default Object(CDO)를 한 번만 가져와서 재사용합니다.
+	const UAvoidanceSubsystem* AvoidanceCDO = GetDefault<UAvoidanceSubsystem>();
+
 	return SNew(SExpandableArea)
 		.HeaderContent()
 		[
@@ -169,14 +173,14 @@ TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
 		.BodyContent()
 		[
 			SNew(SVerticalBox)
-			// --- Number of Worker Threads (이 부분은 변경 없음) ---
+
+			// --- Number of Worker Threads (변경 없음) ---
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			.Padding(8.0f, 5.0f)
 			[
 				SNew(SHorizontalBox)
-				.ToolTipText(LOCTEXT("NumThreadsTooltip",
-				                     "Sets the number of worker threads for pathfinding calculations.\nHigher values can process more requests simultaneously but will increase CPU usage."))
+				.ToolTipText(LOCTEXT("NumThreadsTooltip", "Sets the number of worker threads for pathfinding calculations.\nHigher values can process more requests simultaneously but will increase CPU usage."))
 
 				+ SHorizontalBox::Slot()
 				.FillWidth(0.4f)
@@ -202,7 +206,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
 				]
 			]
 
-			// --- Use Agent Avoidance 
+			// --- Use Agent Avoidance (첫 번째 체크박스) ---
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			.Padding(8.0f, 5.0f)
@@ -225,22 +229,58 @@ TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
 				.VAlign(VAlign_Center)
 				[
 					SNew(SCheckBox)
-								// [핵심 수정] IsChecked_Lambda가 GetDefault를 직접 호출하도록 변경
-					               .IsChecked_Lambda([this]() -> ECheckBoxState
-					               {
-						               // UAvoidanceSubsystem의 Class Default Object(CDO)를 가져옵니다.
-						               if (const UAvoidanceSubsystem* AvoidanceCDO = GetDefault<UAvoidanceSubsystem>())
-						               {
-							               // CDO의 프로퍼티 값을 직접 읽어 체크 상태를 반환합니다.
-							               // UAvoidanceSubsystem::GetbUseAvoidance()는 const 함수여야 합니다.
-							               return AvoidanceCDO->GetbUseAvoidance()
-								                      ? ECheckBoxState::Checked
-								                      : ECheckBoxState::Unchecked;
-						               }
-						               // CDO를 가져올 수 없는 경우 (매우 드묾)
-						               return ECheckBoxState::Undetermined;
-					               })
-					               .OnCheckStateChanged(this, &SPathfindingTuner::OnbAvoidanceComitted)
+					.IsChecked_Lambda([AvoidanceCDO]() -> ECheckBoxState
+					{
+						// CDO가 유효한지 확인하고 프로퍼티 값을 읽어옵니다.
+						if (AvoidanceCDO)
+						{
+							// UAvoidanceSubsystem::bUseAvoidance 값을 직접 읽습니다.
+							return AvoidanceCDO->GetbUseAvoidance()
+								? ECheckBoxState::Checked
+								: ECheckBoxState::Unchecked;
+						}
+						return ECheckBoxState::Undetermined;
+					})
+					.OnCheckStateChanged(this, &SPathfindingTuner::OnbAvoidanceComitted)
+				]
+			]
+
+			// --- Show Velocity Debug Line (두 번째 체크박스) ---
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(8.0f, 5.0f)
+			[
+				SNew(SHorizontalBox)
+				.ToolTipText(LOCTEXT("ShowAvoidanceVelocityDebugTooltip", "If enabled, shows a debug line representing the agent's avoidance velocity."))
+
+				+ SHorizontalBox::Slot()
+				.FillWidth(0.4f)
+				.VAlign(VAlign_Center)
+				.Padding(0, 0, 10, 0)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("ShowAvoidanceVelocityDebugLabel", "Show Velocity Debug Line"))
+					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+				]
+
+				+ SHorizontalBox::Slot()
+				.FillWidth(0.6f)
+				.VAlign(VAlign_Center)
+				[
+					SNew(SCheckBox)
+					.IsChecked_Lambda([AvoidanceCDO]() -> ECheckBoxState
+					{
+						// CDO가 유효한지 확인하고 프로퍼티 값을 읽어옵니다.
+						if (AvoidanceCDO)
+						{
+							// UAvoidanceSubsystem::bShowVelocityDebugLine 값을 직접 읽습니다.
+							return AvoidanceCDO->GetbShowVelocityDebugLine()
+								? ECheckBoxState::Checked
+								: ECheckBoxState::Unchecked;
+						}
+						return ECheckBoxState::Undetermined;
+					})
+					.OnCheckStateChanged(this, &SPathfindingTuner::OnbAvoidanceVelocityDebugComitted)
 				]
 			]
 		]
@@ -1689,6 +1729,17 @@ void SPathfindingTuner::OnbAvoidanceComitted(ECheckBoxState NewState)
 	{
 		const bool bUseAvoidance = (NewState == ECheckBoxState::Checked);
 		AvoidanceCDO->SetbUseAvoidance(bUseAvoidance);
+		AvoidanceCDO->SaveConfig();
+		Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+	}
+}
+
+void SPathfindingTuner::OnbAvoidanceVelocityDebugComitted(ECheckBoxState NewState)
+{
+	if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
+	{
+		const bool bUseAvoidance = (NewState == ECheckBoxState::Checked);
+		AvoidanceCDO->SetbShowVelocityDebugLine(bUseAvoidance);
 		AvoidanceCDO->SaveConfig();
 		Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 	}

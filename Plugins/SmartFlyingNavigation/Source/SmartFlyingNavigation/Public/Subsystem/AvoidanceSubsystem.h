@@ -61,6 +61,13 @@ public:
         const float InSideBiasMagnitude
     );
 
+
+    float GetGridCellSize() {return GridCellSize;}
+    void SetGridCellSize(float InGridCellSize) {GridCellSize = InGridCellSize;}
+    
+    bool GetbShowVelocityDebugLine() const{ return bShowVelocityDebugLine;}
+    void SetbShowVelocityDebugLine(bool bShow) { bShowVelocityDebugLine = bShow;} 
+    
 protected:
     // ~ Begin Tuning Parameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Avoidance|Tuning")
@@ -100,7 +107,9 @@ private:
 
     FVector SolveOptimalVelocity(const TArray<FPlane>& Constraints, const FVector& PreferredVelocity) const;
 
+    UPROPERTY(Config)
     bool bShowVelocityDebugLine;
+    
     void DebugVisualizeVelocities(const UPathfindingComponent* Agent, const FThreadAvoidanceResult& Result, const FVector& FinalOptimalVelocity) const;
 
     UPROPERTY(Config)

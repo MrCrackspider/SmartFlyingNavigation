@@ -31,7 +31,6 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     SolverIterations = 5;
     SideBiasMagnitude = 10.f;
     InterpSpeed = 10.f;
-    bShowVelocityDebugLine = true;
 }
 
 void UAvoidanceSubsystem::PostInitialize()

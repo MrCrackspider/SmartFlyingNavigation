@@ -114,6 +114,7 @@ private:
     TOptional<ECheckBoxState> GetbPeriodicRepathState() const;
     void OnbPeriodicRepathChanged(ECheckBoxState NewState);
     void OnbAvoidanceComitted(ECheckBoxState NewState);
+    void OnbAvoidanceVelocityDebugComitted(ECheckBoxState NewState);
 
     // --- Agent Settings ---
     bool AreOnlyAgentsSelected() const;
