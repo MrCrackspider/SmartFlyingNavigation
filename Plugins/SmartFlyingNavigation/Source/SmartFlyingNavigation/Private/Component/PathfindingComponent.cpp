@@ -414,61 +414,101 @@ FVector UPathfindingComponent::GetPreferredVelocity() const
 
 void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float DeltaTime)
 {
-	AActor* Owner = GetOwner();
-	if (!Owner || FoundPath.IsEmpty() || bIsReachDestination)
-	{
-		return;
-	}
-	
-	// 1. 단순하게 이동: 예측이나 계산 없이, 주어진 속도로 그냥 움직입니다.
-	const FVector MoveDelta = FinalVelocity * DeltaTime;
-	FHitResult HitResult;
-	Owner->AddActorWorldOffset(MoveDelta, true, &HitResult);
+    AActor* Owner = GetOwner();
+    if (!Owner || bIsReachDestination || FinalVelocity.IsNearlyZero())
+    {
+        return;
+    }
 
-	AdjustProgressToSpline(MoveDelta);
-	
-	FRotator InterpolatedRotation = FMath::RInterpTo(CurrentVelocity.ToOrientationRotator(), MoveDelta.ToOrientationRotator(), DeltaTime, 5.f);
-	Owner->SetActorRotation(InterpolatedRotation);
-	
-	// 2. 물리적 충돌 처리: 실제로 부딪혔을 때만 비상 상황을 선포합니다.
-	if (HitResult.bBlockingHit)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Movement physically blocked by %s. Invalidating path."), *HitResult.GetActor()->GetName());
-		InvalidatePathAndRequestRepath(); // 이 함수는 상태를 명확히 바꾸는 최종 버전이어야 합니다.
-		return;
-	}
+   float RemainingMoveDistance = FinalVelocity.Size() * DeltaTime;
+    FVector CurrentLocation = Owner->GetActorLocation();
 
-	// 3. [핵심] 도착 판단: 이동이 끝난 '현재' 위치를 기준으로, 목표에 충분히 가까워졌는지 확인합니다.
-	//    루프를 사용하여, 한 프레임에 여러 웨이포인트를 통과하는 경우도 완벽하게 처리합니다.
-	bool bAdvanced;
-	float AcceptanceRadius = 100.0f;
-	do
-	{
-		bAdvanced = false;
-		if (FoundPath.IsValidIndex(CurrentPathDestinationIndex))
-		{
-			const float DistToTargetSq = FVector::DistSquared(Owner->GetActorLocation(), FoundPath[CurrentPathDestinationIndex]);
+    while (RemainingMoveDistance > KINDA_SMALL_NUMBER && !bIsReachDestination)
+    {
+        if (!FoundPath.IsValidIndex(CurrentPathDestinationIndex))
+        {
+            StopMovement();
+            break;
+        }
 
-			// 현재 위치가 목표 지점의 허용 반경 안에 있는가?
-			if (DistToTargetSq < FMath::Square(AcceptanceRadius))
-			{
-				// 도착했으므로, 다음 목표 지점으로 넘어갑니다.
-				ProgressNextPoint();
-				bAdvanced = true; // 경로가 바뀌었으니, 새 목표에 대해서도 바로 도착했는지 확인하기 위해 루프를 한 번 더 돕니다. 
-			}
-		}
-	}
-	while (bAdvanced && !bIsReachDestination); // 경로의 끝에 도달하면 루프를 멈춥니다.
+        const FVector TargetWaypoint = FoundPath[CurrentPathDestinationIndex];
+        const FVector VectorToWaypoint = TargetWaypoint - CurrentLocation;
+        const float DistanceToWaypoint = VectorToWaypoint.Size();
+
+        const FVector DirectionToWaypoint = VectorToWaypoint.GetSafeNormal();
+
+        const float DistanceToMoveThisStep = FMath::Min(RemainingMoveDistance, DistanceToWaypoint);
+
+        FVector MoveDelta = DirectionToWaypoint * DistanceToMoveThisStep;
+        FVector NewLocation = CurrentLocation + MoveDelta;
+
+        FHitResult HitResult;
+        FCollisionQueryParams CollisionParams(NAME_None, false, Owner);
+        bool bBlocked = GetWorld()->SweepSingleByChannel(
+            HitResult,
+            CurrentLocation,
+            NewLocation,
+            FQuat::Identity,
+            ECC_WorldStatic,
+            FCollisionShape::MakeSphere(AgentRadius),
+            CollisionParams
+        );
+
+        if (bBlocked)
+        {
+           Owner->SetActorLocation(HitResult.Location);
+            UE_LOG(LogTemp, Warning, TEXT("Movement blocked by %s. Invalidating path."), *HitResult.GetActor()->GetName());
+            InvalidatePathAndRequestRepath();
+            return;
+        }
+
+    	Owner->SetActorLocation(NewLocation);
+        CurrentLocation = NewLocation;
+
+    	RemainingMoveDistance -= DistanceToMoveThisStep;
+
+        if (DistanceToWaypoint <= DistanceToMoveThisStep)
+        {
+            ProgressNextPoint();
+        }
+    }
+	// bool bAdvanced;
+	// float AcceptanceRadius = 100.0f;
+	// do
+	// {
+	// 	bAdvanced = false;
+	// 	if (FoundPath.IsValidIndex(CurrentPathDestinationIndex))
+	// 	{
+	// 		const float DistToTargetSq = FVector::DistSquared(Owner->GetActorLocation(), FoundPath[CurrentPathDestinationIndex]);
+	//
+	// 		// 현재 위치가 목표 지점의 허용 반경 안에 있는가?
+	// 		if (DistToTargetSq < FMath::Square(AcceptanceRadius))
+	// 		{
+	// 			// 도착했으므로, 다음 목표 지점으로 넘어갑니다.
+	// 			ProgressNextPoint();
+	// 			bAdvanced = true; // 경로가 바뀌었으니, 새 목표에 대해서도 바로 도착했는지 확인하기 위해 루프를 한 번 더 돕니다. 
+	// 		}
+	// 	}
+	// }
+	// while (bAdvanced && !bIsReachDestination); // 경로의 끝에 도달하면 루프를 멈춥니다.
+    if (!FinalVelocity.IsNearlyZero())
+    {
+        FRotator TargetRotation = FinalVelocity.ToOrientationRotator();
+        Owner->SetActorRotation(FMath::RInterpTo(Owner->GetActorRotation(), TargetRotation, DeltaTime, 5.0f));
+    }
 }
 
-void UPathfindingComponent::AdjustProgressToSpline(const FVector& FinalVelocity)
+void UPathfindingComponent::AdjustProgressToSpline(const FVector& MoveDelta)
 {
 	if (!IsValid(PathSplinePtr) || PathSplinePtr->GetNumberOfSplinePoints() < 2)
 	{
 		return;
 	}
-		
-	DistanceAlongSpline += FinalVelocity.Length();
+
+	FVector SplineTangent = PathSplinePtr->GetDirectionAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::World).GetSafeNormal();
+	float ForwardDist = FVector::DotProduct(MoveDelta, SplineTangent);
+	DistanceAlongSpline += ForwardDist;
+	//DistanceAlongSpline += MoveDelta.Length();
 	
 	// const FVector SplineDirection = PathSplinePtr->GetDirectionAtDistanceAlongSpline(
 	// 		DistanceAlongSpline, ESplineCoordinateSpace::World);
