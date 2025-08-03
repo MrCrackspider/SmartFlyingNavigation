@@ -65,6 +65,9 @@ public:
 	bool RequestLocalPath_Internal(const FVector& Start, const FVector& End, AOctreeVoxelVolume* Volume);
 
 	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+	void StartPathfinding();
+
+	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
 	bool RequestPathToTargetActor();
 
 	UFUNCTION(BlueprintCallable, Category = "Pathfinding")

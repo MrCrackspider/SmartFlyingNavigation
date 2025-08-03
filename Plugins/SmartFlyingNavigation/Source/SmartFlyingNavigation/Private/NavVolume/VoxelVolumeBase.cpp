@@ -57,7 +57,7 @@ void AVoxelVolumeBase::BeginPlay()
 	Super::BeginPlay();
 
 #if WITH_EDITOR
-	UE_LOG(LogTemp, Warning, TEXT("CHUNK LOADED: %s at %s"), *GetActorLabel(), *GetActorLocation().ToString());
+	//UE_LOG(LogTemp, Warning, TEXT("CHUNK LOADED: %s at %s"), *GetActorLabel(), *GetActorLocation().ToString());
 #endif
 	
 	// If debug drawing is enabled, set a timer to update the visualization.
@@ -145,7 +145,7 @@ void AVoxelVolumeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 	
 #if WITH_EDITOR 
-	UE_LOG(LogTemp, Error, TEXT("CHUNK UNLOADED: %s (Reason: %s)"), *GetActorLabel(), *ReasonString);
+	//UE_LOG(LogTemp, Error, TEXT("CHUNK UNLOADED: %s (Reason: %s)"), *GetActorLabel(), *ReasonString);
 #endif
 	
 	// Clear the debug update timer.

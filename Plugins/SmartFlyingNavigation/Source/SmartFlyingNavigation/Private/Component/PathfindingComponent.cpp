@@ -58,7 +58,6 @@ void UPathfindingComponent::BeginPlay()
 		PathSplinePtr->SetupAttachment(GetOwner()->GetRootComponent());
 	}
 
-
 	AvoidanceSubsystem = World->GetSubsystem<UAvoidanceSubsystem>();
 	if (AvoidanceSubsystem)
 	{
@@ -177,25 +176,29 @@ void UPathfindingComponent::OnRegister()
 
 void UPathfindingComponent::OnVolumeBecameReadyForPendingRequest(AOctreeVoxelVolume* RegisteredVolume)
 {
-	// 펜딩된 요청이 없거나, 등록된 볼륨이 내가 기다리던 볼륨이 아니면 무시
-	if (!bHasPendingPathRequest) return;
+	if (!bHasPendingPathRequest)
+	{
+		if (UOctreeNavSubsystem* NavSubsystem = GetWorld()->GetSubsystem<UOctreeNavSubsystem>())
+		{
+			NavSubsystem->OnVolumeRegistered.RemoveDynamic(this, &UPathfindingComponent::OnVolumeBecameReadyForPendingRequest);
+		}
+		return;
+	}
 
 	UOctreeNavSubsystem* NavSubsystem = GetWorld()->GetSubsystem<UOctreeNavSubsystem>();
 	if (!NavSubsystem) return;
 
 	AOctreeVoxelVolume* CurrentVolume = NavSubsystem->GetVolumeChunkAt(GetOwner()->GetActorLocation());
-	if (RegisteredVolume != CurrentVolume) return;
 
-	UE_LOG(LogTemp, Log, TEXT("Start volume '%s' is now ready. Executing pending path request."),
-	       *RegisteredVolume->GetName());
+	if (CurrentVolume && CurrentVolume->IsReadyForNavigation())
+	{
+		UE_LOG(LogTemp, Log, TEXT("PathfindingComponent: Pending request resumed. Start volume '%s' is now ready."), *CurrentVolume->GetName());
 
-	bHasPendingPathRequest = false;
+		bHasPendingPathRequest = false;
+		NavSubsystem->OnVolumeRegistered.RemoveDynamic(this, &UPathfindingComponent::OnVolumeBecameReadyForPendingRequest);
 
-	// 델리게이트는 이제 필요 없으므로 해제
-	NavSubsystem->OnVolumeRegistered.RemoveDynamic(this, &UPathfindingComponent::OnVolumeBecameReadyForPendingRequest);
-
-	// 저장해둔 목표 지점으로 길찾기를 다시 요청
-	RequestPathToLocation(PendingTargetLocation);
+		RequestPathToLocation(PendingTargetLocation);
+	}
 }
 
 bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
@@ -214,7 +217,7 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	}
 
 	// --- 2. 시작 볼륨이 아직 준비되지 않은 경우, 요청을 보류합니다. ---
-	if (!StartVolume->IsReadyForNavigation())
+	if (!StartVolume || !StartVolume->IsReadyForNavigation())
 	{
 		UE_LOG(LogTemp, Log, TEXT("Start volume '%s' is not ready. Path request is pending."), *StartVolume->GetName());
 		bHasPendingPathRequest = true;
@@ -234,10 +237,6 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	// 시작 볼륨과 끝 볼륨이 동일하고, 유효하며, 준비된 상태입니다.
 	if (EndVolume && StartVolume == EndVolume)
 	{
-		// UE_LOG(LogTemp, Log, TEXT("Requesting LOCAL path within volume '%s'."), *StartVolume->GetName());
-		// 단일 볼륨 내 길찾기는 더 간단한 FPathfindingRequest를 직접 사용합니다.
-		// 이 경우 HandleWorldPathResult가 아닌 다른 콜백을 사용하거나, HandleWorldPathResult를 수정해야 합니다.
-		// 여기서는 기존 구조를 최대한 활용하기 위해 RequestLocalPath_Internal을 사용합니다.
 		return RequestLocalPath_Internal(StartLocation, TargetLocation, StartVolume);
 	}
 	// --- CASE B: 계층적 길찾기 ---
@@ -283,6 +282,10 @@ bool UPathfindingComponent::RequestLocalPath_Internal(const FVector& Start, cons
 	CurrentRequestID = PathfindingSubsystem->RequestPath(this, Request);
 
 	return CurrentRequestID != -1;
+}
+
+void UPathfindingComponent::StartPathfinding()
+{
 }
 
 void UPathfindingComponent::CreateOctreeDataSnapshot(const AOctreeVoxelVolume* OctreeVolume, FOctreePathfindingData& SnapshotData) const
@@ -538,7 +541,7 @@ bool UPathfindingComponent::IsOnSplineLine() const
 }
 
 void UPathfindingComponent::DetermineMovementModeForNextPath()
-{	
+{
 	if (IsSplinePathSafe())
 	{
 		SetMovementMode(EPathMovementMode::Spline);

@@ -8,7 +8,7 @@
 #include "OctreeNavSubsystem.generated.h"
 
 class UOctreeDataAsset;
-
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnNavSubsystemReady);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVolumeRegistered, AOctreeVoxelVolume*, RegisteredVolume);
 
 /**
@@ -25,8 +25,13 @@ public:
 	void RegisterVolumeChunk(AOctreeVoxelVolume* Volume);
 	void UnregisterVolumeChunk(AOctreeVoxelVolume* Volume);
 
+	void UpdateVolumeDataAssetMapping(AOctreeVoxelVolume* Volume);
+
 	AOctreeVoxelVolume* GetVolumeChunkAt(const FVector& WorldLocation) const;
 	AOctreeVoxelVolume* GetVolumeByDataAsset(const TSoftObjectPtr<UOctreeDataAsset>& DataAsset) const;
+
+	UPROPERTY(BlueprintAssignable, Category = "Navigation")
+	FOnNavSubsystemReady OnSubsystemReady;
 
 	UPROPERTY(BlueprintAssignable, Category = "Navigation")
 	FOnVolumeRegistered OnVolumeRegistered;
@@ -47,4 +52,9 @@ protected:
 
 	UPROPERTY()
 	TMap<TSoftObjectPtr<UOctreeDataAsset>, TObjectPtr<AOctreeVoxelVolume>> VolumeDataAssetMap;
+
+private:
+	bool bIsReady = false;
+public:
+	bool IsReady() const { return bIsReady; }
 };

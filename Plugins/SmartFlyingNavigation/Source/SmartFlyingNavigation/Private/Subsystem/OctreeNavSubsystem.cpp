@@ -7,6 +7,9 @@
 void UOctreeNavSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+
+
+	bIsReady = false;
 }
 
 void UOctreeNavSubsystem::RegisterVolumeChunk(AOctreeVoxelVolume* Volume)
@@ -14,10 +17,6 @@ void UOctreeNavSubsystem::RegisterVolumeChunk(AOctreeVoxelVolume* Volume)
 	if (IsValid(Volume))
 	{
 		RegisteredVolumeChunks.AddUnique(Volume);
-		if (Volume->GetBakedOctreeData().IsValid())
-		{
-			VolumeDataAssetMap.Add(Volume->GetBakedOctreeData(), Volume);
-		}
 	}
 }
 
@@ -30,6 +29,15 @@ void UOctreeNavSubsystem::UnregisterVolumeChunk(AOctreeVoxelVolume* Volume)
 		{
 			VolumeDataAssetMap.Remove(Volume->GetBakedOctreeData());
 		}
+	}
+}
+
+void UOctreeNavSubsystem::UpdateVolumeDataAssetMapping(AOctreeVoxelVolume* Volume)
+{
+	if (IsValid(Volume) && Volume->GetBakedOctreeData().IsValid())
+	{
+		VolumeDataAssetMap.Add(Volume->GetBakedOctreeData(), Volume);
+		UE_LOG(LogTemp, Log, TEXT("VolumeDataAssetMap updated for Volume '%s' with DataAsset '%s'"), *Volume->GetName(), *Volume->GetBakedOctreeData().ToString());
 	}
 }
 

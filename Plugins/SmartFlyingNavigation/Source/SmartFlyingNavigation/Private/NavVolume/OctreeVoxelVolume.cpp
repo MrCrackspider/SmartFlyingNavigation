@@ -56,15 +56,15 @@ void AOctreeVoxelVolume::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (UWorld* World = GetWorld())
-	{
-		if (UOctreeNavSubsystem* NavSubsystem = World->GetSubsystem<UOctreeNavSubsystem>())
-		{
-			NavSubsystem->RegisterVolumeChunk(this);
-		}
-	}
+	//if (UWorld* World = GetWorld())
+	//{
+	//	if (UOctreeNavSubsystem* NavSubsystem = World->GetSubsystem<UOctreeNavSubsystem>())
+	//	{
+	//		NavSubsystem->RegisterVolumeChunk(this);
+	//	}
+	//}
 
-	RequestAsyncLoad();
+	//RequestAsyncLoad();
 
 
 	{
@@ -114,6 +114,8 @@ void AOctreeVoxelVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void AOctreeVoxelVolume::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
+
+	RequestAsyncLoad();
 
 	if (UWorld* World = GetWorld())
 	{
@@ -1108,6 +1110,7 @@ void AOctreeVoxelVolume::OnDataAssetLoaded()
 			{
 				if (UOctreeNavSubsystem* NavSubsystem = World->GetSubsystem<UOctreeNavSubsystem>())
 				{
+					NavSubsystem->UpdateVolumeDataAssetMapping(this);
 					NavSubsystem->OnVolumeRegistered.Broadcast(this);
 				}
 			}
