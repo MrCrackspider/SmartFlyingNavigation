@@ -16,6 +16,8 @@
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
 #include "PropertyCustomizationHelpers.h"
+#include "Widgets/Notifications/SNotificationList.h"
+#include "Framework/Notifications/NotificationManager.h"
 
 // Widgets
 #include "Widgets/SBoxPanel.h"
@@ -108,7 +110,7 @@ void SPathfindingTuner::Construct(const FArguments& InArgs)
 			[
 				BuildVoxelDebugSettingsSection()
 			]
-			
+
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			.Padding(2)
@@ -158,7 +160,7 @@ SPathfindingTuner::~SPathfindingTuner()
 TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
 {
 	const UPathfindingTunerSettings* TunerSettings = GetDefault<UPathfindingTunerSettings>();
-	
+
 	// UAvoidanceSubsystem의 Class Default Object(CDO)를 한 번만 가져와서 재사용합니다.
 	const UAvoidanceSubsystem* AvoidanceCDO = GetDefault<UAvoidanceSubsystem>();
 
@@ -180,7 +182,8 @@ TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
 			.Padding(8.0f, 5.0f)
 			[
 				SNew(SHorizontalBox)
-				.ToolTipText(LOCTEXT("NumThreadsTooltip", "Sets the number of worker threads for pathfinding calculations.\nHigher values can process more requests simultaneously but will increase CPU usage."))
+				.ToolTipText(LOCTEXT("NumThreadsTooltip",
+				                     "Sets the number of worker threads for pathfinding calculations.\nHigher values can process more requests simultaneously but will increase CPU usage."))
 
 				+ SHorizontalBox::Slot()
 				.FillWidth(0.4f)
@@ -236,8 +239,8 @@ TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
 						{
 							// UAvoidanceSubsystem::bUseAvoidance 값을 직접 읽습니다.
 							return AvoidanceCDO->GetbUseAvoidance()
-								? ECheckBoxState::Checked
-								: ECheckBoxState::Unchecked;
+								       ? ECheckBoxState::Checked
+								       : ECheckBoxState::Unchecked;
 						}
 						return ECheckBoxState::Undetermined;
 					})
@@ -251,7 +254,8 @@ TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
 			.Padding(8.0f, 5.0f)
 			[
 				SNew(SHorizontalBox)
-				.ToolTipText(LOCTEXT("ShowAvoidanceVelocityDebugTooltip", "If enabled, shows a debug line representing the agent's avoidance velocity."))
+				.ToolTipText(LOCTEXT("ShowAvoidanceVelocityDebugTooltip",
+				                     "If enabled, shows a debug line representing the agent's avoidance velocity."))
 
 				+ SHorizontalBox::Slot()
 				.FillWidth(0.4f)
@@ -275,8 +279,8 @@ TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
 						{
 							// UAvoidanceSubsystem::bShowVelocityDebugLine 값을 직접 읽습니다.
 							return AvoidanceCDO->GetbShowVelocityDebugLine()
-								? ECheckBoxState::Checked
-								: ECheckBoxState::Unchecked;
+								       ? ECheckBoxState::Checked
+								       : ECheckBoxState::Unchecked;
 						}
 						return ECheckBoxState::Undetermined;
 					})
@@ -879,11 +883,11 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAgentSettingsSection()
 				+ SHorizontalBox::Slot()
 				.FillWidth(0.6f)
 				.VAlign(VAlign_Center)
-				.Padding(6.f,0.f,0.f,0.f)
+				.Padding(6.f, 0.f, 0.f, 0.f)
 				[
 					SNew(STextBlock)
 					.Text(this, &SPathfindingTuner::GetFinalAgentRadiusAsText)
-					.Font(FAppStyle::GetFontStyle("LargeFont")) 
+					.Font(FAppStyle::GetFontStyle("LargeFont"))
 					.ToolTipText(LOCTEXT("FinalRadiusTooltip",
 					                     "The actual radius used for pathfinding, calculated from Base Radius and the agent's scale. This is a read-only value."))
 					.ColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.7f, 0.f)))
@@ -1828,8 +1832,9 @@ FText SPathfindingTuner::GetFinalAgentRadiusAsText() const
 	{
 		const float RadiusInUnits = CommonFinalRadius.GetValue() / 100.0f;
 
-		FString FormattedString = FString::Printf(TEXT("%.1f (%.2f unit)"), CommonFinalRadius.GetValue(), RadiusInUnits);
-		
+		FString FormattedString =
+			FString::Printf(TEXT("%.1f (%.2f unit)"), CommonFinalRadius.GetValue(), RadiusInUnits);
+
 		return FText::FromString(FormattedString);
 	}
 
@@ -1957,12 +1962,17 @@ FReply SPathfindingTuner::OnBakeButtonClicked()
 		}
 	}
 
+
+
 	// --- 3. 에디터 서브시스템에 작업 위임 ---
 	if (UPathfindingEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UPathfindingEditorSubsystem>())
 	{
 		EditorSubsystem->BakeSpecificVolumes(SelectedVolumes);
-		ShowWarningMessage(LOCTEXT("BakeSelectedComplete",
-		                           "Bake process for selected volumes completed successfully!"));
+		FNotificationInfo NotifyInfo(FText::FromString(TEXT("Bake Complete!")));
+		NotifyInfo.bUseLargeFont = true;
+		NotifyInfo.FadeOutDuration = 4.5f;
+
+		FSlateNotificationManager::Get().AddNotification(NotifyInfo);
 	}
 	else
 	{

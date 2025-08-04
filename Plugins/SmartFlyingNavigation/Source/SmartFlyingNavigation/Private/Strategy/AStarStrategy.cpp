@@ -359,19 +359,15 @@ void FAstarPathfinder::IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPat
 		{
 			const FOctreeNode& NeighborNode = PoolRef[NeighborNodeIndex];
 
-			FVector PortalCenter;
-			const FBox& CurrentBounds = CurrentNode.Bounds;
 			const FBox& NeighborBounds = NeighborNode.Bounds;
-
-			const FBox PortalBounds = CurrentBounds.Overlap(NeighborBounds);
-			PortalCenter = PortalBounds.GetCenter();
-
-			if (HasClearPath(Node->WorldPosition, PortalCenter))
+			FVector NeighborCenter = NeighborBounds.GetCenter();
+			
+			if (HasClearPath(Node->WorldPosition, NeighborCenter))
 			{
 				FAstarPathNode* Successor = MemoryPool.NewNode();
 				Successor->NodeIndex = NeighborNodeIndex;
 
-				Successor->WorldPosition = PortalCenter;
+				Successor->WorldPosition = NeighborCenter;
 
 				OutSuccessors.Add(Successor);
 			}
