@@ -210,16 +210,16 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	AOctreeVoxelVolume* StartVolume = NavSubsystem->GetVolumeChunkAt(StartLocation);
 
 	// --- 1. 시작 볼륨 유효성 검사 ---
-	if (!StartVolume)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Pathfinding request failed: Agent is not inside any navigation volume."));
-		return false;
-	}
+	//if (!StartVolume)
+	//{
+	//	UE_LOG(LogTemp, Warning, TEXT("Pathfinding request failed: Agent is not inside any navigation volume."));
+	//	return false;
+	//}
 
 	// --- 2. 시작 볼륨이 아직 준비되지 않은 경우, 요청을 보류합니다. ---
 	if (!StartVolume || !StartVolume->IsReadyForNavigation())
 	{
-		UE_LOG(LogTemp, Log, TEXT("Start volume '%s' is not ready. Path request is pending."), *StartVolume->GetName());
+		UE_LOG(LogTemp, Log, TEXT("Start volume is not ready. Path request is pending."));
 		bHasPendingPathRequest = true;
 		PendingTargetLocation = TargetLocation;
 		NavSubsystem->OnVolumeRegistered.RemoveDynamic(this, &UPathfindingComponent::OnVolumeBecameReadyForPendingRequest);
@@ -323,7 +323,7 @@ bool UPathfindingComponent::RequestPathToTargetActor()
 	if (!IsValid(TargetActor))
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("TargetActor is not valid!"));
-		return false;
+		return false;	
 	}
 
 	return RequestPathToLocation(TargetActor->GetActorLocation());
@@ -1049,7 +1049,9 @@ bool UPathfindingComponent::IsSplinePathSafe() const
 		}
 		return true;
 	}
-	
+
+	// Begin Test
+	// 이거 쓰면 HPA*가 정상 작동 안하는데
 	const float CurrentDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex - 1);
 	const float NextDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex);
 	
@@ -1078,6 +1080,7 @@ bool UPathfindingComponent::IsSplinePathSafe() const
 			}
 		} 
 	}
+	// End Test
 
 	return true;
 }

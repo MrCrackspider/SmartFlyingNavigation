@@ -67,6 +67,7 @@ void AOctreeVoxelVolume::BeginPlay()
 	//RequestAsyncLoad();
 
 
+
 	{
 		const FVector TotalSize = GetVolumeBounds().GetSize();
 		const FIntVector CalculatedMapSize(
@@ -848,12 +849,21 @@ bool AOctreeVoxelVolume::GetBakedAssetPath(FString& OutPackagePath, FString& Out
 	return true;
 }
 
+#if WITH_EDITORONLY_DATA
 void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 {
 	Super::UpdateDebugObstacleVisualization();
-#if WITH_EDITORONLY_DATA
+
 	if (!VolumeBox || bIsUpdatingVisualization)
 	{
+		return;
+	}
+
+	if (LoadState != EVolumeLoadState::Loaded || RootNodeIndex == -1 || !StaticNodePoolPtr || StaticNodePoolPtr->IsEmpty())
+	{
+		// 기존에 그려진 디버그 메시가 있다면 깨끗하게 지웁니다.
+		if (DebugSolidNodesComponent) DebugSolidNodesComponent->ClearInstances();
+		if (DebugMixedNodesComponent) DebugMixedNodesComponent->ClearInstances();
 		return;
 	}
 
@@ -861,25 +871,63 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 	TWeakObjectPtr<AOctreeVoxelVolume> WeakThis(this);
 	const FBox InitialBounds = VolumeBox->Bounds.GetBox();
 
-	// 1. Collect node information asynchronously to avoid blocking the game thread.
-	Async(EAsyncExecution::ThreadPool, [WeakThis, InitialBounds]()
+	TArray<FOctreeNode> NodePoolCopy;
+	{
+		FScopeLock Lock(&NodePoolCS);
+		NodePoolCopy = *StaticNodePoolPtr;
+	}
+	const int32 RootIdxCopy = RootNodeIndex;
+	const int32 MaxDepthCopy = GetMaxOctreeDepth();
+
+
+	Async(EAsyncExecution::ThreadPool, [WeakThis, InitialBounds, NodePoolCopy, RootIdxCopy, MaxDepthCopy]()
 		{
-			if (!WeakThis.IsValid() || WeakThis->RootNodeIndex == -1)
+			if (!WeakThis.IsValid())
 			{
-				if (WeakThis.IsValid()) WeakThis->bIsUpdatingVisualization = false;
 				return;
 			}
 
 			TArray<FDebugNodeInfo> NodesToDraw;
-			WeakThis->GetDebugNodeInfoRecursive(NodesToDraw, WeakThis->RootNodeIndex, InitialBounds, 0);
+			TFunction<void(int32, const FBox&, int32)> GetDebugInfoRecursive_Safe;
+			GetDebugInfoRecursive_Safe =
+				[&](int32 NodeIndex, const FBox& NodeBounds, int32 CurrentDepth)
+				{
+					constexpr int32 ABSOLUTE_MAX_DEPTH = 32;
+					if (CurrentDepth > ABSOLUTE_MAX_DEPTH)
+					{
+						UE_LOG(LogTemp, Error, TEXT("GetDebugInfoRecursive_Safe: Exceeded absolute max depth! Possible infinite recursion detected."));
+						return;
+					}
 
-			// 2. Schedule the instance update back on the game thread with the collected data.
+					if (!NodePoolCopy.IsValidIndex(NodeIndex) || CurrentDepth > MaxDepthCopy)
+					{
+						return;
+					}
+
+					const FOctreeNode& Node = NodePoolCopy[NodeIndex];
+					if (Node.State != EOctreeNodeState::Mixed || CurrentDepth == MaxDepthCopy)
+					{
+						NodesToDraw.Add({ NodeIndex, NodeBounds, Node.State });
+					}
+					else
+					{
+						for (int i = 0; i < 8; ++i)
+						{
+							if (Node.ChildrenIndices[i] != -1)
+							{
+								GetDebugInfoRecursive_Safe(Node.ChildrenIndices[i], WeakThis->CalculateChildBounds(NodeBounds, i), CurrentDepth + 1);
+							}
+						}
+					}
+				};
+
+			GetDebugInfoRecursive_Safe(RootIdxCopy, InitialBounds, 0);
+
 			AsyncTask(ENamedThreads::GameThread, [WeakThis, NodesToDraw = MoveTemp(NodesToDraw)]()
 				{
 					AOctreeVoxelVolume* StrongThis = WeakThis.Get();
 					if (!StrongThis) return;
 
-					// Clear all existing debug instances.
 					if (StrongThis->DebugSolidNodesComponent) StrongThis->DebugSolidNodesComponent->ClearInstances();
 					if (StrongThis->DebugMixedNodesComponent) StrongThis->DebugMixedNodesComponent->ClearInstances();
 
@@ -889,11 +937,10 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 						return;
 					}
 
-					// Collect transforms for each node type.
 					TArray<FTransform> SolidTransforms, MixedTransforms;
 					for (const FDebugNodeInfo& NodeInfo : NodesToDraw)
 					{
-						const FVector Scale = NodeInfo.Bounds.GetSize() / 100.0f; // Assuming 100-unit debug mesh.
+						const FVector Scale = NodeInfo.Bounds.GetSize() / 100.0f; 
 						const FTransform NodeTransform(FRotator::ZeroRotator, NodeInfo.Bounds.GetCenter(), Scale);
 
 						if (NodeInfo.State == EOctreeNodeState::Solid && StrongThis->DebugSolidNodesComponent)
@@ -906,7 +953,7 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 						}
 					}
 
-					// Batch-add the new instances. Using bWorldSpace=true is simpler here.
+					// 배치(Batch) 추가로 성능을 최적화합니다.
 					if (StrongThis->DebugSolidNodesComponent && !SolidTransforms.IsEmpty())
 					{
 						StrongThis->DebugSolidNodesComponent->AddInstances(SolidTransforms, false, true);
@@ -919,8 +966,8 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 					StrongThis->bIsUpdatingVisualization = false;
 				});
 		});
-#endif
 }
+#endif
 
 // ======================================================================
 // Query Helpers - Implementation
