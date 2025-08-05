@@ -231,31 +231,34 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	bHasPendingPathRequest = false; // 보류 중인 요청이 있었다면 해제
 	CurrentTargetLocation = TargetLocation;
 
-	AOctreeVoxelVolume* EndVolume = NavSubsystem->GetVolumeChunkAt(TargetLocation);
-
+	return RequestLocalPath_Internal(StartLocation, TargetLocation, StartVolume);
+	
+	// AOctreeVoxelVolume* EndVolume = NavSubsystem->GetVolumeChunkAt(TargetLocation);
+	//
 	// --- CASE A: 명백한 로컬 길찾기 ---
 	// 시작 볼륨과 끝 볼륨이 동일하고, 유효하며, 준비된 상태입니다.
-	if (EndVolume && StartVolume == EndVolume)
-	{
-		return RequestLocalPath_Internal(StartLocation, TargetLocation, StartVolume);
-	}
-	// --- CASE B: 계층적 길찾기 ---
-	// 끝 볼륨이 다르거나, 스트리밍되지 않아 null인 경우입니다.
-	else
-	{
-		UE_LOG(LogTemp, Log, TEXT("Requesting HIERARCHICAL path from '%s' to an external or unloaded volume."), *StartVolume->GetName());
-
-		FHierarchicalPathRequest HRequest;
-		HRequest.RequestingComponent = this;
-		HRequest.StartLocation = StartLocation;
-		HRequest.EndLocation = TargetLocation;
-		HRequest.AgentRadius = this->AgentRadius;
-		HRequest.Strategy = PathfindingStrategy;
-		HRequest.OnHierarchicalPathComplete.BindDynamic(this, &UPathfindingComponent::HandleWorldPathResult);
-
-		CurrentRequestID = PathfindingSubsystem->RequestHierarchicalPath(this, HRequest);
-		return CurrentRequestID != -1;
-	}
+	// if (EndVolume && StartVolume == EndVolume)
+	// {
+	// 	return RequestLocalPath_Internal(StartLocation, TargetLocation, StartVolume);
+	// }
+	// // --- CASE B: 계층적 길찾기 ---
+	// // 끝 볼륨이 다르거나, 스트리밍되지 않아 null인 경우입니다.
+	// else
+	// {
+	// 	UE_LOG(LogTemp, Log, TEXT("Requesting HIERARCHICAL path from '%s' to an external or unloaded volume."), *StartVolume->GetName());
+	//
+	// 	FHierarchicalPathRequest HRequest;
+	// 	HRequest.RequestingComponent = this;
+	// 	HRequest.StartLocation = StartLocation;
+	// 	HRequest.EndLocation = TargetLocation;
+	// 	HRequest.AgentRadius = this->AgentRadius;
+	// 	HRequest.Strategy = PathfindingStrategy;
+	// 	HRequest.OnHierarchicalPathComplete.BindDynamic(this, &UPathfindingComponent::HandleWorldPathResult);
+	//
+	// 	// CurrentRequestID = PathfindingSubsystem->RequestHierarchicalPath(this, HRequest);
+	// 	CurrentRequestID = PathfindingSubsystem->RequestHierarchicalPath(this, HRequest);
+	// 	return CurrentRequestID != -1;
+	// }
 }
 
 bool UPathfindingComponent::RequestLocalPath_Internal(const FVector& Start, const FVector& End,
