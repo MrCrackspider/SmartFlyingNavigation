@@ -99,7 +99,7 @@ public:
 	void SetMaxOctreeDepth(int32 Depth) { MaxOctreeDepth = Depth; }
 
 	/** Returns the configured maximum depth of the octree. */
-	FORCEINLINE int32 GetMaxOctreeDepth() const { return static_cast<int>(std::log2(GetMapSize().X));; }
+	FORCEINLINE int32 GetMaxOctreeDepth() const { return static_cast<int>(std::log2(GetMapSize().X)); }
 
 	/**
 	 * Sets the filter used to identify static objects during the baking process.

@@ -299,6 +299,11 @@ public:
 
 	bool IsPathDynamicallyBlocked_Sweep(const FVector& Start, const FVector& End, float AgentRadius) const
 	{
+		if (AgentRadius <= 0.f)
+		{
+			return false;
+		}
+		
 		const FVector PathVector = End - Start;
 		const float TotalDistance = PathVector.Size();
 		if (TotalDistance < KINDA_SMALL_NUMBER)

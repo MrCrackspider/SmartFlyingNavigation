@@ -283,24 +283,24 @@ void UPathfindingSubsystem::Tick(float DeltaTime)
 
 	for (const FPathfindingResult& Result : TasksToProcessThisFrame)
 	{
-		// bool bIsHierarchicalSegment = false;
-		// for (auto& Elem : ActiveHierarchicalTasks)
-		// {
-		// 	if (Elem.Value.LastLocalRequestID == Result.Request.RequestID)
-		// 	{
-		// 		OnHierarchicalSegmentCompleted(Elem.Key, Result.WorldPath, Result.bSuccess);
-		// 		bIsHierarchicalSegment = true;
-		// 		break;
-		// 	}
-		// }
-		//
-		// if (!bIsHierarchicalSegment)
-		// {
-		// 	OnPathfindingCompleted(Result.Request, Result.WorldPath, Result.bSuccess);
-		// }
+		bool bIsHierarchicalSegment = false;
+		for (auto& Elem : ActiveHierarchicalTasks)
+		{
+			if (Elem.Value.LastLocalRequestID == Result.Request.RequestID)
+			{
+				OnHierarchicalSegmentCompleted(Elem.Key, Result.WorldPath, Result.bSuccess);
+				bIsHierarchicalSegment = true;
+				break;
+			}
+		}
+		
+		if (!bIsHierarchicalSegment)
+		{
+			OnPathfindingCompleted(Result.Request, Result.WorldPath, Result.bSuccess);
+		}
 
 		// Use this until develop hierachy path finding
-		OnPathfindingCompleted(Result.Request, Result.WorldPath, Result.bSuccess);
+		// OnPathfindingCompleted(Result.Request, Result.WorldPath, Result.bSuccess);
 	}
 
 	UOctreeNavSubsystem* NavSubsystem = GetWorld()->GetSubsystem<UOctreeNavSubsystem>();
@@ -458,6 +458,7 @@ void UPathfindingSubsystem::OnPathfindingCompleted(const FPathfindingRequest& Re
 	if (Request.RequestingObject.IsValid())
 	{
 		Request.OnWorldPathComplete.ExecuteIfBound(WorldPath, bSuccess);
+		//TasksToProcessThisFrame에서 remove해주기
 	}
 }
 

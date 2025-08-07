@@ -834,6 +834,11 @@ bool UPathfindingComponent::IsPathObstructed(const FVector& Start, const FVector
 		return true;
 	}
 
+	if (AgentRadius <= 0.f)
+	{
+		return false;
+	}
+
 	const FVector PathVector = End - Start;
 	const float TotalDistance = PathVector.Size();
 
