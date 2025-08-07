@@ -14,7 +14,6 @@ public:
     virtual void ShutdownModule() override;
 
 private:
-   
     TSharedRef<SDockTab> SpawnPathfindingTunerTab(const FSpawnTabArgs& SpawnTabArgs);
     TSharedPtr<FExtender> MenuExtender; 
 };

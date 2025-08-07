@@ -61,7 +61,6 @@ namespace PathfindingTunerStyleInternal
     }
 } // namespace PathfindingTunerStyleInternal
 
-
 void FSmartFlyingNavigationEditorModule::StartupModule()
 {
 	FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
@@ -78,8 +77,6 @@ void FSmartFlyingNavigationEditorModule::StartupModule()
     
     PathfindingTunerStyleInternal::Initialize();
     
-    FLevelEditorModule& LevelEditorModule = FModuleManager::LoadModuleChecked<FLevelEditorModule>("LevelEditor");
-    
     MenuExtender = MakeShareable(new FExtender()); 
     MenuExtender->AddMenuExtension(
         "WindowLayout",
@@ -93,7 +90,7 @@ void FSmartFlyingNavigationEditorModule::StartupModule()
                  .BorderImage(FAppStyle::GetBrush("Menu.Background"))
                  [
                      SNew(SHorizontalBox)
-
+    
                      + SHorizontalBox::Slot()
                      .Padding(FMargin(5.f, 0.0f, 5.0f, 0.0f))
                      .AutoWidth()
@@ -135,10 +132,12 @@ void FSmartFlyingNavigationEditorModule::StartupModule()
             );
         })
     );
+
+    FLevelEditorModule& LevelEditorModule = FModuleManager::LoadModuleChecked<FLevelEditorModule>("LevelEditor");
     
     LevelEditorModule.GetMenuExtensibilityManager()->AddExtender(MenuExtender);
 
-    FGlobalTabmanager::Get()->RegisterTabSpawner(PathfindingTunerTabName, 
+    FGlobalTabmanager::Get()->RegisterNomadTabSpawner(PathfindingTunerTabName, 
         FOnSpawnTab::CreateRaw(this, &FSmartFlyingNavigationEditorModule::SpawnPathfindingTunerTab)) 
         .SetDisplayName(FText::FromString("Pathfinding Tuner"))
         .SetIcon(FSlateIcon(PathfindingTunerStyleInternal::GetStyleSetName(), "PathfindingTuner.CustomIcon")) 
@@ -166,8 +165,10 @@ void FSmartFlyingNavigationEditorModule::ShutdownModule()
             MenuExtender.Reset(); 
         }
     }
-    PathfindingTunerStyleInternal::Shutdown(); 
+
+    FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(PathfindingTunerTabName);
     
+    PathfindingTunerStyleInternal::Shutdown(); 
 }
 
 TSharedRef<SDockTab> FSmartFlyingNavigationEditorModule::SpawnPathfindingTunerTab(const FSpawnTabArgs& SpawnTabArgs)
