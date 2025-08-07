@@ -45,11 +45,13 @@ void FPathfindingAsyncTasks::DoThreadedWork()
 	if (!OwnerSubsystem.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Pathfinding Task [%d] is aborting because the subsystem is no longer valid."), Request.RequestID);
-	
+
 		if (Request.MemoryPool)
 		{
-			OwnerSubsystem->ReturnPool(Request.MemoryPool);
+			delete Request.MemoryPool;
+			Request.MemoryPool = nullptr;
 		}
+		
 		delete this;
 		return;
 	}
@@ -173,6 +175,7 @@ void UPathfindingSubsystem::Deinitialize()
 	if (PathfindingThreadPool)
 	{
 		UE_LOG(LogTemp, Log, TEXT("Destroying PathfindingThreadPool."));
+
 		PathfindingThreadPool->Destroy();
 		PathfindingThreadPool = nullptr;
 	}
