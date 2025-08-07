@@ -175,7 +175,7 @@ void UPathfindingSubsystem::Deinitialize()
 	if (PathfindingThreadPool)
 	{
 		UE_LOG(LogTemp, Log, TEXT("Destroying PathfindingThreadPool."));
-
+		
 		PathfindingThreadPool->Destroy();
 		PathfindingThreadPool = nullptr;
 	}
@@ -283,21 +283,24 @@ void UPathfindingSubsystem::Tick(float DeltaTime)
 
 	for (const FPathfindingResult& Result : TasksToProcessThisFrame)
 	{
-		bool bIsHierarchicalSegment = false;
-		for (auto& Elem : ActiveHierarchicalTasks)
-		{
-			if (Elem.Value.LastLocalRequestID == Result.Request.RequestID)
-			{
-				OnHierarchicalSegmentCompleted(Elem.Key, Result.WorldPath, Result.bSuccess);
-				bIsHierarchicalSegment = true;
-				break;
-			}
-		}
+		// bool bIsHierarchicalSegment = false;
+		// for (auto& Elem : ActiveHierarchicalTasks)
+		// {
+		// 	if (Elem.Value.LastLocalRequestID == Result.Request.RequestID)
+		// 	{
+		// 		OnHierarchicalSegmentCompleted(Elem.Key, Result.WorldPath, Result.bSuccess);
+		// 		bIsHierarchicalSegment = true;
+		// 		break;
+		// 	}
+		// }
+		//
+		// if (!bIsHierarchicalSegment)
+		// {
+		// 	OnPathfindingCompleted(Result.Request, Result.WorldPath, Result.bSuccess);
+		// }
 
-		if (!bIsHierarchicalSegment)
-		{
-			OnPathfindingCompleted(Result.Request, Result.WorldPath, Result.bSuccess);
-		}
+		// Use this until develop hierachy path finding
+		OnPathfindingCompleted(Result.Request, Result.WorldPath, Result.bSuccess);
 	}
 
 	UOctreeNavSubsystem* NavSubsystem = GetWorld()->GetSubsystem<UOctreeNavSubsystem>();

@@ -132,11 +132,13 @@ FAstarPathfinder::FAstarPathfinder(const FOctreePathfindingData& InOctreeData, i
 EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_Pathfinder_FindPath_Internal);
-
+	
 	MemoryPool.Reset();
 	OpenSet.Empty();
 	OpenSetLookup.Empty();
 	ClosedSet.Empty();
+
+	UE_LOG(LogTemp, Error, TEXT("Radius: %f"), AgentRadius);
 
 	const TPathNodePtrCompare<FAstarPathNode> Predicate;
 
