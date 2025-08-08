@@ -497,86 +497,124 @@ void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 	PathSplinePtr->AddSplinePoint(FoundPath[AddIndex], ESplineCoordinateSpace::World, false);
 	PathSplinePtr->UpdateSpline();
 }
-
 void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess)
 {
-	if (!IsValid(PathSplinePtr))
-	{
-		return;
-	}
+    if (!IsValid(PathSplinePtr)) return;
 
-	if (!bSuccess || Path.IsEmpty())
-	{
-		if (bPeriodicRepath)
-		{
-			GetWorld()->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath, RepathCooldown, false);
-		}
-		return;
-	}
+    if (!bSuccess || Path.IsEmpty())
+    {
+        if (bPeriodicRepath)
+            GetWorld()->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath, RepathCooldown, false);
+        return;
+    }
 
-	// **--- Core Repath Logic: Find the most optimal point on the new path to join ---**
-	// **This prevents the agent from turning back to the start of the newly generated path.**
-	
-	const FVector CurrentLocation = GetOwner()->GetActorLocation();
-	TArray<FVector> NewPath;
+    const FVector CurrentLocation = GetOwner()->GetActorLocation();
 
+    int32 ClosestSegIdx = -1;
+    float ClosestDistSq = TNumericLimits<float>::Max();
+    FVector ClosestPoint = Path[0];
+    for (int32 i = 1; i < Path.Num(); ++i)
+    {
+        const FVector A = Path[i-1];
+        const FVector B = Path[i];
+        const FVector AB = B - A;
+        const float Den = FVector::DotProduct(AB, AB);
+        float t = (Den > KINDA_SMALL_NUMBER) ? FVector::DotProduct(CurrentLocation - A, AB) / Den : 0.f;
+        t = FMath::Clamp(t, 0.f, 1.f);
+        const FVector P = A + AB * t;
+        const float d2 = FVector::DistSquared(CurrentLocation, P);
+        if (d2 < ClosestDistSq)
+        {
+            ClosestDistSq = d2;
+            ClosestSegIdx = i;
+            ClosestPoint = P;
+        }
+    }
 
-	int32 FinalStartIndex = -1;
+	FVector ForwardDir = CurrentVelocity.IsNearlyZero() ? FVector::ZeroVector : CurrentVelocity.GetSafeNormal();
+    if (ForwardDir.IsNearlyZero() && ClosestSegIdx >= 1)
+    {
+        const FVector A = Path[ClosestSegIdx-1];
+        const FVector B = Path[ClosestSegIdx];
+        ForwardDir = (B - A).GetSafeNormal();
+    }
+    if (ForwardDir.IsNearlyZero())
+    {
+        ForwardDir = (Path.Last() - CurrentLocation).GetSafeNormal();
+    }
 
-	for (int32 i = 1; i < Path.Num(); ++i)
-	{
-		if (!IsPathObstructed(CurrentLocation, Path[i]))
-		{
-			FinalStartIndex = i;
-			break;
-		}
-	}
+	int32 JoinIdx = -1;
+    const int32 StartIdx = FMath::Max(1, ClosestSegIdx); // 최소 1부터
+    for (int32 j = StartIdx; j < Path.Num(); ++j)
+    {
+        if (FVector::DotProduct(Path[j] - CurrentLocation, ForwardDir) <= 0.f) continue;
+        if (!IsPathObstructed(CurrentLocation, Path[j]))
+        {
+            JoinIdx = j;
+            break;
+        }
+    }
 
-	NewPath.Add(CurrentLocation);
+    TArray<FVector> NewPath;
+    NewPath.Add(CurrentLocation);
 
-	if (FinalStartIndex != -1)
-	{
-		for (int32 i = FinalStartIndex; i < Path.Num(); ++i)
-		{
-			NewPath.Add(Path[i]);
-		}
-	}
-	else
-	{
-		NewPath.Append(Path);
-	}
+    if (JoinIdx >= 0)
+    {
+        for (int32 k = JoinIdx; k < Path.Num(); ++k) NewPath.Add(Path[k]);
+    }
+    else
+    {
+        const float Step = FMath::Max(AgentRadius * 0.5f, 10.f);
+        FVector DirSeg = ForwardDir;
+        if (DirSeg.IsNearlyZero() && ClosestSegIdx >= 1)
+            DirSeg = (Path[ClosestSegIdx] - Path[ClosestSegIdx-1]).GetSafeNormal();
+        if (DirSeg.IsNearlyZero()) DirSeg = (Path.Last() - Path[0]).GetSafeNormal();
 
-	FoundPath = NewPath;
+        FVector E = ClosestPoint;
+        const float SegLen = (ClosestSegIdx >= 1) ? (Path[ClosestSegIdx] - Path[ClosestSegIdx-1]).Size() : 0.f;
+        const int32 MaxIt = FMath::Max(1, (int32)FMath::CeilToInt((SegLen + 1.f) / Step));
+        bool bFoundE = false;
+        for (int32 it = 1; it <= MaxIt; ++it)
+        {
+            const FVector Cand = ClosestPoint + DirSeg * (it * Step);
+            if (!IsPathObstructed(CurrentLocation, Cand))
+            {
+                E = Cand; bFoundE = true; break;
+            }
+        }
 
-	bIsReachDestination = false;
-	CurrentState = EPathfindingState::FollowPath;
-	CurrentPathDestinationIndex = 1;
+        if (bFoundE)
+        {
+            NewPath.Add(E);
+            const int32 AfterIdx = FMath::Clamp(ClosestSegIdx, 1, Path.Num()-1);
+            for (int32 k = AfterIdx; k < Path.Num(); ++k) NewPath.Add(Path[k]);
+        }
+        else
+        {
+            const int32 FallbackIdx = FMath::Clamp(ClosestSegIdx, 1, Path.Num()-1);
+            for (int32 k = FallbackIdx; k < Path.Num(); ++k) NewPath.Add(Path[k]);
+        }
+    }
 
+    FoundPath = MoveTemp(NewPath);
 
-	PathSplinePtr->ClearSplinePoints();
-	for (int i = 0; i < PartialPointSplineNum; i++)
-	{
-		if (i >= FoundPath.Num()) break;
-		PathSplinePtr->AddSplinePoint(FoundPath[i], ESplineCoordinateSpace::World, false);
-	}
-	PathSplinePtr->UpdateSpline();
-	DistanceAlongSpline = 0.f;
+    bIsReachDestination = false;
+    CurrentState = EPathfindingState::FollowPath;
+    CurrentPathDestinationIndex = (FoundPath.Num() >= 2) ? 1 : 0;
 
-	DetermineMovementModeForNextPath();
+    PathSplinePtr->ClearSplinePoints();
+    for (int i = 0; i < PartialPointSplineNum && i < FoundPath.Num(); ++i)
+        PathSplinePtr->AddSplinePoint(FoundPath[i], ESplineCoordinateSpace::World, false);
+    PathSplinePtr->UpdateSpline();
 
-	if (bDrawDebugPath)
-	{
-		DrawDebugPath();
-	}
+    DistanceAlongSpline = 0.f;
 
-	if (bPeriodicRepath)
-	{
-		if (UWorld* World = GetWorld())
-		{
-			World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath,
-											  RepathCooldown, false);
-		}
-	}
+    DetermineMovementModeForNextPath();
+
+    if (bDrawDebugPath) DrawDebugPath();
+
+    if (bPeriodicRepath)
+        GetWorld()->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath, RepathCooldown, false);
 }
 
 void UPathfindingComponent::UpdateAgentRadiusFromScale(bool bForceUpdate)
@@ -605,17 +643,6 @@ void UPathfindingComponent::UpdateAgentRadiusFromScale(bool bForceUpdate)
 // Internal Logic
 //======================================================================================
 
-void UPathfindingComponent::HandlePathfindingResult()
-{
-	if (bPeriodicRepath && !bIsReachDestination)
-	{
-		if (UWorld* World = GetWorld())
-		{
-			World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath,
-			                                  RepathCooldown, false);
-		}
-	}
-}
 
 void UPathfindingComponent::InvalidatePathAndRequestRepath()
 {
@@ -704,13 +731,6 @@ void UPathfindingComponent::DrawDebugPath()
 		return;
 	}
 
-	const float Duration = 1.f;
-	const float LineThickness = 5.0f;
-	const float BoxThickness = AgentRadius * 0.7;
-	const FVector BoxHalfSize(AgentRadius * 0.05);
-
-	const FLinearColor PathColor(0.5f, 0.0f, 1.0f);
-	const FLinearColor PathPointColor(.5f, 0.5f, 1.0f);
 
 	for (int32 i = 0; i < FoundPath.Num() - 1; ++i)
 	{

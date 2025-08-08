@@ -180,10 +180,7 @@ protected:
 	void PartialSplinePointUpdate(int32 StartIndex);
 
 	void UpdateAgentRadiusFromScale(bool bForceUpdate = false);
-	
-	/** Process the results when the asynchronous pathfinding task completes. */
-	void HandlePathfindingResult();
-
+	 
 	/** When the path is invalid, the current movement is stopped and a retracing timer is started. */
 	void InvalidatePathAndRequestRepath();
 
@@ -217,25 +214,21 @@ public:
 	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
 	float RotationInterpSpeed = 5.0f;
-
-	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,
-		meta = (AllowPrivateAccess = true))
-	TArray<bool> RotationAxisLock = {false, false, false};
-
+	
 	// --- dynamic repath settings ---
 	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
 	float RepathCooldown = 1.f;
 
-	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere,BlueprintReadWrite,
+	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
 	bool bPeriodicRepath = false;
 
-	UPROPERTY(Category = "Pathfinding|Dynamic Repath",EditAnywhere, BlueprintReadWrite,
+	UPROPERTY(Category = "Pathfinding|Dynamic Repath", EditAnywhere, BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
 	int32 PathValidationLookAhead = 3;
-	
-	UPROPERTY(Category = "Pathfinding|Dynamic Repath", EditAnywhere,BlueprintReadWrite,
+
+	UPROPERTY(Category = "Pathfinding|Dynamic Repath", EditAnywhere, BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
 	int32 PartialPointSplineNum = 5;
 	
@@ -250,14 +243,38 @@ public:
 
 	UPROPERTY()
 	bool bContinuosFollowingWhenReached;
-	
+
 	UPROPERTY(Category = "Pathfinding|Spline", EditAnywhere, BlueprintReadWrite,
 		meta = (EditCondition = "MovementMode == EPathMovementMode::Spline", AllowPrivateAccess = true))
 	float SafetyCheckStepSize = 50.f;
- 
+
+	UPROPERTY(EditAnywhere, Category="Pathfinding", BlueprintReadWrite,
+	meta=(AllowPrivateAccess=true, DisplayName="Draw Path Duration (sec)"))
+	float Duration = 1.f;
+
+	UPROPERTY(EditAnywhere, Category="Pathfinding", BlueprintReadWrite,
+	meta=(AllowPrivateAccess=true, DisplayName="Path Line Thickness"))
+	float LineThickness = 5.0f;
+
+	UPROPERTY(EditAnywhere, Category="Pathfinding", BlueprintReadWrite,
+	meta=(AllowPrivateAccess=true, DisplayName="Path Point Box Thickness"))
+	float BoxThickness = AgentRadius * 0.7;
+
+	UPROPERTY(EditAnywhere, Category="Pathfinding", BlueprintReadWrite,
+		meta=(AllowPrivateAccess=true, DisplayName="Path Point Box Half Size"))
+	FVector BoxHalfSize = FVector(AgentRadius * 0.05);
+
+	UPROPERTY(EditAnywhere, Category="Pathfinding", BlueprintReadWrite,
+	meta=(AllowPrivateAccess=true, DisplayName="Path Line Color"))
+	FLinearColor PathColor = FLinearColor(0.5f, 0.0f, 1.0f);
+
+	UPROPERTY(EditAnywhere, Category="Pathfinding", BlueprintReadWrite,
+	meta=(AllowPrivateAccess=true, DisplayName="Path Point Color"))
+	FLinearColor PathPointColor = FLinearColor(.5f, 0.5f, 1.0f);
+
 	UPROPERTY(EditAnywhere, Category = "Pathfinding", BlueprintReadWrite, meta = (AllowPrivateAccess = true))
 	bool bDrawDebugPath = true;
-	
+
 	UPROPERTY(Category = "Pathfinding|Dynamic Goal", EditAnywhere, BlueprintReadWrite,
 		meta = (AllowPrivateAccess = "true"))
 	float GoalUpdateThreshold = 100.f; // The target must move this distance (cm) or more to re-explore
