@@ -14,7 +14,6 @@
 #include "NavVolume/OctreeVoxelVolume.h"
 #include "Engine/Engine.h"
 #include "Strategy/AStarStrategy.h"
-#include "Components/WorldPartitionStreamingSourceComponent.h"
 #include "Utility/Parallel/PathfindingRequest.h"
 
 UPathfindingComponent::UPathfindingComponent()
@@ -34,9 +33,6 @@ UPathfindingComponent::UPathfindingComponent()
 	DebugSphereComponent->SetCanEverAffectNavigation(false);
 	DebugSphereComponent->bHiddenInGame = true;
 	DebugSphereComponent->SetSphereRadius(BaseAgentRadius);
-
-	// StreamingSourceComponent = CreateDefaultSubobject<UWorldPartitionStreamingSourceComponent>(TEXT("StreamingSourceComponent"));
-	// StreamingSourceComponent->DisableStreamingSource();
 }
 
 void UPathfindingComponent::BeginPlay()
@@ -74,11 +70,6 @@ void UPathfindingComponent::BeginPlay()
 		}
 	}
 
-	// if (StreamingSourceComponent)
-	// {
-	// 	ActivateStreaming();
-	// }
-
 	if (AVoxelVolumeBase* StartingVolume = GetCurrentVolume())
 	{
 		GoalUpdateThreshold = StartingVolume->VoxelExtent;
@@ -103,46 +94,6 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	}
 	CurrentVelocity = PreferredVelocity;
 	UpdateAgentRadiusFromScale();
-
-	// If using Avoidance, the functions below are called by the Avoidance Subsystem, 
-	// so they are commented out for now.
-	
-	/***
-	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-	if (CurrentState == EPathfindingState::FollowPath && !bIsReachDestination)
-	{
-		if (FoundPath.IsValidIndex(CurrentPathDestinationIndex) && CurrentPathDestinationIndex > 0)
-		{
-			const AActor* Owner = GetOwner();
-			if (!Owner) return;
-
-			const FVector& TargetWaypoint = FoundPath[CurrentPathDestinationIndex];
-			const FVector& PrevWaypoint = FoundPath[CurrentPathDestinationIndex - 1];
-
-			const FVector PathSegmentDirection = (TargetWaypoint - PrevWaypoint).GetSafeNormal();
-
-			const FVector VectorFromTargetToAgent = Owner->GetActorLocation() - TargetWaypoint;
-
-			const float DotProduct = FVector::DotProduct(VectorFromTargetToAgent, PathSegmentDirection);
-
-			if (DotProduct >= 0.0f)
-			{
-				ProgressNextPoint();
-
-				return;
-			}
-		}
-	}
-
-	if (!IsValid(AvoidanceSubsystem) || !AvoidanceSubsystem->GetbUseAvoidance())
-	{
-		UpdateSteering(DeltaTime);
-		ApplyMovement(PreferredVelocity, DeltaTime);
-	}
-
-	UpdateAgentRadiusFromScale();
-	 */
 }
 
 void UPathfindingComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -156,11 +107,6 @@ void UPathfindingComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		GetWorld()->GetTimerManager().ClearAllTimersForObject(this);
 	}
-
-	// if (StreamingSourceComponent)
-	// {
-	// 	DeactivateStreaming();
-	// }
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -194,8 +140,6 @@ void UPathfindingComponent::OnVolumeBecameReadyForPendingRequest(AOctreeVoxelVol
 
 	if (CurrentVolume && CurrentVolume->IsReadyForNavigation())
 	{
-		UE_LOG(LogTemp, Log, TEXT("PathfindingComponent: Pending request resumed. Start volume '%s' is now ready."), *CurrentVolume->GetName());
-
 		bHasPendingPathRequest = false;
 		NavSubsystem->OnVolumeRegistered.RemoveDynamic(this, &UPathfindingComponent::OnVolumeBecameReadyForPendingRequest);
 
@@ -213,8 +157,7 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 
 	const FVector StartLocation = GetOwner()->GetActorLocation();
 	AOctreeVoxelVolume* StartVolume = NavSubsystem->GetVolumeChunkAt(StartLocation);
-
-
+	
 	// --- 2. If the start volume is not ready, pend the request. ---
 	if (!StartVolume || !StartVolume->IsReadyForNavigation())
 	{
@@ -231,33 +174,6 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 	CurrentTargetLocation = TargetLocation;
 
 	return RequestLocalPath_Internal(StartLocation, TargetLocation, StartVolume);
-	
-	// AOctreeVoxelVolume* EndVolume = NavSubsystem->GetVolumeChunkAt(TargetLocation);
-	//
-	// --- CASE A: Clear Local Pathfinding ---
-	// The start and end volumes are the same, valid, and ready.
-	// if (EndVolume && StartVolume == EndVolume)
-	// {
-	// 	return RequestLocalPath_Internal(StartLocation, TargetLocation, StartVolume);
-	// }
-	// --- CASE B: Hierarchical Pathfinding ---
-	// The end volume is different or is null because it hasn't been streamed in.
-	// else
-	// {
-	// 	UE_LOG(LogTemp, Log, TEXT("Requesting HIERARCHICAL path from '%s' to an external or unloaded volume."), *StartVolume->GetName());
-	//
-	// 	FHierarchicalPathRequest HRequest;
-	// 	HRequest.RequestingComponent = this;
-	// 	HRequest.StartLocation = StartLocation;
-	// 	HRequest.EndLocation = TargetLocation;
-	// 	HRequest.AgentRadius = this->AgentRadius;
-	// 	HRequest.Strategy = PathfindingStrategy;
-	// 	HRequest.OnHierarchicalPathComplete.BindDynamic(this, &UPathfindingComponent::HandleWorldPathResult);
-	//
-	// 	// CurrentRequestID = PathfindingSubsystem->RequestHierarchicalPath(this, HRequest);
-	// 	CurrentRequestID = PathfindingSubsystem->RequestHierarchicalPath(this, HRequest);
-	// 	return CurrentRequestID != -1;
-	// }
 }
 
 bool UPathfindingComponent::RequestLocalPath_Internal(const FVector& Start, const FVector& End,
@@ -284,10 +200,6 @@ bool UPathfindingComponent::RequestLocalPath_Internal(const FVector& Start, cons
 	CurrentRequestID = PathfindingSubsystem->RequestPath(this, Request);
 
 	return CurrentRequestID != -1;
-}
-
-void UPathfindingComponent::StartPathfinding()
-{
 }
 
 void UPathfindingComponent::CreateOctreeDataSnapshot(const AOctreeVoxelVolume* OctreeVolume, FOctreePathfindingData& SnapshotData) const
@@ -362,25 +274,6 @@ AVoxelVolumeBase* UPathfindingComponent::GetCurrentVolume() const
 
 	return nullptr;
 }
-
-// void UPathfindingComponent::ActivateStreaming()
-// {
-// 	// Currently called in BeginPlay, but it could also be called the moment pathfinding starts.
-// 	// However, we must consider that this might cause issues due to loading times.```
-//
-// 	if (StreamingSourceComponent)
-// 	{
-// 		StreamingSourceComponent->EnableStreamingSource();
-// 	}
-// }
-//
-// void UPathfindingComponent::DeactivateStreaming()
-// {
-// 	if (IsValid(StreamingSourceComponent))
-// 	{
-// 		StreamingSourceComponent->DisableStreamingSource();
-// 	}
-// }
 
 //======================================================================================
 // Avoidance Interface
@@ -488,15 +381,6 @@ void UPathfindingComponent::AdjustProgressToSpline(const FVector& MoveDelta)
 	{
 		DistanceAlongSpline += ForwardDist;
 	}
-	
-	//DistanceAlongSpline += FinalVelocity.Length();
-	
-	// const FVector SplineDirection = PathSplinePtr->GetDirectionAtDistanceAlongSpline(
-	// 		DistanceAlongSpline, ESplineCoordinateSpace::World);
-	// const float ForwardDistance = FVector::DotProduct(FinalVelocity, SplineDirection);
-	// DistanceAlongSpline += ForwardDistance;
-	// const float SplineLength = PathSplinePtr->GetSplineLength();
-	// DistanceAlongSpline = FMath::Clamp(DistanceAlongSpline, 0.f, SplineLength);
 }
 
 void UPathfindingComponent::ProgressNextPoint()
@@ -511,15 +395,12 @@ void UPathfindingComponent::ProgressNextPoint()
 
 		if (DistanceToFinalGoalSq <= FMath::Square(GoalUpdateThreshold))
 		{
-			UE_LOG(LogTemp, Log, TEXT("Reached the final destination. Stopping movement."));
 			OnDestinationReached.Broadcast();
 			StopMovement();
 			return;
 		}
 		else
 		{
-			UE_LOG(LogTemp, Warning, TEXT("Reached end of a partial path. Requesting next path segment immediately."));
-
 			FoundPath.Empty();
 			PreferredVelocity = FVector::ZeroVector;
 			CurrentVelocity = FVector::ZeroVector;
@@ -616,95 +497,16 @@ void UPathfindingComponent::PartialSplinePointUpdate(int32 StartIndex)
 	PathSplinePtr->AddSplinePoint(FoundPath[AddIndex], ESplineCoordinateSpace::World, false);
 	PathSplinePtr->UpdateSpline();
 }
-/**
- * 
+
 void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess)
 {
 	if (!IsValid(PathSplinePtr))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("PathSplinePtr is not valid. Cannot set up spline path."));
 		return;
 	}
 
 	if (!bSuccess || Path.IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed or path is empty."));
-		if (bPeriodicRepath)
-		{
-			GetWorld()->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath, RepathCooldown, false);
-		}
-		return;
-	}
-	
-	if (bSuccess && Path.Num() > 0)
-	{
-		// if (IsPathObstructed(GetOwner()->GetActorLocation(), Path[0]))
-		// {
-		// 	UE_LOG(LogTemp, Warning, TEXT("New path is obstructed from actor's current location. Requesting a new path immediately."));
-		// 	RequestPathToLocation(CurrentTargetLocation);
-		// 	return;
-		// }
-		
-		// *** Case: Path is safe ***
-		FoundPath = Path;
-		if (FVector::DistSquared(GetOwner()->GetActorLocation(), FoundPath[0]) < FMath::Square(10.0f))
-		{
-			CurrentPathDestinationIndex = 0;
-		}
-		else
-		{
-			FoundPath.Insert(GetOwner()->GetActorLocation(), 0);
-			CurrentPathDestinationIndex = 1;
-		}
-
-		bIsReachDestination = false;
-		CurrentState = EPathfindingState::FollowPath;
-		CurrentPathDestinationIndex = 1; // Set to start following from the second point of the path (index 1).
-		
-		// Keep the existing Spline and debug drawing logic
-		PathSplinePtr->ClearSplinePoints();
-		for (int i = 0; i < PartialPointSplineNum; i++)
-		{
-			if (i >= FoundPath.Num()) break;
-			PathSplinePtr->AddSplinePoint(FoundPath[i], ESplineCoordinateSpace::World, false);
-		}
-		PathSplinePtr->UpdateSpline();
-		DistanceAlongSpline = 0.f;
-
-	
-		DetermineMovementModeForNextPath();
-		
-		if (bDrawDebugPath)
-		{
-			DrawDebugPath();
-		}
-	}
-	else
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed or path is too short."));
-	}
-
-	if (bPeriodicRepath)
-	{
-		if (UWorld* World = GetWorld())
-		{
-			World->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath,
-											  RepathCooldown, false);
-		}
-	}
-}
- */
-void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, bool bSuccess)
-{
-	if (!IsValid(PathSplinePtr))
-	{
-		UE_LOG(LogTemp, Warning, TEXT("PathSplinePtr is not valid. Cannot set up spline path."));
-		return;
-	}
-
-	if (!bSuccess || Path.IsEmpty())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Pathfinding failed or path is empty. Retrying if periodic repath is enabled."));
 		if (bPeriodicRepath)
 		{
 			GetWorld()->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath, RepathCooldown, false);
@@ -819,8 +621,6 @@ void UPathfindingComponent::InvalidatePathAndRequestRepath()
 {
 	if (CurrentState == EPathfindingState::PathInvalidated) return;
 
-	UE_LOG(LogTemp, Warning, TEXT("Path Invalidated! Stopping movement and scheduling a repath..."));
-
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(RepathCooldownTimer);
@@ -830,7 +630,6 @@ void UPathfindingComponent::InvalidatePathAndRequestRepath()
 	// End Test
 }
 
-// 
 bool UPathfindingComponent::IsPathObstructed(const FVector& Start, const FVector& End, bool bIsPortalApproach) const
 {
 	AOctreeVoxelVolume* OctreeVolume = Cast<AOctreeVoxelVolume>(GetCurrentVolume());
@@ -896,6 +695,7 @@ bool UPathfindingComponent::IsPathObstructed(const FVector& Start, const FVector
 	return false;
 }
 
+#if WITH_EDITOR
 void UPathfindingComponent::DrawDebugPath()
 {
 	UWorld* World = GetWorld();
@@ -944,6 +744,7 @@ void UPathfindingComponent::DrawDebugPath()
 		);
 	}
 }
+#endif
 
 void UPathfindingComponent::UpdatePreferredVelocity(float DeltaTime)
 {
@@ -1010,7 +811,6 @@ bool UPathfindingComponent::IsSplinePathSafe() const
 		if (SplineLength > KINDA_SMALL_NUMBER && VoxelVolume->IsLocationInBlockedVoxel(
 			PathSplinePtr->GetLocationAtDistanceAlongSpline(SplineLength, ESplineCoordinateSpace::World)))
 		{
-			UE_LOG(LogTemp, Warning, TEXT("Spline path endpoint is inside a blocked voxel. Path is unsafe."));
 			return false;
 		}
 		return true;

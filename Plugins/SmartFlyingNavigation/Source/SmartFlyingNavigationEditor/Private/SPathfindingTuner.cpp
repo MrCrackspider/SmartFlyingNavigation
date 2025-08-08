@@ -38,19 +38,6 @@
 #include "SPathfindingTunerSettings.h"
 #include "Containers/UnrealString.h"
 
-// LevelStreaming
-// #include "EngineUtils.h"
-// #include "FileHelpers.h"
-// #include "AssetRegistry/AssetRegistryModule.h"
-// #include "Misc/ScopedSlowTask.h"
-// #include "EditorAssetLibrary.h"
-// #include "ObjectTools.h"
-// #include "Components/BoxComponent.h"
-// #include "Landscape.h"
-// #include "LandscapeStreamingProxy.h"
-// #include "LandscapeComponent.h"
-// #include "Subsystem/OctreeNavSubsystem.h"
-
 #include "PathfindingEditorSubsystem.h"
 
 

@@ -30,12 +30,6 @@
 #include "Subsystem/OctreeNavSubsystem.h"
 #include "Engine/StreamableManager.h"
 #include "Engine/AssetManager.h"
-// #include "LandscapeComponent.h" 
-// #include "Landscape.h"
-// #include "LandscapeStreamingProxy.h"
-// #include "LandscapeSubsystem.h"
-// #include "EngineUtils.h"
-// #include "LandscapeInfo.h"
 
 AOctreeVoxelVolume::AOctreeVoxelVolume()
 {
@@ -55,16 +49,6 @@ AOctreeVoxelVolume::AOctreeVoxelVolume()
 void AOctreeVoxelVolume::BeginPlay()
 {
 	Super::BeginPlay();
-
-	//if (UWorld* World = GetWorld())
-	//{
-	//	if (UOctreeNavSubsystem* NavSubsystem = World->GetSubsystem<UOctreeNavSubsystem>())
-	//	{
-	//		NavSubsystem->RegisterVolumeChunk(this);
-	//	}
-	//}
-
-	//RequestAsyncLoad();
 	
 	{
 		const FVector TotalSize = GetVolumeBounds().GetSize();
@@ -128,7 +112,6 @@ void AOctreeVoxelVolume::PostInitializeComponents()
 void AOctreeVoxelVolume::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-	//DrawDebugDynamicObstaclesWithBoxes();
 	// Main logic is handled by BeginPlay initialization and the DynamicObstacleTimer.
 }
 
@@ -509,8 +492,7 @@ void AOctreeVoxelVolume::SaveOctreeToAsset(const TArray<FOctreeNode>& NodePoolTo
 			}
 		}
 	}
-	UE_LOG(LogTemp, Log, TEXT("Saving data for '%s': %d nodes, %d nodes with portals, %d total portal links."), *GetActorLabel(), NodePoolToSave.Num(), PortalsToSave.Num(), TotalPortalLinkCount);
-
+	
 	DataAssetToSave->Modify();
 
 	DataAssetToSave->PortalNodes = PortalsToSave;
@@ -767,7 +749,6 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 						}
 					}
 
-					// 배치(Batch) 추가로 성능을 최적화합니다.
 					if (StrongThis->DebugSolidNodesComponent && !SolidTransforms.IsEmpty())
 					{
 						StrongThis->DebugSolidNodesComponent->AddInstances(SolidTransforms, false, true);
@@ -1265,8 +1246,6 @@ void AOctreeVoxelVolume::ConnectPortals_Bake(
 				if (MinDistanceSq > DistanceThresholdSq)
 				{
 					// The found neighbor is too far away, so we consider it invalid and abandon the connection.
-					UE_LOG(LogTemp, Warning, TEXT("Neighbor '%s' for '%s' was found, but it's too far (DistSq: %.f, ThresholdSq: %.f). Discarding connection."),
-						*NeighborVolume->GetName(), *GetName(), MinDistanceSq, DistanceThresholdSq);
 					NeighborVolume = nullptr;
 				}
 			}
@@ -1277,14 +1256,12 @@ void AOctreeVoxelVolume::ConnectPortals_Bake(
 				TSoftObjectPtr<UOctreeDataAsset> NeighborDataAssetPtr = NeighborVolume->GetBakedOctreeData();
 				if (NeighborDataAssetPtr.IsNull())
 				{
-					UE_LOG(LogTemp, Error, TEXT("ConnectPortals_Bake CRITICAL: Neighbor volume '%s' does not have a valid BakedOctreeData asset!"), *NeighborVolume->GetName());
 					continue;
 				}
 
 				const TArray<FOctreeNode>* NeighborNodePoolPtr = AllVolumeData.Find(NeighborVolume);
 				if (!NeighborNodePoolPtr)
 				{
-					UE_LOG(LogTemp, Warning, TEXT("ConnectPortals_Bake: Found neighbor volume '%s', but its node data is not in the AllVolumeData map."), *NeighborVolume->GetName());
 					continue;
 				}
 
@@ -1328,10 +1305,6 @@ void AOctreeVoxelVolume::ConnectPortals_Bake(
 		}
 	}
 
-	if (CreatedPortalCount > 0)
-	{
-		UE_LOG(LogTemp, Log, TEXT("ConnectPortals_Bake SUCCESS for '%s': Found %d boundary nodes and created %d portals."), *GetActorLabel(), BoundaryNodeCount, CreatedPortalCount);
-	}
 #endif
 }
 #endif

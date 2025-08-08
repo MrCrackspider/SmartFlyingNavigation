@@ -44,7 +44,7 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 
 		if (!PoolRef.IsValidIndex(StartNodeIndex))
 		{
-			UE_LOG(LogTemp, Log, TEXT("AStarStrategy: Start is safe but on a boundary. Finding nearest reference node (start location will NOT be moved)."));
+			UE_LOG(LogTemp, Warning, TEXT("AStarStrategy: Start is safe but on a boundary. Finding nearest reference node (start location will NOT be moved)."));
 			
 			StartNodeIndex = OctreeData.FindNearestValidLeafForAgent(
 				InRequest.StartLocation, InRequest.AgentRadius, NearbyGoalSearchRadius, 1);

@@ -45,22 +45,6 @@ AOctreeVoxelVolume* UOctreeNavSubsystem::GetVolumeChunkAt(const FVector& WorldLo
 {
 	for (AOctreeVoxelVolume* Volume : RegisteredVolumeChunks)
 	{
-		//const bool bIsUsingWorldPartition = Volume->GetWorld() ? Volume->GetWorld()->GetWorldPartition() != nullptr : false;
-		//if (bIsUsingWorldPartition)
-		//{
-		//	if (Volume && Volume->GetIsSpatiallyLoaded() && Volume->IsReadyForNavigation() && Volume->GetVolumeBounds().IsInside(WorldLocation))
-		//	{
-		//		return Volume;
-		//	}
-		//}
-		//else
-		//{
-		//	if (Volume && Volume->GetVolumeBounds().IsInside(WorldLocation))
-		//	{
-		//		return Volume;
-		//	}
-		//}
-
 		// GetIsSpatiallyLoaded is Editor-only function But Get VolumeChunkAt is runtime function so we need to not use GetIsSpatiallyLoaded
 		// if (Volume && Volume->GetIsSpatiallyLoaded() && Volume->IsReadyForNavigation() && Volume->GetVolumeBounds().IsInside(WorldLocation))
 		if (Volume && Volume->IsReadyForNavigation() && Volume->GetVolumeBounds().IsInside(WorldLocation))

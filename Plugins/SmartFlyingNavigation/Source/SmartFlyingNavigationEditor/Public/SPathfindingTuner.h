@@ -48,7 +48,6 @@ private:
     bool TickActorSelection(float DeltaTime);
     void OnActorSelectionChanged();
 
-    // 디테일 뷰 위젯을 가리킬 포인터
     TSharedPtr<IDetailsView> AgentDetailsView ;
     
      
@@ -73,10 +72,10 @@ private:
     void OnPerformanceCategoryExpansionChanged(bool bIsExpanded);
     void OnOctreeSettingsCategoryExpansionChanged(bool bIsExpanded);
     void OnBakedDataCategoryExpansionChanged(bool bIsExpanded);
-    void OnAgentSettingsCategoryExpansionChanged(bool bIsExpanded);
+    // void OnAgentSettingsCategoryExpansionChanged(bool bIsExpanded);
     void OnDebugSettingsCategoryExpansionChanged(bool bIsExpanded);
     void OnAgentDebugCategoryExpansionChanged(bool bIsExpanded);
-    void OnWorldBakeCategoryExpansionChanged(bool bIsExpanded);
+    // void OnWorldBakeCategoryExpansionChanged(bool bIsExpanded);
     //=================================================================================================
     // UI Callbacks & Value Accessors
     //=================================================================================================
@@ -157,8 +156,8 @@ private:
     //
     // // --- Actions ---
     FReply OnBakeButtonClicked();
-    FReply OnBakeWorldButtonClicked();
-    FReply OnCalculateVolumesClicked();
+    // FReply OnBakeWorldButtonClicked();
+    // FReply OnCalculateVolumesClicked();
     //
     // FText GetEstimatedVolumesText() const;
     void ShowWarningMessage(const FText& Message) const;
@@ -184,8 +183,7 @@ private:
     //=================================================================================================
     // Internal Functions
     //=================================================================================================
-    /** 월드 베이크 시작 전, 설정 값들이 유효한지 검사하고 사용자에게 확인을 받습니다. */
-    bool ValidateSettingsAndConfirm_Internal(const UPathfindingTunerSettings* InSettings) const;
+    // bool ValidateSettingsAndConfirm_Internal(const UPathfindingTunerSettings* InSettings) const;
 };
  
 //=================================================================================================

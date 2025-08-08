@@ -88,7 +88,6 @@ public:
 	 * @param NewData The new data asset to assign.
 	 */
 
-	// RAWPOINTER로 해도 괜찮을지 검토 필요
 	// void SetBakedOctreeData(TObjectPtr<UOctreeDataAsset> NewData) { BakedOctreeData = NewData; }
 	void SetBakedOctreeData(UOctreeDataAsset* NewData) { BakedOctreeData = NewData; }
 

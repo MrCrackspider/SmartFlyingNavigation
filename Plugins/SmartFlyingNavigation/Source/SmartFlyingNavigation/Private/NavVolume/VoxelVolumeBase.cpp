@@ -55,10 +55,6 @@ AVoxelVolumeBase::AVoxelVolumeBase()
 void AVoxelVolumeBase::BeginPlay()
 {
 	Super::BeginPlay();
-
-#if WITH_EDITOR
-	//UE_LOG(LogTemp, Warning, TEXT("CHUNK LOADED: %s at %s"), *GetActorLabel(), *GetActorLocation().ToString());
-#endif
 	
 	// If debug drawing is enabled, set a timer to update the visualization.
 	if (bDrawDebugBox)
@@ -122,9 +118,7 @@ void AVoxelVolumeBase::OnConstruction(const FTransform& Transform)
 
 	// Since the RootComponent is now the pivot, the box's relative location should be HalfExtent
 	// to position the entire volume in positive coordinate space.
-	VolumeBox->SetBoxExtent(HalfExtent);
-	//VolumeBox->SetRelativeLocation(HalfExtent);
-	
+	VolumeBox->SetBoxExtent(HalfExtent);	
 }
 
 void AVoxelVolumeBase::Tick(float DeltaTime)
@@ -143,10 +137,6 @@ void AVoxelVolumeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	case EEndPlayReason::Quit: ReasonString = TEXT("Quit"); break;
 	default: ReasonString = TEXT("Unknown"); break;
 	}
-	
-#if WITH_EDITOR 
-	//UE_LOG(LogTemp, Error, TEXT("CHUNK UNLOADED: %s (Reason: %s)"), *GetActorLabel(), *ReasonString);
-#endif
 	
 	// Clear the debug update timer.
 	GetWorldTimerManager().ClearTimer(DebugUpdateTimer);

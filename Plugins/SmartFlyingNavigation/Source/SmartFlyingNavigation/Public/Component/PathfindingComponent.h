@@ -65,9 +65,6 @@ public:
 	bool RequestLocalPath_Internal(const FVector& Start, const FVector& End, AOctreeVoxelVolume* Volume);
 
 	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
-	void StartPathfinding();
-
-	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
 	bool RequestPathToTargetActor();
 
 	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
@@ -112,16 +109,6 @@ public:
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
 #pragma endregion
-
-// #pragma region World Partition
-// 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Streaming")
-// 	TObjectPtr<UWorldPartitionStreamingSourceComponent> StreamingSourceComponent;
-//
-// 	UFUNCTION(BlueprintCallable, Category = "Streaming")
-// 	void ActivateStreaming();
-// 	UFUNCTION(BlueprintCallable, Category = "Streaming")
-// 	void DeactivateStreaming();
-// #pragma endregion
 
 #pragma region Avoidance Interface
 
@@ -201,8 +188,11 @@ protected:
 	void InvalidatePathAndRequestRepath();
 
 	bool IsPathObstructed(const FVector& Start, const FVector& End, bool bIsPortalApproach = false) const;
-	
+
+#if WITH_EDITOR
 	void DrawDebugPath();
+#endif
+	
 	
 #pragma endregion
 

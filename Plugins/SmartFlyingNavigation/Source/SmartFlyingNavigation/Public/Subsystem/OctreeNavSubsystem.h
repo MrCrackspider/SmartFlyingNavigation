@@ -45,8 +45,6 @@ public:
 #endif
 
 protected:
-	// 월드에 존재하는 모든 Volume Chunk들을 관리
-	// 빠른 조회를 위해 그리드나 다른 공간 분할 구조로 개선 가능
 	UPROPERTY()
 	TArray<TObjectPtr<AOctreeVoxelVolume>> RegisteredVolumeChunks;
 

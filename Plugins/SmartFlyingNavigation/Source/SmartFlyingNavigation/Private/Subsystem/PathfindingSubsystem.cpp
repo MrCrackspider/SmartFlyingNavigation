@@ -13,8 +13,6 @@
 #include "Engine/Engine.h"
 #include "Misc/Paths.h"
 
-#include "WorldPartition/WorldPartitionSubsystem.h"
-
 FORCEINLINE uint32 GetTypeHash(const TSoftObjectPtr<UOctreeDataAsset>& Ptr)
 {
 	return GetTypeHash(Ptr.ToSoftObjectPath());
@@ -107,7 +105,6 @@ void UPathfindingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Super::Initialize(Collection);
 
 	UWorld* World = GetWorld();
-	UE_LOG(LogTemp, Log, TEXT("PathfindingSubsystem::Initialize for world '%s'."), *World->GetMapName());
 
 	if (PathfindingThreadPool)
 	{
@@ -126,7 +123,6 @@ void UPathfindingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		if (PathfindingThreadPool->Create(FinalNumThreads, 32 * 1024, TPri_Normal, TEXT("PathfindingThreadPool")))
 		{
 			this->CurrentNumWorkerThreads = FinalNumThreads;
-			UE_LOG(LogTemp, Log, TEXT("PathfindingThreadPool created with %d threads."), FinalNumThreads);
 		}
 		else
 		{
@@ -139,21 +135,11 @@ void UPathfindingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	
 #if WITH_EDITOR
 	const FString MapName = UWorld::RemovePIEPrefix(World->GetMapName());
-	// FString MapName = GetWorld()->GetMapName();
-	// MapName.RemoveFromStart(GetWorld()->StreamingLevelsPrefix);
 	const FString ManifestAssetName = TEXT("DA_WorldNav_") + MapName;
 	const FString ManifestAssetPath = FPaths::Combine(TEXT("/Game/Data/Navigation/"), ManifestAssetName);
 
 	CurrentWorldNavData = LoadObject<UWorldNavigationDataAsset>(nullptr, *ManifestAssetPath);
 
-	if (CurrentWorldNavData)
-	{
-		UE_LOG(LogTemp, Log, TEXT("World Navigation Data Manifest '%s' loaded successfully."), *ManifestAssetPath);
-	}
-	else
-	{
-		UE_LOG(LogTemp, Warning, TEXT("World Navigation Data Manifest '%s' could not be found. Long-range hierarchical pathfinding may be disabled."), *ManifestAssetPath);
-	}
 #endif
 	
 	NextRequestID.Set(0);
@@ -161,8 +147,6 @@ void UPathfindingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UPathfindingSubsystem::Deinitialize()
 {
-	UE_LOG(LogTemp, Log, TEXT("PathfindingSubsystem::Deinitialize for world '%s'."), *GetWorld()->GetMapName());
-
 	for (auto& ProbePair : ActiveStreamingProbes)
 	{
 		if (IsValid(ProbePair.Value))
@@ -174,8 +158,6 @@ void UPathfindingSubsystem::Deinitialize()
 
 	if (PathfindingThreadPool)
 	{
-		UE_LOG(LogTemp, Log, TEXT("Destroying PathfindingThreadPool."));
-		
 		PathfindingThreadPool->Destroy();
 		PathfindingThreadPool = nullptr;
 	}
@@ -237,32 +219,6 @@ int32 UPathfindingSubsystem::RequestPath(const UObject* WorldContextObject, FPat
 
 }
 
-// int32 UPathfindingSubsystem::RequestHierarchicalPath(const UObject* WorldContextObject, FHierarchicalPathRequest& Request)
-// {
-// 	if (!PathfindingThreadPool || !Request.RequestingComponent.IsValid() || !Request.Strategy.IsValid())
-// 	{
-// 		return -1;
-// 	}
-//
-// 	Request.RequestID = NextRequestID.Increment();
-// 	
-// 	FHierarchicalPathfindingTask NewTask(Request);
-// 	
-// 	if (!FindHighLevelPath(WorldContextObject, Request, NewTask.HighLevelDataAssetPath))
-// 	{
-// 		UE_LOG(LogTemp, Warning, TEXT("Hierarchical Pathfinding Failed for RequestID %d: Could not find a high-level path of data assets."), Request.RequestID);
-// 		Request.OnHierarchicalPathComplete.ExecuteIfBound({}, false);
-// 		return -1;
-// 	}
-// 	
-// 	NewTask.State = EHierarchicalTaskState::ReadyToFindLocalPath;
-// 	ActiveHierarchicalTasks.Add(Request.RequestID, NewTask);
-// 	
-// 	ProcessNextHierarchicalSegment(WorldContextObject, ActiveHierarchicalTasks.FindChecked(Request.RequestID));
-//
-// 	return Request.RequestID;
-// }
-
 void UPathfindingSubsystem::Tick(float DeltaTime)
 {
 	TArray<FPathfindingResult> TasksToProcessThisFrame;
@@ -298,9 +254,6 @@ void UPathfindingSubsystem::Tick(float DeltaTime)
 		{
 			OnPathfindingCompleted(Result.Request, Result.WorldPath, Result.bSuccess);
 		}
-
-		// Use this until develop hierachy path finding
-		// OnPathfindingCompleted(Result.Request, Result.WorldPath, Result.bSuccess);
 	}
 
 	UOctreeNavSubsystem* NavSubsystem = GetWorld()->GetSubsystem<UOctreeNavSubsystem>();
@@ -317,7 +270,6 @@ void UPathfindingSubsystem::Tick(float DeltaTime)
 			AOctreeVoxelVolume* LoadedVolume = NavSubsystem->GetVolumeByDataAsset(WaitingForDataAsset);
 			if (LoadedVolume && LoadedVolume->IsReadyForNavigation())
 			{
-				UE_LOG(LogTemp, Log, TEXT("Segment %d for RequestID %d: Volume with data '%s' has been successfully loaded! Resuming task."), Task.CurrentSegmentIndex, Task.OriginalRequest.RequestID, *WaitingForDataAsset.ToString());
 				Task.State = EHierarchicalTaskState::ReadyToFindLocalPath;
 
 				if (UPathfindingComponent* RequestingComp = Task.OriginalRequest.RequestingComponent.Get())

@@ -173,7 +173,6 @@ void UPathfindingEditorSubsystem::BakeAndConnectVolumes_Internal(const TArray<AO
 
 	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 
-	UE_LOG(LogTemp, Log, TEXT("--- Step 1: Starting creation and assignment of all data assets ---"));
 	for (AOctreeVoxelVolume* Volume : VolumesToProcess)
 	{
 		if (!IsValid(Volume)) continue;
@@ -194,12 +193,9 @@ void UPathfindingEditorSubsystem::BakeAndConnectVolumes_Internal(const TArray<AO
 
 			Volume->SetBakedOctreeData(NewDataAsset);
 			FAssetRegistryModule::AssetCreated(NewDataAsset);
-			UE_LOG(LogTemp, Verbose, TEXT("Data asset '%s' created for '%s'."), *AssetName, *Volume->GetName());
 		}
 	}
-	UE_LOG(LogTemp, Log, TEXT("--- Step 1: Finished creation and assignment of all data assets ---"));
-
-	UE_LOG(LogTemp, Log, TEXT("--- Step 2: Starting bake of internal Octree data ---"));
+	
 	TMap<AOctreeVoxelVolume*, TArray<FOctreeNode>> BakedVolumeData;
 	for (AOctreeVoxelVolume* Volume : VolumesToProcess)
 	{
@@ -210,7 +206,6 @@ void UPathfindingEditorSubsystem::BakeAndConnectVolumes_Internal(const TArray<AO
 			BakedVolumeData.Add(Volume, NodePool);
 		}
 	}
-	UE_LOG(LogTemp, Log, TEXT("--- Step 2: Finished bake of internal Octree data ---"));
 
 	TArray<AOctreeVoxelVolume*> AllRelevantVolumes;
 	TMap<AOctreeVoxelVolume*, TArray<FOctreeNode>> AllVolumeNodeData;
@@ -231,7 +226,6 @@ void UPathfindingEditorSubsystem::BakeAndConnectVolumes_Internal(const TArray<AO
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("--- Step 4: Starting portal connection ---"));
 	TMap<AOctreeVoxelVolume*, TMap<int32, FVolumePortalLinks>> AllPortalData;
 	for (AOctreeVoxelVolume* Volume : VolumesToProcess)
 	{
@@ -243,9 +237,7 @@ void UPathfindingEditorSubsystem::BakeAndConnectVolumes_Internal(const TArray<AO
 			AllPortalData.Add(Volume, PortalNodes);
 		}
 	}
-	UE_LOG(LogTemp, Log, TEXT("--- Step 4: Finished portal connection ---"));
 
-	UE_LOG(LogTemp, Log, TEXT("--- Step 5: Preparing final data for saving ---"));
 	TArray<UPackage*> PackagesToSave;
 	for (AOctreeVoxelVolume* Volume : VolumesToProcess)
 	{
@@ -265,7 +257,6 @@ void UPathfindingEditorSubsystem::BakeAndConnectVolumes_Internal(const TArray<AO
 
 	if (PackagesToSave.Num() > 0)
 	{
-		UE_LOG(LogTemp, Log, TEXT("--- Step 6: Saving %d data asset packages to disk. ---"), PackagesToSave.Num());
 		UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, true);
 	}
 	else
