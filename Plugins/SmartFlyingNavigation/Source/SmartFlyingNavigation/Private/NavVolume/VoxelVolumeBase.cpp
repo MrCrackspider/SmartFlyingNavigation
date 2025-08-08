@@ -139,7 +139,7 @@ void AVoxelVolumeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 	case EEndPlayReason::Destroyed: ReasonString = TEXT("Destroyed"); break;
 	case EEndPlayReason::LevelTransition: ReasonString = TEXT("Level Transition"); break;
-	case EEndPlayReason::RemovedFromWorld: ReasonString = TEXT("Removed from World (Streaming Out)"); break; // 우리가 원하는 이유
+	case EEndPlayReason::RemovedFromWorld: ReasonString = TEXT("Removed from World (Streaming Out)"); break;
 	case EEndPlayReason::Quit: ReasonString = TEXT("Quit"); break;
 	default: ReasonString = TEXT("Unknown"); break;
 	}
@@ -173,7 +173,7 @@ FVector AVoxelVolumeBase::VoxelIndexToWorld(const FIntVector& VoxelIndex) const
 	const FIntVector HalfMapSize = MapSize / 2;
 	const FVector VoxelLocalPosition = (FVector(VoxelIndex - HalfMapSize) * VoxelExtent) + FVector(VoxelExtent * 0.5f);
 
-	// 2. 이 로컬 좌표를 월드 좌표로 변환합니다.
+	// 2. Transform this local position to a world position.
 	return GetActorTransform().TransformPosition(VoxelLocalPosition);
 }
 
@@ -181,10 +181,10 @@ FIntVector AVoxelVolumeBase::WorldToVoxelIndex(const FVector& WorldPosition) con
 {
 	if (VoxelExtent <= 0.f) return FIntVector::ZeroValue;
 
-	// 1. 월드 좌표를 볼륨의 로컬 좌표로 변환합니다.
+	// 1. Transform the world position to the volume's local coordinate space.
 	const FVector LocalPosition = GetActorTransform().InverseTransformPosition(WorldPosition);
 
-	// 2. 로컬 좌표를 복셀 인덱스로 변환하고, HalfMapSize를 더해 배열 인덱스로 만듭니다.
+	// 2. Convert the local position to a voxel index and add HalfMapSize to get the array index.
 	const FIntVector HalfMapSize = MapSize / 2;
 	return FIntVector(
 		FMath::FloorToInt(LocalPosition.X / VoxelExtent) + HalfMapSize.X,

@@ -40,8 +40,6 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	}
 	else
 	{
-		// CASE B: 에이전트가 물리적으로 안전한 공간에 있습니다. (정상적인 상황)
-
 		StartNodeIndex = OctreeData.FindLeafNodeAt(InRequest.StartLocation);
 
 		if (!PoolRef.IsValidIndex(StartNodeIndex))
@@ -73,9 +71,6 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 		return false;
 	}
 
-	//----------------------------------------------------------------
-	// 3. 경로 탐색기(Pathfinder) 생성 및 실행
-	//----------------------------------------------------------------
 	FPathNodeMemoryPoolBase* BasePool = InRequest.MemoryPool;
 	if (!BasePool)
 	{
@@ -84,7 +79,6 @@ bool UAStarStrategy::FindPathWithStrategy(const FPathfindingRequest& InRequest, 
 	}
 	auto& NodePool = *static_cast<TNodeMemoryPool<FAstarPathNode>*>(BasePool);
 
-	// 최종 안전장치: 이 시점에서 StartNodeIndex는 절대로 유효하지 않은 값이 될 수 없습니다.
 	checkf(PoolRef.IsValidIndex(StartNodeIndex), TEXT("AStarStrategy: StartNodeIndex (%d) is invalid right before creating Pathfinder! Logic is flawed."), StartNodeIndex);
 
 	FAstarPathfinder Pathfinder(OctreeData, StartNodeIndex, GoalNodeIndex,
@@ -132,13 +126,11 @@ FAstarPathfinder::FAstarPathfinder(const FOctreePathfindingData& InOctreeData, i
 EPathfindingResult FAstarPathfinder::FindPath(TArray<FVector>& OutPath)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(AStar_Pathfinder_FindPath_Internal);
-	
+
 	MemoryPool.Reset();
 	OpenSet.Empty();
 	OpenSetLookup.Empty();
 	ClosedSet.Empty();
-
-	UE_LOG(LogTemp, Error, TEXT("Radius: %f"), AgentRadius);
 
 	const TPathNodePtrCompare<FAstarPathNode> Predicate;
 

@@ -7,7 +7,6 @@
 const FName UOctreeDataAsset::OctreeAssetType = TEXT("OctreeData");
 
 #if WITH_EDITOR
-// 이 함수는 이제 오직 FOctreeNode 데이터만 직렬화하고 압축합니다.
 void UOctreeDataAsset::SetAndCompressBakedData(const TArray<FOctreeNode>& InNodePool, const FIntVector& InMapSize, int32 InMaxDepth)
 {
 	this->BakedVolumeSize = InMapSize;
@@ -49,8 +48,6 @@ void UOctreeDataAsset::SetAndCompressBakedData(const TArray<FOctreeNode>& InNode
 
 void UOctreeDataAsset::DecompressAndInitialize()
 {
-	// 이 함수는 이제 오직 NodePool 데이터만 압축 해제합니다.
-	// PortalNodes는 엔진이 에셋을 로드할 때 표준 직렬화 시스템을 통해 자동으로 채워줍니다.
 	if (NodePool.Num() > 0 || CompressedNodePool.Num() == 0)
 	{
 		return;

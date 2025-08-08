@@ -37,7 +37,7 @@ void UPathfindingEditorSubsystem::BakeSpecificVolumes(const TArray<AOctreeVoxelV
 {
 	if (VolumesToBake.IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("BakeSpecificVolumes: 베이크할 볼륨이 선택되지 않았습니다."));
+		UE_LOG(LogTemp, Warning, TEXT("BakeSpecificVolumes: No volumes were selected to bake."));
 		return;
 	}
 
@@ -53,140 +53,117 @@ void UPathfindingEditorSubsystem::BakeSpecificVolumes(const TArray<AOctreeVoxelV
 
 	if (!World)
 	{
-		UE_LOG(LogTemp, Error, TEXT("BakeSpecificVolumes 실패: 유효한 월드 컨텍스트를 얻을 수 없습니다."));
+		UE_LOG(LogTemp, Error, TEXT("BakeSpecificVolumes failed: Could not get a valid world context."));
 		return;
 	}
 
 	const FScopedTransaction Transaction(LOCTEXT("BakeSelectedVolumesTransaction", "Bake Selected Octree Volumes"));
-	// 모든 복잡한 로직을 내부 함수에 위임
 	BakeAndConnectVolumes_Internal(VolumesToBake, World);
 }
 
-void UPathfindingEditorSubsystem::BakeEntireWorld(const UPathfindingTunerSettings* TunerSettings)
-{
-	UWorld* World = GEditor->GetEditorWorldContext().World();
-	if (!World || !TunerSettings)
-	{
-		UE_LOG(LogTemp, Error, TEXT("BakeEntireWorld 실패: 월드 또는 튜너 설정이 유효하지 않습니다."));
-		return;
-	}
+// void UPathfindingEditorSubsystem::BakeEntireWorld(const UPathfindingTunerSettings* TunerSettings)
+// {
+// 	UWorld* World = GEditor->GetEditorWorldContext().World();
+// 	if (!World || !TunerSettings)
+// 	{
+// 		UE_LOG(LogTemp, Error, TEXT("BakeEntireWorld failed: World or tuner settings are not valid."));
+// 		return;
+// 	}
+//
+// 	const FScopedTransaction Transaction(LOCTEXT("WorldBakeTransaction", "Bake Entire World Navigation"));
+//
+// 	TMap<ULandscapeComponent*, TEnumAsByte<ECollisionEnabled::Type>> OriginalCollisionStates;
+// 	SetupLandscapeCollisions_Internal(World, OriginalCollisionStates);
+//
+// 	CleanupPreviousAssets(World, TunerSettings->WorldBake_SaveDirectory.Path);
+// 	if (UOctreeNavSubsystem* NavSubsystem = World->GetSubsystem<UOctreeNavSubsystem>())
+// 	{
+// 		NavSubsystem->ClearAllRegisteredVolumes();
+// 	}
+//
+// 	FBox WorldBounds(ForceInit);
+// 	if (!CalculateWorldBakeBounds(World, WorldBounds))
+// 	{
+// 		UE_LOG(LogTemp, Warning, TEXT("World Bake aborted: Could not determine world bounds to bake."));
+// 		RestoreLandscapeCollisions_Internal(OriginalCollisionStates);
+// 		return;
+// 	}
+//
+// 	TArray<FWorldBakeResult> BakeResults;
+// 	if (!BakeAndCreateVolumesInGrid(World, WorldBounds, TunerSettings, BakeResults))
+// 	{
+// 		RestoreLandscapeCollisions_Internal(OriginalCollisionStates);
+// 		return;
+// 	}
+//
+// 	if (BakeResults.IsEmpty())
+// 	{
+// 		UE_LOG(LogTemp, Warning, TEXT("World Bake complete: No obstacles found to generate navigation data."));
+// 		RestoreLandscapeCollisions_Internal(OriginalCollisionStates);
+// 		return;
+// 	}
+//
+// 	TArray<AOctreeVoxelVolume*> CreatedVolumes;
+// 	for (const FWorldBakeResult& Result : BakeResults)
+// 	{
+// 		CreatedVolumes.Add(Result.Volume);
+// 	}
+//
+// 	//BakeAndConnectVolumes_Internal(CreatedVolumes, World);
+//
+// 	RestoreLandscapeCollisions_Internal(OriginalCollisionStates);
+//
+// 	UE_LOG(LogTemp, Log, TEXT("=== Starting generation of World Navigation Data Manifest. ==="));
+//
+// 	const FString ManifestDirectory = TEXT("/Game/Data/Navigation/");
+// 	const FString ManifestAssetName = TEXT("DA_WorldNav_") + World->GetMapName();
+// 	const FString ManifestPackagePath = FPaths::Combine(ManifestDirectory, ManifestAssetName);
+//
+// 	UWorldNavigationDataAsset* WorldNavData = nullptr;
+//
+// 	WorldNavData = LoadObject<UWorldNavigationDataAsset>(nullptr, *ManifestPackagePath);
+//
+// 	if (WorldNavData)
+// 	{
+// 		UE_LOG(LogTemp, Log, TEXT("Overwriting existing manifest asset '%s'."), *ManifestPackagePath);
+// 		WorldNavData->VolumeInfos.Empty();
+// 	}
+// 	else
+// 	{
+// 		UE_LOG(LogTemp, Log, TEXT("Creating new manifest asset '%s'."), *ManifestPackagePath);
+//
+// 		if (!UEditorAssetLibrary::DoesDirectoryExist(ManifestDirectory))
+// 		{
+// 			UE_LOG(LogTemp, Log, TEXT("Directory '%s' does not exist, creating it."), *ManifestDirectory);
+// 			UEditorAssetLibrary::MakeDirectory(ManifestDirectory);
+// 		}
+//
+// 		UPackage* ManifestPackage = CreatePackage(*ManifestPackagePath);
+// 		WorldNavData = NewObject<UWorldNavigationDataAsset>(ManifestPackage, FName(*ManifestAssetName), RF_Public | RF_Standalone);
+// 		FAssetRegistryModule::AssetCreated(WorldNavData);
+// 	}
+//
+// 	for (AOctreeVoxelVolume* Volume : CreatedVolumes)
+// 	{
+// 		if (IsValid(Volume))
+// 		{
+// 			FVolumeSpatialInfo Info;
+// 			Info.Bounds = Volume->GetVolumeBounds();
+// 			Info.NavDataAsset = Volume->GetBakedOctreeData();
+// 			WorldNavData->VolumeInfos.Add(Info);
+// 		}
+// 	}
+//
+// 	WorldNavData->MarkPackageDirty();
+// 	UPackage* PackageToSave = WorldNavData->GetPackage();
+// 	const bool bSaveSuccess = UEditorLoadingAndSavingUtils::SavePackages({ PackageToSave }, true);
+//
+// 	if (!bSaveSuccess)
+// 	{
+// 		UE_LOG(LogTemp, Error, TEXT("Failed to save World Navigation Data Manifest '%s'."), *ManifestPackagePath);
+// 	}
+// }
 
-	const FScopedTransaction Transaction(LOCTEXT("WorldBakeTransaction", "Bake Entire World Navigation"));
-
-	// --- 1. 환경 설정 ---
-	TMap<ULandscapeComponent*, TEnumAsByte<ECollisionEnabled::Type>> OriginalCollisionStates;
-	SetupLandscapeCollisions_Internal(World, OriginalCollisionStates);
-
-	// --- 2. 사전 정리 ---
-	CleanupPreviousAssets(World, TunerSettings->WorldBake_SaveDirectory.Path);
-	if (UOctreeNavSubsystem* NavSubsystem = World->GetSubsystem<UOctreeNavSubsystem>())
-	{
-		NavSubsystem->ClearAllRegisteredVolumes();
-	}
-
-	// --- 3. 베이크 범위 계산 ---
-	FBox WorldBounds(ForceInit);
-	if (!CalculateWorldBakeBounds(World, WorldBounds))
-	{
-		UE_LOG(LogTemp, Warning, TEXT("World Bake 중단: 베이크할 월드 범위를 결정할 수 없습니다."));
-		RestoreLandscapeCollisions_Internal(OriginalCollisionStates);
-		return;
-	}
-
-	// --- 4. 볼륨 생성 ---
-	TArray<FWorldBakeResult> BakeResults;
-	if (!BakeAndCreateVolumesInGrid(World, WorldBounds, TunerSettings, BakeResults))
-	{
-		RestoreLandscapeCollisions_Internal(OriginalCollisionStates);
-		return;
-	}
-
-	if (BakeResults.IsEmpty())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("World Bake 완료: 내비게이션 데이터를 생성할 장애물을 찾지 못했습니다."));
-		RestoreLandscapeCollisions_Internal(OriginalCollisionStates);
-		return;
-	}
-
-	// --- 5. 생성된 볼륨 목록 추출 ---
-	TArray<AOctreeVoxelVolume*> CreatedVolumes;
-	for (const FWorldBakeResult& Result : BakeResults)
-	{
-		CreatedVolumes.Add(Result.Volume);
-	}
-
-	// --- 6. 핵심 로직 위임: 볼륨 베이크, 포털 연결, 개별 데이터 에셋 저장 ---
-	BakeAndConnectVolumes_Internal(CreatedVolumes, World);
-
-	// --- 7. 환경 복원 ---
-	RestoreLandscapeCollisions_Internal(OriginalCollisionStates);
-
-	// =================================================================================
-	// <<< 월드 내비게이션 데이터 명세(Manifest) 생성 및 저장 (최종 수정본) >>>
-	// =================================================================================
-	UE_LOG(LogTemp, Log, TEXT("=== 월드 내비게이션 데이터 명세 생성을 시작합니다. ==="));
-
-	const FString ManifestDirectory = TEXT("/Game/Data/Navigation/");
-	const FString ManifestAssetName = TEXT("DA_WorldNav_") + World->GetMapName();
-	const FString ManifestPackagePath = FPaths::Combine(ManifestDirectory, ManifestAssetName);
-
-	UWorldNavigationDataAsset* WorldNavData = nullptr;
-
-	// --- "삭제 후 생성" 대신 "로드 또는 생성" 방식으로 "partially loaded" 오류를 해결합니다. ---
-
-	// 1. 먼저 해당 경로의 에셋을 메모리로 완전히 로드하려고 시도합니다.
-	WorldNavData = LoadObject<UWorldNavigationDataAsset>(nullptr, *ManifestPackagePath);
-
-	if (WorldNavData)
-	{
-		// 에셋이 이미 존재하고 성공적으로 로드된 경우
-		UE_LOG(LogTemp, Log, TEXT("기존 명세 에셋 '%s'를 덮어씁니다."), *ManifestPackagePath);
-		WorldNavData->VolumeInfos.Empty();
-	}
-	else
-	{
-		// 에셋이 존재하지 않는 경우 (첫 베이크)
-		UE_LOG(LogTemp, Log, TEXT("새로운 명세 에셋 '%s'를 생성합니다."), *ManifestPackagePath);
-
-		// 폴더가 없을 수 있으므로 확인하고, 없다면 생성합
-		if (!UEditorAssetLibrary::DoesDirectoryExist(ManifestDirectory))
-		{
-			UE_LOG(LogTemp, Log, TEXT("'%s' 디렉토리가 존재하지 않아 새로 생성합니다."), *ManifestDirectory);
-			UEditorAssetLibrary::MakeDirectory(ManifestDirectory);
-		}
-
-		// 새 패키지와 명세 에셋을 메모리에 생성
-		UPackage* ManifestPackage = CreatePackage(*ManifestPackagePath);
-		WorldNavData = NewObject<UWorldNavigationDataAsset>(ManifestPackage, FName(*ManifestAssetName), RF_Public | RF_Standalone);
-		FAssetRegistryModule::AssetCreated(WorldNavData);
-	}
-
-	// 생성되었거나 로드된 WorldNavData 에셋에 새로운 볼륨 정보를 채웁니다.
-	for (AOctreeVoxelVolume* Volume : CreatedVolumes)
-	{
-		if (IsValid(Volume))
-		{
-			FVolumeSpatialInfo Info;
-			Info.Bounds = Volume->GetVolumeBounds();
-			Info.NavDataAsset = Volume->GetBakedOctreeData();
-			WorldNavData->VolumeInfos.Add(Info);
-		}
-	}
-
-	// 에셋을 저장 준비 상태로 만들고 디스크에 저장
-	// 이 시점에서 WorldNavData는 항상 유효하고 완전히 로드된 상태임이 보장
-	WorldNavData->MarkPackageDirty();
-	UPackage* PackageToSave = WorldNavData->GetPackage();
-	const bool bSaveSuccess = UEditorLoadingAndSavingUtils::SavePackages({ PackageToSave }, true);
-
-	if (!bSaveSuccess)
-	{
-		UE_LOG(LogTemp, Error, TEXT("월드 내비게이션 데이터 명세 '%s' 저장에 실패했습니다."), *ManifestPackagePath);
-	}
-}
-// PathfindingEditorSubsystem.cpp
-
-#if WITH_EDITOR
 void UPathfindingEditorSubsystem::BakeAndConnectVolumes_Internal(const TArray<AOctreeVoxelVolume*>& VolumesToProcess, UWorld* InWorld)
 {
 	if (VolumesToProcess.IsEmpty() || !InWorld)
@@ -196,10 +173,7 @@ void UPathfindingEditorSubsystem::BakeAndConnectVolumes_Internal(const TArray<AO
 
 	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 
-	// ==================================================================
-	// 단계 1: 모든 볼륨에 대한 데이터 에셋을 먼저 생성하고 할당합니다.
-	// ==================================================================
-	UE_LOG(LogTemp, Log, TEXT("--- 단계 1: 모든 데이터 에셋 생성 및 할당 시작 ---"));
+	UE_LOG(LogTemp, Log, TEXT("--- Step 1: Starting creation and assignment of all data assets ---"));
 	for (AOctreeVoxelVolume* Volume : VolumesToProcess)
 	{
 		if (!IsValid(Volume)) continue;
@@ -220,16 +194,12 @@ void UPathfindingEditorSubsystem::BakeAndConnectVolumes_Internal(const TArray<AO
 
 			Volume->SetBakedOctreeData(NewDataAsset);
 			FAssetRegistryModule::AssetCreated(NewDataAsset);
-			UE_LOG(LogTemp, Verbose, TEXT("'%s'에 대한 데이터 에셋 '%s' 생성 완료."), *Volume->GetName(), *AssetName);
+			UE_LOG(LogTemp, Verbose, TEXT("Data asset '%s' created for '%s'."), *AssetName, *Volume->GetName());
 		}
 	}
-	UE_LOG(LogTemp, Log, TEXT("--- 단계 1: 모든 데이터 에셋 생성 및 할당 완료 ---"));
+	UE_LOG(LogTemp, Log, TEXT("--- Step 1: Finished creation and assignment of all data assets ---"));
 
-
-	// ==================================================================
-	// 단계 2: 각 볼륨의 내부 Octree 데이터를 베이크합니다.
-	// ==================================================================
-	UE_LOG(LogTemp, Log, TEXT("--- 단계 2: 내부 Octree 데이터 베이크 시작 ---"));
+	UE_LOG(LogTemp, Log, TEXT("--- Step 2: Starting bake of internal Octree data ---"));
 	TMap<AOctreeVoxelVolume*, TArray<FOctreeNode>> BakedVolumeData;
 	for (AOctreeVoxelVolume* Volume : VolumesToProcess)
 	{
@@ -240,12 +210,8 @@ void UPathfindingEditorSubsystem::BakeAndConnectVolumes_Internal(const TArray<AO
 			BakedVolumeData.Add(Volume, NodePool);
 		}
 	}
-	UE_LOG(LogTemp, Log, TEXT("--- 단계 2: 내부 Octree 데이터 베이크 완료 ---"));
+	UE_LOG(LogTemp, Log, TEXT("--- Step 2: Finished bake of internal Octree data ---"));
 
-
-	// ==================================================================
-	// 단계 3: 포털 연결을 위한 전체 컨텍스트를 수집합니다.
-	// ==================================================================
 	TArray<AOctreeVoxelVolume*> AllRelevantVolumes;
 	TMap<AOctreeVoxelVolume*, TArray<FOctreeNode>> AllVolumeNodeData;
 	AllRelevantVolumes.Append(VolumesToProcess);
@@ -265,41 +231,30 @@ void UPathfindingEditorSubsystem::BakeAndConnectVolumes_Internal(const TArray<AO
 		}
 	}
 
-	// ==================================================================
-	// 단계 4: 포털을 연결합니다.
-	// ==================================================================
-	UE_LOG(LogTemp, Log, TEXT("--- 단계 4: 포털 연결 시작 ---"));
-	// [수정] AllPortalData의 타입을 새로운 데이터 구조에 맞게 변경합니다.
+	UE_LOG(LogTemp, Log, TEXT("--- Step 4: Starting portal connection ---"));
 	TMap<AOctreeVoxelVolume*, TMap<int32, FVolumePortalLinks>> AllPortalData;
 	for (AOctreeVoxelVolume* Volume : VolumesToProcess)
 	{
 		TArray<FOctreeNode>* MyNodePool = BakedVolumeData.Find(Volume);
 		if (MyNodePool)
 		{
-			// [수정] 지역 변수 PortalNodes의 타입도 새로운 데이터 구조에 맞게 변경합니다.
 			TMap<int32, FVolumePortalLinks> PortalNodes;
 			Volume->ConnectPortals_Bake(*MyNodePool, PortalNodes, AllVolumeNodeData, AllRelevantVolumes);
 			AllPortalData.Add(Volume, PortalNodes);
 		}
 	}
-	UE_LOG(LogTemp, Log, TEXT("--- 단계 4: 포털 연결 완료 ---"));
+	UE_LOG(LogTemp, Log, TEXT("--- Step 4: Finished portal connection ---"));
 
-
-	// ==================================================================
-	// 단계 5: 최종 데이터를 에셋에 할당하고 저장할 패키지 목록을 만듭니다.
-	// ==================================================================
-	UE_LOG(LogTemp, Log, TEXT("--- 단계 5: 최종 데이터 저장 준비 ---"));
+	UE_LOG(LogTemp, Log, TEXT("--- Step 5: Preparing final data for saving ---"));
 	TArray<UPackage*> PackagesToSave;
 	for (AOctreeVoxelVolume* Volume : VolumesToProcess)
 	{
 		UOctreeDataAsset* DataAsset = Volume->GetBakedOctreeData().Get();
 		TArray<FOctreeNode>* NodePoolToSave = BakedVolumeData.Find(Volume);
-		// [수정] PortalsToSave의 타입도 이제 올바른 TMap<int32, FVolumePortalLinks>* 가 됩니다.
 		TMap<int32, FVolumePortalLinks>* PortalsToSave = AllPortalData.Find(Volume);
 
 		if (DataAsset && NodePoolToSave && PortalsToSave)
 		{
-			// 이제 SaveOctreeToAsset 함수 호출 시 타입이 일치합니다.
 			Volume->SaveOctreeToAsset(*NodePoolToSave, *PortalsToSave);
 			if (UPackage* Package = DataAsset->GetPackage())
 			{
@@ -308,21 +263,18 @@ void UPathfindingEditorSubsystem::BakeAndConnectVolumes_Internal(const TArray<AO
 		}
 	}
 
-	// ==================================================================
-	// 단계 6: 모든 패키지를 한 번에 디스크에 저장합니다.
-	// ==================================================================
 	if (PackagesToSave.Num() > 0)
 	{
-		UE_LOG(LogTemp, Log, TEXT("--- 단계 6: %d개의 데이터 에셋 패키지를 디스크에 저장합니다. ---"), PackagesToSave.Num());
+		UE_LOG(LogTemp, Log, TEXT("--- Step 6: Saving %d data asset packages to disk. ---"), PackagesToSave.Num());
 		UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, true);
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("--- 단계 6: 저장할 데이터 에셋 패키지가 없습니다. ---"));
+		UE_LOG(LogTemp, Warning, TEXT("--- Step 6: No data asset packages to save. ---"));
 	}
 }
 #endif
-
+#if WITH_EDITOR
 void UPathfindingEditorSubsystem::CleanupPreviousAssets(UWorld* InWorld, const FString& InSavePath) const
 {
 	FString SavePath = InSavePath;
@@ -341,24 +293,19 @@ void UPathfindingEditorSubsystem::CleanupPreviousAssets(UWorld* InWorld, const F
 		for (const FString& Path : AssetPathStrings)
 		{
 			FAssetData AssetData = AssetRegistryModule.Get().GetAssetByObjectPath(FSoftObjectPath(Path));
-
-			// 에셋이 유효하고, 클래스가 'UOctreeDataAsset'인 경우에만 삭제 목록에 추가
-			// 근데 이걸로는 조건이 부족할 것 같은데 아닌가?
 			if (AssetData.IsValid() && AssetData.GetClass() == UOctreeDataAsset::StaticClass())
 			{
 				AssetsToDelete.Add(AssetData);
 			}
 		}
 
-		// 필터링된 에셋 목록을 일괄 삭제
 		if (!AssetsToDelete.IsEmpty())
 		{
-			UE_LOG(LogTemp, Log, TEXT("CleanupPreviousAssets: '%s' 경로에서 %d개의 이전 데이터 에셋을 삭제합니다."), *SavePath, AssetsToDelete.Num());
+			UE_LOG(LogTemp, Log, TEXT("CleanupPreviousAssets: Deleting %d previous data assets from '%s'."), AssetsToDelete.Num(), *SavePath);
 			ObjectTools::DeleteAssets(AssetsToDelete, true);
 		}
 	}
 
-	// 월드에 존재하는 모든 AOctreeVoxelVolume 액터를 찾아서 삭제
 	TArray<AActor*> ActorsToDelete;
 	for (TActorIterator<AOctreeVoxelVolume> It(InWorld); It; ++It)
 	{
@@ -369,9 +316,6 @@ void UPathfindingEditorSubsystem::CleanupPreviousAssets(UWorld* InWorld, const F
 	{
 		for (AActor* Actor : ActorsToDelete)
 		{
-			// InWorld->DestroyActor(Actor)는 즉시 실행되지 않을 수 있으므로,
-			// 에디터 유틸리티에서는 EditorLevelUtils 등을 사용하는 것이 더 안정적일 수 있으나,
-			// 현재 컨텍스트에서는 이 방법도 일반적으로 잘 동작합니다.
 			InWorld->DestroyActor(Actor);
 		}
 	}
@@ -464,9 +408,6 @@ bool UPathfindingEditorSubsystem::BakeAndCreateVolumesInGrid(
 				NewVolume->BakedDataSaveDirectory.Path = InSettings->WorldBake_SaveDirectory.Path;
 
 				TArray<FOctreeNode> NodePool;
-
-				// 이걸 하면 장애물이 없는 볼륨은 생략
-				//if (NewVolume->BakeStaticData(InWorld, NodePool) && NodePool.Num() > 1)
 				if (NewVolume->BakeStaticData(InWorld, NodePool))
 				{
 					FWorldBakeResult Result;

@@ -30,12 +30,12 @@
 #include "Subsystem/OctreeNavSubsystem.h"
 #include "Engine/StreamableManager.h"
 #include "Engine/AssetManager.h"
-#include "LandscapeComponent.h" 
-#include "Landscape.h"
-#include "LandscapeStreamingProxy.h"
-#include "LandscapeSubsystem.h"
-#include "EngineUtils.h"
-#include "LandscapeInfo.h"
+// #include "LandscapeComponent.h" 
+// #include "Landscape.h"
+// #include "LandscapeStreamingProxy.h"
+// #include "LandscapeSubsystem.h"
+// #include "EngineUtils.h"
+// #include "LandscapeInfo.h"
 
 AOctreeVoxelVolume::AOctreeVoxelVolume()
 {
@@ -65,9 +65,7 @@ void AOctreeVoxelVolume::BeginPlay()
 	//}
 
 	//RequestAsyncLoad();
-
-
-
+	
 	{
 		const FVector TotalSize = GetVolumeBounds().GetSize();
 		const FIntVector CalculatedMapSize(
@@ -212,18 +210,15 @@ void AOctreeVoxelVolume::GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObs
 
 bool AOctreeVoxelVolume::IsLocationInBlockedVoxel(const FVector& WorldLocation) const
 {
-	// --- 1. 사전 검사: 데이터가 준비되었고, 위치가 유효한 범위 내에 있는지 확인 ---
 	if (LoadState != EVolumeLoadState::Loaded)
 	{
-		return true; // 데이터가 없으면 안전을 위해 막혔다고 처리
+		return true;
 	}
 	if (!GetVolumeBounds().IsInsideOrOn(WorldLocation))
 	{
-		return true; // 볼륨 범위를 벗어남
+		return true;
 	}
 
-	// --- 2. 동적 장애물 레이어 확인 (빠른 비트마스크 검사) ---
-	// 이 로직은 IsLocationBlockedByDynamicObstacle 함수와 동일하지만, 여기서 직접 처리하는 것이 더 효율적입니다.
 	const FVector LocalPos = WorldLocation - GetVolumeBounds().Min;
 	const int32 VoxelIndexX = FMath::FloorToInt(LocalPos.X / VoxelExtent);
 	const int32 VoxelIndexY = FMath::FloorToInt(LocalPos.Y / VoxelExtent);
@@ -238,15 +233,12 @@ bool AOctreeVoxelVolume::IsLocationInBlockedVoxel(const FVector& WorldLocation) 
 
 		if (DynamicObstacleBitmask.IsValidIndex(ChunkIndex) && DynamicObstacleBitmask[ChunkIndex].GetBit(BitIndex))
 		{
-			// 동적 장애물에 의해 막힘
 			return true;
 		}
 	}
 
-	// --- 3. 정적 장애물 레이어 확인 (수정된 옥트리 순회) ---
 	if (!StaticNodePoolPtr || RootNodeIndex == -1)
 	{
-		// 정적 데이터가 없으면 동적 장애물 결과만 신뢰합니다.
 		return false;
 	}
 
@@ -257,29 +249,21 @@ bool AOctreeVoxelVolume::IsLocationInBlockedVoxel(const FVector& WorldLocation) 
 	{
 		const FOctreeNode& Node = (*StaticNodePoolPtr)[CurrentNodeIndex];
 
-		// 최종 판단: 리프 노드에 도달했거나, 최대 깊이에 도달했을 때
 		if (Node.State != EOctreeNodeState::Mixed || CurrentDepth >= GetMaxOctreeDepth())
 		{
-			// 이 노드가 Solid 상태일 때만 막힌 것입니다. Empty 상태는 안전합니다.
 			return Node.State == EOctreeNodeState::Solid;
 		}
 
-		// 분기: Mixed 노드이므로 자식으로 내려가야 합니다.
 		const int32 ChildOctant = GetOctantContainingVoxel(Node.Bounds, WorldLocation);
 		CurrentNodeIndex = Node.ChildrenIndices[ChildOctant];
 		CurrentDepth++;
 		
-		// 만약 자식 인덱스가 -1이라면, 이 분기는 비어있어서 최적화된(Collapse) 것입니다.
-		// 따라서 이 위치는 막히지 않았습니다.
 		if (CurrentNodeIndex == -1)
 		{
 			return false;
 		}
 	}
 
-	// 루프가 비정상적으로 종료된 경우 (예: WorldLocation이 볼륨 밖에 있는 경우 등)
-	// 안전을 위해 막혔다고 처리할 수 있지만, 위의 사전 검사로 대부분 걸러집니다.
-	// 여기까지 왔다는 것은 해당 위치가 비어있다는 것을 의미합니다.
 	return false;
 }
 //~======================================================================
@@ -486,169 +470,6 @@ bool AOctreeVoxelVolume::BakeStaticData(UWorld* World, TArray<FOctreeNode>& OutN
 	return true;
 }
 
-void AOctreeVoxelVolume::ConnectPortals_Bake(
-	TArray<FOctreeNode>& InOutMyNodePool,
-	TMap<int32, FVolumePortalLinks>& OutPortalNodes,
-	const TMap<AOctreeVoxelVolume*, TArray<FOctreeNode>>& AllVolumeData,
-	const TArray<AOctreeVoxelVolume*>& AllCreatedVolumes)
-{
-#if WITH_EDITOR
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		UE_LOG(LogTemp, Error, TEXT("ConnectPortals_Bake: Debug drawing failed because World is null."));
-		return;
-	}
-
-	// Epsilon: 경계면을 살짝 넘어가기 위한 아주 작은 값입니다.
-	constexpr float Epsilon = 1.0f;
-	int32 BoundaryNodeCount = 0;
-	int32 CreatedPortalCount = 0;
-
-	// 현재 볼륨의 모든 노드를 순회합니다.
-	for (int32 MyNodeIndex = 0; MyNodeIndex < InOutMyNodePool.Num(); ++MyNodeIndex)
-	{
-		FOctreeNode& MyNode = InOutMyNodePool[MyNodeIndex];
-
-		// 포털은 비어있는(Empty) 노드에서만 생성될 수 있습니다.
-		if (MyNode.State != EOctreeNodeState::Empty)
-		{
-			continue;
-		}
-
-		// 6방향(위, 아래, 앞, 뒤, 좌, 우)을 모두 검사합니다.
-		for (int32 DirIndex = 0; DirIndex < static_cast<int32>(ENeighborDirection::MAX); ++DirIndex)
-		{
-			// 이미 내부 이웃이 있는 경우는 건너뜁니다. (볼륨 경계면의 노드만 처리)
-			if (MyNode.Neighbors[DirIndex] != -1)
-			{
-				continue;
-			}
-
-			BoundaryNodeCount++;
-			const ENeighborDirection Direction = static_cast<ENeighborDirection>(DirIndex);
-
-			FVector TestPoint = MyNode.Bounds.GetCenter();
-			switch (Direction)
-			{
-			case ENeighborDirection::Right: TestPoint.X = MyNode.Bounds.Max.X + Epsilon; break;
-			case ENeighborDirection::Left:  TestPoint.X = MyNode.Bounds.Min.X - Epsilon; break;
-			case ENeighborDirection::Front: TestPoint.Y = MyNode.Bounds.Max.Y + Epsilon; break;
-			case ENeighborDirection::Back:  TestPoint.Y = MyNode.Bounds.Min.Y - Epsilon; break;
-			case ENeighborDirection::Up:    TestPoint.Z = MyNode.Bounds.Max.Z + Epsilon; break;
-			case ENeighborDirection::Down:  TestPoint.Z = MyNode.Bounds.Min.Z - Epsilon; break;
-			}
-
-			// 이웃 볼륨 찾기: NavSubsystem 대신 전달받은 전체 볼륨 목록을 직접 순회합니다.
-			AOctreeVoxelVolume* NeighborVolume = nullptr;
-			float MinDistanceSq = TNumericLimits<float>::Max();
-
-			// 생성된 모든 볼륨을 순회하며 가장 적합한 이웃을 찾습니다.
-			for (AOctreeVoxelVolume* PotentialNeighbor : AllCreatedVolumes)
-			{
-				if (!PotentialNeighbor || PotentialNeighbor == this) continue;
-
-				const FBox NeighborBounds = PotentialNeighbor->GetVolumeBounds();
-
-				// 1. 테스트 지점이 잠재적 이웃 볼륨 내에 있는지 먼저 확인합니다.
-				if (NeighborBounds.IsInsideOrOn(TestPoint))
-				{
-					// 2. 테스트 지점과 잠재적 이웃 볼륨의 중심점 사이의 거리를 계산합니다.
-					const float DistSq = FVector::DistSquared(TestPoint, NeighborBounds.GetCenter());
-
-					// 3. 가장 중심점이 가까운 볼륨을 이웃으로 선택합니다.
-					//    동일 크기 볼륨 그리드에서는 이 방식이 가장 직관적이고 안정적입니다.
-					if (DistSq < MinDistanceSq)
-					{
-						MinDistanceSq = DistSq;
-						NeighborVolume = PotentialNeighbor;
-					}
-				}
-			}
-
-			// 만약 찾은 이웃이 너무 멀리 있다면(즉, 엉뚱한 이웃을 찾았다면) 무시합니다.
-			// 이는 여러 볼륨이 겹쳐있거나 할 때, 잘못된 이웃이 선택되는 것을 방지하는 중요한 방어 로직입니다.
-			if (NeighborVolume)
-			{
-				// 볼륨의 크기는 모든 축에서 동일하다고 가정하고, 한 축의 Extent(반지름)를 가져옵니다.
-				const float VolumeHalfExtent = NeighborVolume->GetVolumeBounds().GetExtent().X;
-				// 합리적인 거리 임계값. (반지름의 1.5배 거리 제곱)
-				// TestPoint는 경계면 근처에 있으므로, 중심까지의 거리는 반지름과 비슷해야 합니다.
-				const float DistanceThresholdSq = FMath::Square(VolumeHalfExtent * 1.5f);
-
-				if (MinDistanceSq > DistanceThresholdSq)
-				{
-					// 찾은 이웃이 너무 멀리 떨어져 있으므로, 유효한 이웃이 없는 것으로 간주하고 연결을 포기합니다.
-					UE_LOG(LogTemp, Warning, TEXT("Neighbor '%s' for '%s' was found, but it's too far (DistSq: %.f, ThresholdSq: %.f). Discarding connection."),
-						*NeighborVolume->GetName(), *GetName(), MinDistanceSq, DistanceThresholdSq);
-					NeighborVolume = nullptr;
-				}
-			}
-
-			// 가장 적합하고 유효한 이웃 볼륨을 찾았다면, 포털 생성을 시도합니다.
-			if (NeighborVolume)
-			{
-				TSoftObjectPtr<UOctreeDataAsset> NeighborDataAssetPtr = NeighborVolume->GetBakedOctreeData();
-				if (NeighborDataAssetPtr.IsNull())
-				{
-					UE_LOG(LogTemp, Error, TEXT("ConnectPortals_Bake CRITICAL: 이웃 볼륨 '%s'가 유효한 BakedOctreeData 에셋을 가지고 있지 않습니다!"), *NeighborVolume->GetName());
-					continue;
-				}
-
-				const TArray<FOctreeNode>* NeighborNodePoolPtr = AllVolumeData.Find(NeighborVolume);
-				if (!NeighborNodePoolPtr)
-				{
-					UE_LOG(LogTemp, Warning, TEXT("ConnectPortals_Bake: 이웃 볼륨 '%s'는 찾았지만, AllVolumeData 맵에 해당 볼륨의 노드 데이터가 없습니다."), *NeighborVolume->GetName());
-					continue;
-				}
-
-				// 이웃 볼륨에서 테스트 지점에 해당하는 리프 노드를 찾습니다.
-				const int32 NeighborNodeIndex = NeighborVolume->FindLeafNode_Internal(*NeighborNodePoolPtr, 0, TestPoint, NeighborVolume->GetMaxOctreeDepth());
-
-				if (NeighborNodePoolPtr->IsValidIndex(NeighborNodeIndex))
-				{
-					const FOctreeNode& NeighborNode = (*NeighborNodePoolPtr)[NeighborNodeIndex];
-
-					// 이웃 노드도 비어있어야만 포털을 생성할 수 있습니다.
-					if (NeighborNode.State == EOctreeNodeState::Empty)
-					{
-						const float PortalClearance = FMath::Min(MyNode.MaxAllowedRadius, NeighborNode.MaxAllowedRadius);
-
-						FVolumePortalLink PortalLink;
-						PortalLink.TargetVolume = NeighborDataAssetPtr;
-						PortalLink.TargetNodeIndex = NeighborNodeIndex;
-						PortalLink.MaxAllowedRadius = PortalClearance;
-						FVolumePortalLinks& LinksContainer = OutPortalNodes.FindOrAdd(MyNodeIndex);
-						LinksContainer.Links.Add(PortalLink);
-
-						CreatedPortalCount++;
-					}
-					else
-					{
-						FString StateString = (NeighborNode.State == EOctreeNodeState::Solid) ? TEXT("Solid") : TEXT("Mixed");
-						UE_LOG(LogTemp, Warning, TEXT(">>> FAILED: '%s'(노드 %d)의 포털 생성 실패. 이웃 볼륨 '%s'의 노드 %d가 비어있지 않음 (상태: %s)."),
-							*GetName(), MyNodeIndex, *NeighborVolume->GetName(), NeighborNodeIndex, *StateString);
-
-#if WITH_EDITOR
-						DrawDebugBox(World, NeighborNode.Bounds.GetCenter(), NeighborNode.Bounds.GetExtent(), FColor::Red, false, 30.0f, 0, 10.0f);
-#endif
-					}
-				}
-				else
-				{
-					UE_LOG(LogTemp, Warning, TEXT(">>> FAILED: 이웃 볼륨 '%s'에서 TestPoint(%s)에 해당하는 유효한 리프 노드를 찾지 못했습니다."), *GetActorLabel(), *TestPoint.ToString());
-				}
-			}
-		}
-	}
-
-	if (CreatedPortalCount > 0)
-	{
-		UE_LOG(LogTemp, Log, TEXT("ConnectPortals_Bake SUCCESS for '%s': Found %d boundary nodes and created %d portals."), *GetActorLabel(), BoundaryNodeCount, CreatedPortalCount);
-	}
-#endif
-}
-
 void AOctreeVoxelVolume::SaveOctreeToAsset(const TArray<FOctreeNode>& NodePoolToSave, const TMap<int32, FVolumePortalLinks>& PortalsToSave)
 {
 #if WITH_EDITOR
@@ -665,8 +486,7 @@ void AOctreeVoxelVolume::SaveOctreeToAsset(const TArray<FOctreeNode>& NodePoolTo
 		UE_LOG(LogTemp, Error, TEXT("SaveOctreeToAsset failed for '%s': The assigned data asset is missing."), *GetActorLabel());
 		return;
 	}
-
-	// 검증 로그
+	
 	int32 TotalPortalLinkCount = 0;
 	if (PortalsToSave.Num() == 0)
 	{
@@ -693,14 +513,10 @@ void AOctreeVoxelVolume::SaveOctreeToAsset(const TArray<FOctreeNode>& NodePoolTo
 
 	DataAssetToSave->Modify();
 
-	// 1. PortalNodes는 UPROPERTY이므로, 데이터 에셋의 멤버 변수에 직접 할당
-	//    엔진의 표준 직렬화 시스템이 이 데이터를 올바르게 저장
 	DataAssetToSave->PortalNodes = PortalsToSave;
 
-	// NodePool은 커스텀 압축 함수를 호출하여 처리
 	DataAssetToSave->SetAndCompressBakedData(NodePoolToSave, this->MapSize, this->GetMaxOctreeDepth());
 
-	// 변경된 에셋 데이터를 디스크에 확실히 저장
 	TArray<UObject*> AssetsToSave;
 	AssetsToSave.Add(DataAssetToSave);
 
@@ -744,7 +560,6 @@ void AOctreeVoxelVolume::VoxelizeComponent(const FBox& ComponentBounds, const FC
 	}
 }
 
-// TO-DO: Check
 void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticObstacles, UObject* WorldContextObject, const FBox& ScanWorldBounds) const
 {
 	OutStaticObstacles.Empty();
@@ -861,7 +676,6 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 
 	if (LoadState != EVolumeLoadState::Loaded || RootNodeIndex == -1 || !StaticNodePoolPtr || StaticNodePoolPtr->IsEmpty())
 	{
-		// 기존에 그려진 디버그 메시가 있다면 깨끗하게 지웁니다.
 		if (DebugSolidNodesComponent) DebugSolidNodesComponent->ClearInstances();
 		if (DebugMixedNodesComponent) DebugMixedNodesComponent->ClearInstances();
 		return;
@@ -975,10 +789,8 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 
 FIntVector AOctreeVoxelVolume::WorldToVoxelIndex(const FVector& WorldLocation) const
 {
-	// VoxelExtent가 0이거나 음수일 경우의 방어 코드
 	if (VoxelExtent <= 0.f) return FIntVector::ZeroValue;
 
-	// 볼륨의 최소 경계점을 (0,0,0) 원점으로 간주하고 계산합니다.
 	const FVector LocalPosition = WorldLocation - GetVolumeBounds().Min;
 	return FIntVector(
 		FMath::FloorToInt(LocalPosition.X / VoxelExtent),
@@ -990,7 +802,6 @@ FIntVector AOctreeVoxelVolume::WorldToVoxelIndex(const FVector& WorldLocation) c
 FVector AOctreeVoxelVolume::VoxelIndexToWorld(const FIntVector& VoxelIndex) const
 {
 	const FVector VoxelSize(VoxelExtent);
-	// 복셀의 월드 좌표는 (볼륨 시작점) + (인덱스 * 복셀 크기) + (중심점 보정) 입니다.
 	return GetVolumeBounds().Min + (FVector(VoxelIndex) * VoxelExtent) + (VoxelSize * 0.5f);
 }
 
@@ -1056,7 +867,7 @@ void AOctreeVoxelVolume::DrawDebugDynamicObstaclesWithBoxes()
     const float MinNodeSize = TotalSize.X / FMath::Pow(2.f, GetMaxOctreeDepth());
     const FVector VoxelSize(100);
 	
-    const FIntVector CalculatedMapSize( // 'MapSize'를 'CalculatedMapSize'로 변경
+    const FIntVector CalculatedMapSize(
         FMath::RoundToInt(TotalSize.X / VoxelSize.X),
         FMath::RoundToInt(TotalSize.Y / VoxelSize.Y),
         FMath::RoundToInt(TotalSize.Z / VoxelSize.Z)
@@ -1225,8 +1036,6 @@ void AOctreeVoxelVolume::InsertObstacleRecursive_Internal(TArray<FOctreeNode>& I
 		for (int i = 0; i < 8; ++i)
 		{
 			const int32 NewChildIndex = InOutNodePool.Emplace(FOctreeNode());
-			// 배열이 재할당될 수 있으므로, InOutNodePool[NodeIndex]를 다시 참조하지 않도록 주의해야 합니다.
-			// 여기서는 괜찮지만 복잡한 로직에서는 포인터/참조를 다시 얻어야 할 수 있습니다.
 			InOutNodePool[NewChildIndex].Bounds = CalculateChildBounds(CurrentNodeBounds, i);
 			InOutNodePool[NodeIndex].ChildrenIndices[i] = NewChildIndex;
 		}
@@ -1360,5 +1169,169 @@ void AOctreeVoxelVolume::PrecomputeNeighbors_Internal(TArray<FOctreeNode>& InOut
 			}
 		}
 	}
+}
+
+void AOctreeVoxelVolume::ConnectPortals_Bake(
+	TArray<FOctreeNode>& InOutMyNodePool,
+	TMap<int32, FVolumePortalLinks>& OutPortalNodes,
+	const TMap<AOctreeVoxelVolume*, TArray<FOctreeNode>>& AllVolumeData,
+	const TArray<AOctreeVoxelVolume*>& AllCreatedVolumes)
+{
+#if WITH_EDITOR
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		UE_LOG(LogTemp, Error, TEXT("ConnectPortals_Bake: Debug drawing failed because World is null."));
+		return;
+	}
+
+	// Epsilon: A small value to step just outside the boundary.
+	constexpr float Epsilon = 1.0f;
+	int32 BoundaryNodeCount = 0;
+	int32 CreatedPortalCount = 0;
+
+	// Iterate through all nodes in the current volume.
+	for (int32 MyNodeIndex = 0; MyNodeIndex < InOutMyNodePool.Num(); ++MyNodeIndex)
+	{
+		FOctreeNode& MyNode = InOutMyNodePool[MyNodeIndex];
+
+		// Portals can only be created from empty nodes.
+		if (MyNode.State != EOctreeNodeState::Empty)
+		{
+			continue;
+		}
+
+		// Check all 6 directions.
+		for (int32 DirIndex = 0; DirIndex < static_cast<int32>(ENeighborDirection::MAX); ++DirIndex)
+		{
+			// Skip if there's already an internal neighbor (we only care about boundary nodes).
+			if (MyNode.Neighbors[DirIndex] != -1)
+			{
+				continue;
+			}
+
+			BoundaryNodeCount++;
+			const ENeighborDirection Direction = static_cast<ENeighborDirection>(DirIndex);
+
+			FVector TestPoint = MyNode.Bounds.GetCenter();
+			switch (Direction)
+			{
+			case ENeighborDirection::Right: TestPoint.X = MyNode.Bounds.Max.X + Epsilon; break;
+			case ENeighborDirection::Left:  TestPoint.X = MyNode.Bounds.Min.X - Epsilon; break;
+			case ENeighborDirection::Front: TestPoint.Y = MyNode.Bounds.Max.Y + Epsilon; break;
+			case ENeighborDirection::Back:  TestPoint.Y = MyNode.Bounds.Min.Y - Epsilon; break;
+			case ENeighborDirection::Up:    TestPoint.Z = MyNode.Bounds.Max.Z + Epsilon; break;
+			case ENeighborDirection::Down:  TestPoint.Z = MyNode.Bounds.Min.Z - Epsilon; break;
+			}
+
+			// Find the neighboring volume by iterating through all created volumes.
+			AOctreeVoxelVolume* NeighborVolume = nullptr;
+			float MinDistanceSq = TNumericLimits<float>::Max();
+
+			// Iterate through all created volumes to find the most suitable neighbor.
+			for (AOctreeVoxelVolume* PotentialNeighbor : AllCreatedVolumes)
+			{
+				if (!PotentialNeighbor || PotentialNeighbor == this) continue;
+
+				const FBox NeighborBounds = PotentialNeighbor->GetVolumeBounds();
+
+				// 1. First, check if the test point is inside the potential neighbor's bounds.
+				if (NeighborBounds.IsInsideOrOn(TestPoint))
+				{
+					// 2. Calculate the distance between the test point and the center of the potential neighbor.
+					const float DistSq = FVector::DistSquared(TestPoint, NeighborBounds.GetCenter());
+
+					// 3. Choose the volume with the closest center as the neighbor.
+					//    This is a robust method for grid-aligned volumes of the same size.
+					if (DistSq < MinDistanceSq)
+					{
+						MinDistanceSq = DistSq;
+						NeighborVolume = PotentialNeighbor;
+					}
+				}
+			}
+
+			// If the found neighbor is too far away, ignore it.
+			// This is an important defensive check to prevent incorrect neighbor selection
+			// when volumes overlap or are arranged complexly.
+			if (NeighborVolume)
+			{
+				// Assuming the volume is cubic, get the extent of one axis.
+				const float VolumeHalfExtent = NeighborVolume->GetVolumeBounds().GetExtent().X;
+				// A reasonable distance threshold (squared distance of 1.5 times the half-extent).
+				// Since TestPoint is near the boundary, the distance to the center should be similar to the half-extent.
+				const float DistanceThresholdSq = FMath::Square(VolumeHalfExtent * 1.5f);
+
+				if (MinDistanceSq > DistanceThresholdSq)
+				{
+					// The found neighbor is too far away, so we consider it invalid and abandon the connection.
+					UE_LOG(LogTemp, Warning, TEXT("Neighbor '%s' for '%s' was found, but it's too far (DistSq: %.f, ThresholdSq: %.f). Discarding connection."),
+						*NeighborVolume->GetName(), *GetName(), MinDistanceSq, DistanceThresholdSq);
+					NeighborVolume = nullptr;
+				}
+			}
+
+			// If a suitable and valid neighbor volume was found, attempt to create a portal.
+			if (NeighborVolume)
+			{
+				TSoftObjectPtr<UOctreeDataAsset> NeighborDataAssetPtr = NeighborVolume->GetBakedOctreeData();
+				if (NeighborDataAssetPtr.IsNull())
+				{
+					UE_LOG(LogTemp, Error, TEXT("ConnectPortals_Bake CRITICAL: Neighbor volume '%s' does not have a valid BakedOctreeData asset!"), *NeighborVolume->GetName());
+					continue;
+				}
+
+				const TArray<FOctreeNode>* NeighborNodePoolPtr = AllVolumeData.Find(NeighborVolume);
+				if (!NeighborNodePoolPtr)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("ConnectPortals_Bake: Found neighbor volume '%s', but its node data is not in the AllVolumeData map."), *NeighborVolume->GetName());
+					continue;
+				}
+
+				// Find the corresponding leaf node in the neighbor volume at the test point.
+				const int32 NeighborNodeIndex = NeighborVolume->FindLeafNode_Internal(*NeighborNodePoolPtr, 0, TestPoint, NeighborVolume->GetMaxOctreeDepth());
+
+				if (NeighborNodePoolPtr->IsValidIndex(NeighborNodeIndex))
+				{
+					const FOctreeNode& NeighborNode = (*NeighborNodePoolPtr)[NeighborNodeIndex];
+
+					// A portal can only be created if the neighbor node is also empty.
+					if (NeighborNode.State == EOctreeNodeState::Empty)
+					{
+						const float PortalClearance = FMath::Min(MyNode.MaxAllowedRadius, NeighborNode.MaxAllowedRadius);
+
+						FVolumePortalLink PortalLink;
+						PortalLink.TargetVolume = NeighborDataAssetPtr;
+						PortalLink.TargetNodeIndex = NeighborNodeIndex;
+						PortalLink.MaxAllowedRadius = PortalClearance;
+						FVolumePortalLinks& LinksContainer = OutPortalNodes.FindOrAdd(MyNodeIndex);
+						LinksContainer.Links.Add(PortalLink);
+
+						CreatedPortalCount++;
+					}
+					else
+					{
+						FString StateString = (NeighborNode.State == EOctreeNodeState::Solid) ? TEXT("Solid") : TEXT("Mixed");
+						UE_LOG(LogTemp, Warning, TEXT(">>> FAILED: Portal creation for '%s' (Node %d) failed. Neighbor node %d in '%s' is not empty (State: %s)."),
+							*GetName(), MyNodeIndex, *NeighborVolume->GetName(), NeighborNodeIndex, *StateString);
+
+#if WITH_EDITOR
+						DrawDebugBox(World, NeighborNode.Bounds.GetCenter(), NeighborNode.Bounds.GetExtent(), FColor::Red, false, 30.0f, 0, 10.0f);
+#endif
+					}
+				}
+				else
+				{
+					UE_LOG(LogTemp, Warning, TEXT(">>> FAILED: Could not find a valid leaf node in neighbor volume '%s' at TestPoint(%s)."), *GetActorLabel(), *TestPoint.ToString());
+				}
+			}
+		}
+	}
+
+	if (CreatedPortalCount > 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("ConnectPortals_Bake SUCCESS for '%s': Found %d boundary nodes and created %d portals."), *GetActorLabel(), BoundaryNodeCount, CreatedPortalCount);
+	}
+#endif
 }
 #endif

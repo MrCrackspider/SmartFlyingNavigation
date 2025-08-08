@@ -36,27 +36,27 @@ public:
 	bool bAgentDebugSettingsExpanded;
 
 	// Begin Test
-	/** 월드 전체를 Bake할 때 사용할 청크의 크기 (월드 단위) */
+	/** The size of the chunks (in world units) to use when baking the entire world. */
 	UPROPERTY(Config)
 	float WorldBake_VolumeSize = 25600.0f;
 
-	/** 월드 전체를 Bake할 때 사용할 Voxel의 크기 */
+	/** The size of the Voxels to use when baking the entire world. */
 	UPROPERTY(Config)
 	float WorldBake_VoxelExtent = 100.0f;
 
-	/** 월드 전체를 Bake할 때 사용할 Octree의 최대 깊이 */
+	/** The maximum depth of the Octree to use when baking the entire world. */
 	UPROPERTY(Config)
 	int32 WorldBake_MaxOctreeDepth = 7;
 
-	/** 월드 전체 Bake 시 생성된 에셋들을 저장할 기본 경로 */
+	/** The default path to save generated assets to when baking the entire world. */
 	UPROPERTY(Config)
 	FDirectoryPath WorldBake_SaveDirectory;
 
-	/** 월드 전체 Bake 시 사용할 장애물 프로파일 */
+	/** The obstacle profile to use when baking the entire world. */
 	UPROPERTY(Config)
 	TSoftObjectPtr<UVoxelObstacleProfile> WorldBake_ObstacleProfile;
 
-	/** UI 섹션 확장 상태 저장을 위한 변수 */
+	/** Variable to save the expansion state of the UI section. */
 	UPROPERTY(Config)
 	bool bIsWorldBakeCategoryExpanded = true;
 

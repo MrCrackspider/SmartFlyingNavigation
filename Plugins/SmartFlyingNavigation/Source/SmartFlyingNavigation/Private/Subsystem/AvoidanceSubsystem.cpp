@@ -26,11 +26,11 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
     TimeHorizon = 1.f;
     MaxNeighbors = 8;
-    GridCellSize = 200.f;
+    GridCellSize = 100.f;
     SymmetryBreakingRangeMultiplier = 8.f;
     SolverIterations = 5;
     SideBiasMagnitude = 10.f;
-    InterpSpeed = 10.f;
+    InterpSpeed = 1.f;
 }
 
 void UAvoidanceSubsystem::PostInitialize()
@@ -344,8 +344,6 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
         {
             SideVector *= -1.0f;
         }
-
-        UE_LOG(LogTemp, Display, TEXT("%f, %f, %f"), SideVector.X, SideVector.Y, SideVector.Z);
 
         FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
         return ActualPreferredVelocity;

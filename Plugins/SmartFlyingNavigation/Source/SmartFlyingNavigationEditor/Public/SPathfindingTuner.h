@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "NavData/OctreeDataAsset.h"
+#include "IDetailsView.h"
 #include "Widgets/SCompoundWidget.h"
 
 class UPathfindingSubsystem;
@@ -33,19 +34,24 @@ private:
     //=================================================================================================
     TSharedRef<SWidget> BuildPerformanceSettingsSection();
     TSharedRef<SWidget> BuildOctreeVolumeSettingsSection();
-    TSharedRef<SWidget> BuildBakedDataSettingsSection();
-    TSharedRef<SWidget> BuildAgentSettingsSection();
     TSharedRef<SWidget> BuildVoxelDebugSettingsSection();
-    TSharedRef<SWidget> BuildAgentDebugSection();
-    TSharedRef<SWidget> BuildWorldBakeSection();
+    TSharedRef<SWidget> BuildBakedDataSettingsSection();
+
+    // TSharedRef<SWidget> BuildAgentSettingsSection();
+    // TSharedRef<SWidget> BuildAgentDebugSection();
+    //TSharedRef<SWidget> BuildWorldBakeSection();
     
     //=================================================================================================
     // Actor Selection Handling
     //=================================================================================================
- 
+    
     bool TickActorSelection(float DeltaTime);
     void OnActorSelectionChanged();
 
+    // 디테일 뷰 위젯을 가리킬 포인터
+    TSharedPtr<IDetailsView> AgentDetailsView ;
+    
+     
     //=================================================================================================
     // Property Getters & Setters (Generic Helpers)
     //=================================================================================================
@@ -90,8 +96,8 @@ private:
     FText GetObstacleProfileFullPathAsText() const;
 
     FReply OnBrowseButtonClicked();
-    TOptional<int32> GetMaxOctreeDepth() const;
-    void OnMaxOctreeDepthCommitted(int32 NewValue, ETextCommit::Type CommitType);
+    // TOptional<int32> GetMaxOctreeDepth() const;
+    // void OnMaxOctreeDepthCommitted(int32 NewValue, ETextCommit::Type CommitType);
     
     TOptional<float> GetVoxelExtent() const;
     void OnVoxelExtentCommitted(float NewValue, ETextCommit::Type CommitType);
@@ -111,50 +117,50 @@ private:
     void OnDebugLineWidthCommitted(float NewValue, ETextCommit::Type CommitType);
    TOptional<ECheckBoxState> GetDrawDebugPathState() const;
     void OnDrawDebugPathChanged(ECheckBoxState NewState);
-    TOptional<ECheckBoxState> GetbPeriodicRepathState() const;
-    void OnbPeriodicRepathChanged(ECheckBoxState NewState);
+  //  TOptional<ECheckBoxState> GetbPeriodicRepathState() const;
+    //void OnbPeriodicRepathChanged(ECheckBoxState NewState);
     void OnbAvoidanceComitted(ECheckBoxState NewState);
     void OnbAvoidanceVelocityDebugComitted(ECheckBoxState NewState);
 
     // --- Agent Settings ---
     bool AreOnlyAgentsSelected() const;
-    FText GetSelectedAgentName() const;
-    
-    FString GetTargetActorPath() const;
-    void OnTargetActorChanged(const FAssetData& AssetData);
-        
-    TOptional<float> GetAgentRadius() const;
-    FText GetFinalAgentRadiusAsText() const;
-    void OnAgentRadiusCommitted(float NewValue, ETextCommit::Type CommitType);
-    
-    TOptional<float> GetMovementSpeed() const;
-    void OnMovementSpeedCommitted(float NewValue, ETextCommit::Type CommitType);
-
-    TOptional<float> GetAvoidanceRadius() const;
-    void OnAvoidanceRadiusCommitted(float NewValue, ETextCommit::Type CommitType);
-    TOptional<float> GetRepathCooldown() const;
-    void OnRepathCooldownCommitted(float NewCooldownValue,
-                                   ETextCommit::Type CommitType);
-
-    // --- World Bake Settings ---
-    TOptional<float> GetWorldBakeVolumeSize() const;
-    void OnWorldBakeVolumeSizeCommitted(float NewValue, ETextCommit::Type CommitType);
-    TOptional<float> GetWorldBakeVoxelExtent() const;
-    void OnWorldBakeVoxelExtentCommitted(float NewValue, ETextCommit::Type CommitType);
-    TOptional<int32> GetWorldBakeMaxDepth() const;
-    void OnWorldBakeMaxDepthCommitted(int32 NewValue, ETextCommit::Type CommitType);
-    FText GetWorldBakeSaveDirectory() const;
-    void OnWorldBakeSaveDirectoryCommitted(const FText& InText, ETextCommit::Type CommitInfo);
-    FReply OnWorldBakeBrowseButtonClicked();
-    FString GetWorldBakeObstacleProfilePath() const;
-    void OnWorldBakeObstacleProfileChanged(const FAssetData& AssetData);
-
-    // --- Actions ---
+    // FText GetSelectedAgentName() const;
+    //
+    // FString GetTargetActorPath() const;
+    // void OnTargetActorChanged(const FAssetData& AssetData);
+    //     
+    // TOptional<float> GetAgentRadius() const;
+    // FText GetFinalAgentRadiusAsText() const;
+    // void OnAgentRadiusCommitted(float NewValue, ETextCommit::Type CommitType);
+    //
+    // TOptional<float> GetMovementSpeed() const;
+    // void OnMovementSpeedCommitted(float NewValue, ETextCommit::Type CommitType);
+    //
+    // TOptional<float> GetAvoidanceRadius() const;
+    // void OnAvoidanceRadiusCommitted(float NewValue, ETextCommit::Type CommitType);
+    // TOptional<float> GetRepathCooldown() const;
+    // void OnRepathCooldownCommitted(float NewCooldownValue,
+    //                                ETextCommit::Type CommitType);
+    //
+    // // --- World Bake Settings ---
+    // TOptional<float> GetWorldBakeVolumeSize() const;
+    // void OnWorldBakeVolumeSizeCommitted(float NewValue, ETextCommit::Type CommitType);
+    // TOptional<float> GetWorldBakeVoxelExtent() const;
+    // void OnWorldBakeVoxelExtentCommitted(float NewValue, ETextCommit::Type CommitType);
+    // TOptional<int32> GetWorldBakeMaxDepth() const;
+    // void OnWorldBakeMaxDepthCommitted(int32 NewValue, ETextCommit::Type CommitType);
+    // FText GetWorldBakeSaveDirectory() const;
+    // void OnWorldBakeSaveDirectoryCommitted(const FText& InText, ETextCommit::Type CommitInfo);
+    // FReply OnWorldBakeBrowseButtonClicked();
+    // FString GetWorldBakeObstacleProfilePath() const;
+    // void OnWorldBakeObstacleProfileChanged(const FAssetData& AssetData);
+    //
+    // // --- Actions ---
     FReply OnBakeButtonClicked();
     FReply OnBakeWorldButtonClicked();
     FReply OnCalculateVolumesClicked();
-
-    FText GetEstimatedVolumesText() const;
+    //
+    // FText GetEstimatedVolumesText() const;
     void ShowWarningMessage(const FText& Message) const;
     FReply OnRequestPathButtonClicked();
     bool IsPIEActive() const;

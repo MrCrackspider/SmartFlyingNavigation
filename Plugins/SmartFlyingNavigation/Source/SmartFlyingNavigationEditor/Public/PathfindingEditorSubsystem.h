@@ -31,6 +31,7 @@ class SMARTFLYINGNAVIGATIONEDITOR_API UPathfindingEditorSubsystem : public UEdit
 {
 	GENERATED_BODY()
 
+#if WITH_EDITOR
 public:
 	/**
 	 * Bakes a specific list of already-existing OctreeVoxelVolumes.
@@ -44,10 +45,9 @@ public:
 	 * This is the entry point for "Bake World".
 	 * @param TunerSettings The settings asset that defines how the world bake should operate.
 	 */
-	void BakeEntireWorld(const UPathfindingTunerSettings* TunerSettings);
+	//void BakeEntireWorld(const UPathfindingTunerSettings* TunerSettings);
 
 private:
-#if WITH_EDITOR
 	// --- Helper functions for the World Bake process ---
 
 	/** Deletes all previously baked OctreeVoxelVolume actors and their associated Data Assets. */

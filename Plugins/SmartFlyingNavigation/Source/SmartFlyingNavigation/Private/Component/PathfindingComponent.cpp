@@ -35,8 +35,8 @@ UPathfindingComponent::UPathfindingComponent()
 	DebugSphereComponent->bHiddenInGame = true;
 	DebugSphereComponent->SetSphereRadius(BaseAgentRadius);
 
-	StreamingSourceComponent = CreateDefaultSubobject<UWorldPartitionStreamingSourceComponent>(TEXT("StreamingSourceComponent"));
-	StreamingSourceComponent->DisableStreamingSource();
+	// StreamingSourceComponent = CreateDefaultSubobject<UWorldPartitionStreamingSourceComponent>(TEXT("StreamingSourceComponent"));
+	// StreamingSourceComponent->DisableStreamingSource();
 }
 
 void UPathfindingComponent::BeginPlay()
@@ -74,10 +74,10 @@ void UPathfindingComponent::BeginPlay()
 		}
 	}
 
-	if (StreamingSourceComponent)
-	{
-		ActivateStreaming();
-	}
+	// if (StreamingSourceComponent)
+	// {
+	// 	ActivateStreaming();
+	// }
 
 	if (AVoxelVolumeBase* StartingVolume = GetCurrentVolume())
 	{
@@ -85,8 +85,8 @@ void UPathfindingComponent::BeginPlay()
 	}
 	else
 	{
-		// 기본값 설정
-		// 근데 이거를 VoxelExtent값이랑 동일하게 처리하고 싶음.
+		// Set default value
+		// TODO: This should ideally be set to the same value as VoxelExtent.
 		GoalUpdateThreshold = 100.0f;
 	}
 }
@@ -101,10 +101,12 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		UpdateSteering(DeltaTime);
 		ApplyMovement(PreferredVelocity, DeltaTime);
 	}
-	// Avoidance 사용하면 Avoidance Subsystem에서 아래 함수들 호출해주기 때문에 일단 주석처리.
 	CurrentVelocity = PreferredVelocity;
 	UpdateAgentRadiusFromScale();
 
+	// If using Avoidance, the functions below are called by the Avoidance Subsystem, 
+	// so they are commented out for now.
+	
 	/***
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
@@ -155,10 +157,10 @@ void UPathfindingComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		GetWorld()->GetTimerManager().ClearAllTimersForObject(this);
 	}
 
-	if (StreamingSourceComponent)
-	{
-		DeactivateStreaming();
-	}
+	// if (StreamingSourceComponent)
+	// {
+	// 	DeactivateStreaming();
+	// }
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -203,20 +205,17 @@ void UPathfindingComponent::OnVolumeBecameReadyForPendingRequest(AOctreeVoxelVol
 
 bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 {
+	if (bIsReachDestination) return false;
+
+	// --- 1. Validate Start Volume ---
 	UOctreeNavSubsystem* NavSubsystem = GetWorld()->GetSubsystem<UOctreeNavSubsystem>();
 	if (!NavSubsystem || !PathfindingSubsystem) return false;
 
 	const FVector StartLocation = GetOwner()->GetActorLocation();
 	AOctreeVoxelVolume* StartVolume = NavSubsystem->GetVolumeChunkAt(StartLocation);
 
-	// --- 1. 시작 볼륨 유효성 검사 ---
-	//if (!StartVolume)
-	//{
-	//	UE_LOG(LogTemp, Warning, TEXT("Pathfinding request failed: Agent is not inside any navigation volume."));
-	//	return false;
-	//}
 
-	// --- 2. 시작 볼륨이 아직 준비되지 않은 경우, 요청을 보류합니다. ---
+	// --- 2. If the start volume is not ready, pend the request. ---
 	if (!StartVolume || !StartVolume->IsReadyForNavigation())
 	{
 		UE_LOG(LogTemp, Log, TEXT("Start volume is not ready. Path request is pending."));
@@ -224,25 +223,25 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 		PendingTargetLocation = TargetLocation;
 		NavSubsystem->OnVolumeRegistered.RemoveDynamic(this, &UPathfindingComponent::OnVolumeBecameReadyForPendingRequest);
 		NavSubsystem->OnVolumeRegistered.AddDynamic(this, &UPathfindingComponent::OnVolumeBecameReadyForPendingRequest);
-		return true; // 요청 접수됨
+		return true; // Request accepted
 	}
 
-	// --- 3. 로컬/계층 길찾기 분기 ---
-	bHasPendingPathRequest = false; // 보류 중인 요청이 있었다면 해제
+	// --- 3. Branch for Local/Hierarchical Pathfinding ---
+	bHasPendingPathRequest = false; // Clear any pending request flag
 	CurrentTargetLocation = TargetLocation;
 
 	return RequestLocalPath_Internal(StartLocation, TargetLocation, StartVolume);
 	
 	// AOctreeVoxelVolume* EndVolume = NavSubsystem->GetVolumeChunkAt(TargetLocation);
 	//
-	// --- CASE A: 명백한 로컬 길찾기 ---
-	// 시작 볼륨과 끝 볼륨이 동일하고, 유효하며, 준비된 상태입니다.
+	// --- CASE A: Clear Local Pathfinding ---
+	// The start and end volumes are the same, valid, and ready.
 	// if (EndVolume && StartVolume == EndVolume)
 	// {
 	// 	return RequestLocalPath_Internal(StartLocation, TargetLocation, StartVolume);
 	// }
-	// // --- CASE B: 계층적 길찾기 ---
-	// // 끝 볼륨이 다르거나, 스트리밍되지 않아 null인 경우입니다.
+	// --- CASE B: Hierarchical Pathfinding ---
+	// The end volume is different or is null because it hasn't been streamed in.
 	// else
 	// {
 	// 	UE_LOG(LogTemp, Log, TEXT("Requesting HIERARCHICAL path from '%s' to an external or unloaded volume."), *StartVolume->GetName());
@@ -278,7 +277,7 @@ bool UPathfindingComponent::RequestLocalPath_Internal(const FVector& Start, cons
 	Request.NodeType = EPathfindingNodeType::Octree;
 	Request.OnWorldPathComplete.BindDynamic(this, &UPathfindingComponent::HandleWorldPathResult);
 
-	// 볼륨에서 데이터 스냅샷 생성
+	// Create a data snapshot from the volume
 	CreateOctreeDataSnapshot(Volume, Request.NavigationData);
 
 	CurrentTargetLocation = End;
@@ -364,24 +363,24 @@ AVoxelVolumeBase* UPathfindingComponent::GetCurrentVolume() const
 	return nullptr;
 }
 
-void UPathfindingComponent::ActivateStreaming()
-{
-	// 지금은 BeginPlay에서 호출하고 있지만 길찾기를 하는 순간 호출해도 괜찮음.
-	// 그런데 그러면 Load되는 시간이 있기 때문에 문제가 될 수도 있는 점을 감안해야 함.
-	if (StreamingSourceComponent)
-	{
-		StreamingSourceComponent->EnableStreamingSource();
-	}
-}
-
-void UPathfindingComponent::DeactivateStreaming()
-{
-	// 길찾기 종료 시에 호출
-	if (StreamingSourceComponent)
-	{
-		StreamingSourceComponent->DisableStreamingSource();
-	}
-}
+// void UPathfindingComponent::ActivateStreaming()
+// {
+// 	// Currently called in BeginPlay, but it could also be called the moment pathfinding starts.
+// 	// However, we must consider that this might cause issues due to loading times.```
+//
+// 	if (StreamingSourceComponent)
+// 	{
+// 		StreamingSourceComponent->EnableStreamingSource();
+// 	}
+// }
+//
+// void UPathfindingComponent::DeactivateStreaming()
+// {
+// 	if (IsValid(StreamingSourceComponent))
+// 	{
+// 		StreamingSourceComponent->DisableStreamingSource();
+// 	}
+// }
 
 //======================================================================================
 // Avoidance Interface
@@ -423,17 +422,23 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 		return;
 	}
 	
-	// 1. 단순하게 이동: 예측이나 계산 없이, 주어진 속도로 그냥 움직입니다.
+	// 1. Simple Move: Move with the given velocity without prediction or complex calculations.
 	const FVector MoveDelta = FinalVelocity * DeltaTime;
 	FHitResult HitResult;
 	Owner->AddActorWorldOffset(MoveDelta, true, &HitResult);
 
 	AdjustProgressToSpline(MoveDelta);
+	if (!MoveDelta.IsNearlyZero())
+	{
+		const FRotator CurrentRotation = Owner->GetActorRotation();
+		const FRotator TargetRotation = MoveDelta.ToOrientationRotator();
+		FRotator InterpolatedRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, 5.f);
+    
+		Owner->SetActorRotation(InterpolatedRotation);
+	}
 	
-	FRotator InterpolatedRotation = FMath::RInterpTo(CurrentVelocity.ToOrientationRotator(), MoveDelta.ToOrientationRotator(), DeltaTime, 5.f);
-	Owner->SetActorRotation(InterpolatedRotation);
 	
-	// 2. 물리적 충돌 처리: 실제로 부딪혔을 때만 비상 상황을 선포합니다.
+	// 2. Physical Collision Handling: Declare an emergency only upon actual impact.
 	if (HitResult.bBlockingHit)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Movement physically blocked by %s. Invalidating path."), *HitResult.GetActor()->GetName());
@@ -441,29 +446,30 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 		return;
 	}
 
-	// 3. [핵심] 도착 판단: 이동이 끝난 '현재' 위치를 기준으로, 목표에 충분히 가까워졌는지 확인합니다.
-	//    루프를 사용하여, 한 프레임에 여러 웨이포인트를 통과하는 경우도 완벽하게 처리합니다.
+	// 3. [KEY] Arrival Check: Based on the 'current' position after moving, check if we are close enough to the target.
+	//    A loop is used to perfectly handle cases where multiple waypoints are passed in a single frame.
+	
 	while (!bIsReachDestination && FoundPath.IsValidIndex(CurrentPathDestinationIndex) && CurrentPathDestinationIndex > 0)
 	{
 		const FVector& TargetWaypoint = FoundPath[CurrentPathDestinationIndex];
 		const FVector& PrevWaypoint = FoundPath[CurrentPathDestinationIndex - 1];
 
-		// 이전 웨이포인트에서 현재 웨이포인트로 향하는 경로 선분의 방향입니다.
+		// **Vector representing the direction of the current path segment.**
 		const FVector PathSegmentDirection = (TargetWaypoint - PrevWaypoint).GetSafeNormal();
 
-		// 목표 웨이포인트에서 현재 액터 위치로 향하는 벡터입니다.
+		// **Vector from the target waypoint to the agent's current location.**
 		const FVector VectorToAgent = Owner->GetActorLocation() - TargetWaypoint;
-
-		// 두 벡터를 내적하여 액터가 경로 선분 방향을 기준으로 목표 지점을 지나쳤는지 확인합니다.
-		// 내적 결과가 0 이상이면, 목표 지점을 통과한 것으로 간주합니다.
+		
+		// **Use the dot product to check if the agent has passed the target waypoint along the path's direction.**
+		// **A non-negative result means the agent is at or past the waypoint.**
 		if (FVector::DotProduct(VectorToAgent, PathSegmentDirection) >= 0.0f)
 		{
-			// 목표를 통과했으므로 다음 웨이포인트로 진행합니다.
+			// The target was passed, so proceed to the next waypoint.
 			ProgressNextPoint();
 		}
 		else
 		{
-			// 아직 목표를 통과하지 못했으므로, 이번 프레임의 확인을 중단합니다.
+			// The target has not been passed yet, so stop checking for this frame.
 			break;
 		}
 	}
@@ -495,7 +501,7 @@ void UPathfindingComponent::AdjustProgressToSpline(const FVector& MoveDelta)
 
 void UPathfindingComponent::ProgressNextPoint()
 {
-	// Linear로 가도 partialSplineUpdate는 해야해서 if문으로 감싸지 마세요
+	// Don't wrap this in an if statement, as partialSplineUpdate is needed even for Linear movement.
 	PartialSplinePointUpdate(CurrentPathDestinationIndex);
 	
 	if (CurrentPathDestinationIndex + 1 >= FoundPath.Num())
@@ -706,8 +712,9 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 		return;
 	}
 
-	// --- 여기가 Repath 문제를 해결하는 핵심 로직입니다 ---
-
+	// **--- Core Repath Logic: Find the most optimal point on the new path to join ---**
+	// **This prevents the agent from turning back to the start of the newly generated path.**
+	
 	const FVector CurrentLocation = GetOwner()->GetActorLocation();
 	TArray<FVector> NewPath;
 
@@ -739,13 +746,11 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
 
 	FoundPath = NewPath;
 
-	// 상태를 리셋합니다.
 	bIsReachDestination = false;
 	CurrentState = EPathfindingState::FollowPath;
 	CurrentPathDestinationIndex = 1;
 
 
-	// 스플라인 및 디버그 드로잉 로직
 	PathSplinePtr->ClearSplinePoints();
 	for (int i = 0; i < PartialPointSplineNum; i++)
 	{
@@ -864,12 +869,12 @@ bool UPathfindingComponent::IsPathObstructed(const FVector& Start, const FVector
 		}
 		else
 		{
-			// 일반적인 경로: 기존과 같이 에이전트 반경을 고려하여 오프셋 테스트를 수행합니다.
+			// Normal path: Perform offset tests considering the agent radius as before.
 			const FVector TestOffsets[] = {
 				FVector::ZeroVector,
-				FVector(0, AgentRadius, 0),  // 좌
-				FVector(0, -AgentRadius, 0), // 우
-				FVector(0, 0, AgentRadius),  // 위
+				FVector(0, AgentRadius, 0),  // Left
+				FVector(0, -AgentRadius, 0), // Right
+				FVector(0, 0, AgentRadius),  // Up
 				FVector(0, 0, -AgentRadius)
 			};
 
@@ -889,54 +894,6 @@ bool UPathfindingComponent::IsPathObstructed(const FVector& Start, const FVector
 	}
 
 	return false;
-	/**
-	* 
-	AOctreeVoxelVolume* OctreeVolume = Cast<AOctreeVoxelVolume>(GetCurrentVolume());
-	if (!OctreeVolume)
-	{
-		return true;
-	}
-
-	const FVector PathVector = End - Start;
-	const float TotalDistance = PathVector.Size();
-
-	const float StepSize = AgentRadius * 0.5f;
-
-	if (TotalDistance < StepSize)
-	{
-		return OctreeVolume->IsLocationInBlockedVoxel(End);
-	}
-
-	const FVector Direction = PathVector.GetSafeNormal();
-
-	for (float Distance = 0; Distance < TotalDistance; Distance += StepSize)
-	{
-		const FVector CenterPosition = Start + Direction * Distance;
-
-		const FVector TestOffsets[] = {
-			FVector::ZeroVector,
-			FVector(0, AgentRadius, 0), // 좌
-			FVector(0, -AgentRadius, 0), // 우
-			FVector(0, 0, AgentRadius), // 위
-			FVector(0, 0, -AgentRadius)
-		};
-
-		for (const FVector& Offset : TestOffsets)
-		{
-			if (OctreeVolume->IsLocationInBlockedVoxel(CenterPosition + Offset))
-			{
-				return true;
-			}
-		}
-	}
-
-	if (OctreeVolume->IsLocationInBlockedVoxel(End))
-	{
-		return true;
-	}
-
-	return false;
-	 */
 }
 
 void UPathfindingComponent::DrawDebugPath()
@@ -947,7 +904,7 @@ void UPathfindingComponent::DrawDebugPath()
 		return;
 	}
 
-	const float Duration = 10.0f;
+	const float Duration = 1.f;
 	const float LineThickness = 5.0f;
 	const float BoxThickness = AgentRadius * 0.7;
 	const FVector BoxHalfSize(AgentRadius * 0.05);
@@ -1039,6 +996,7 @@ void UPathfindingComponent::UpdateSplinePreferredVelocity(float DeltaTime)
 
 bool UPathfindingComponent::IsSplinePathSafe() const
 {
+	// Using this breaks HPA* (Hierarchical Pathfinding A*).
 	AOctreeVoxelVolume* VoxelVolume = Cast<AOctreeVoxelVolume>(GetCurrentVolume());
 	if (!IsValid(PathSplinePtr) || !IsValid(VoxelVolume))
 	{
@@ -1059,7 +1017,6 @@ bool UPathfindingComponent::IsSplinePathSafe() const
 	}
 
 	// Begin Test
-	// 이거 쓰면 HPA*가 정상 작동 안하는데
 	const float CurrentDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex - 1);
 	const float NextDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex);
 	

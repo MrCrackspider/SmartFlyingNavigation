@@ -1,6 +1,5 @@
 // Copyright © 2025 TeamHamDev. All Rights Reserved.
 
-
 #include "Nav3DPathfindingDetails.h"
 #include "DetailLayoutBuilder.h"
 #include "DetailWidgetRow.h"
@@ -8,83 +7,103 @@
 #include "PropertyEditorModule.h"
 #include "Component/PathfindingComponent.h"
 
-
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Text/STextBlock.h"
-
+#include "Editor.h" 
+#include "IPropertyUtilities.h"
 #include "Framework/Application/SlateApplication.h" 
 #include "Widgets/Docking/SDockTab.h"
 #include "PathfindingTunerTabName.h"
-
 
 TSharedRef<IDetailCustomization> FNav3DPathfindingDetails::MakeInstance()
 {
 	return MakeShareable(new FNav3DPathfindingDetails);
 }
 
-void FNav3DPathfindingDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuidler)
+void FNav3DPathfindingDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
 {
-	IDetailCategoryBuilder& DebuggingCategory = DetailBuidler.EditCategory("Tuner", FText::GetEmpty(), ECategoryPriority::Important);
-	IDetailCategoryBuilder& PathfindingCategory = DetailBuidler.EditCategory("Navigation Configuration", FText::GetEmpty(), ECategoryPriority::Important);
-
-	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, TargetActor));
-	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PathfindingStrategyClass));
-	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, RotationAxisLock));
-	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, BaseAgentRadius));
-	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, AgentRadius));
-	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, MovementSpeed));
-	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, RotationInterpSpeed));
-	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, RepathCooldown));
-	PathfindingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bPeriodicRepath));
-
-	TArray<TWeakObjectPtr<UObject>> SelectedObjects;
-	DetailBuidler.GetObjectsBeingCustomized(SelectedObjects);
-
-	//Path finding Button in Editor (Moved to Slate UI)
-//	auto OnRequestPathClicked = [SelectedObjects]()-> FReply
-//	{
-//		for (const TWeakObjectPtr<UObject>& SelectedObject : SelectedObjects)
-//		{
-//			if (UPathfindingComponent* PathfindingComp = Cast<UPathfindingComponent>(SelectedObject.Get()))
-//			{
-//				PathfindingComp->RequestPathToTargetActor();
-//			}
-//		}
-//		return FReply::Handled();
-//	};
-//	
-//	DebuggingCategory.AddCustomRow(FText::FromString(TEXT("Request Path"))).NameContent()
-//	[
-//		SNew(STextBlock)
-//		.Text(FText::FromString(TEXT("Execute Pathfinding")))
-//		.Font(IDetailLayoutBuilder::GetDetailFont())
-//	].ValueContent()
-//	[
-//		SNew(SButton)
-//		.Text(FText::FromString(TEXT("Request Path to Target")))
-//		.OnClicked_Lambda(OnRequestPathClicked) 
-//	];
-//
-//	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bDrawDebugPath));
+	IDetailCategoryBuilder& CoreCategory = DetailBuilder.EditCategory("Core Configuration", LOCTEXT("CoreConfigCategory", "Core Configuration"), ECategoryPriority::Important);
+	IDetailCategoryBuilder& AgentCategory = DetailBuilder.EditCategory("Agent Properties", LOCTEXT("AgentPropsCategory", "Agent Properties"), ECategoryPriority::Important);
+	IDetailCategoryBuilder& MovementCategory = DetailBuilder.EditCategory("Movement", LOCTEXT("MovementCategory", "Movement"), ECategoryPriority::Important);
+	IDetailCategoryBuilder& RepathingCategory = DetailBuilder.EditCategory("Dynamic Pathfinding", LOCTEXT("RepathingCategory", "Dynamic Pathfinding"), ECategoryPriority::Important);
+	IDetailCategoryBuilder& OptimizationCategory = DetailBuilder.EditCategory("Optimization", LOCTEXT("OptimizationCategory", "Optimization"), ECategoryPriority::Important);
+	IDetailCategoryBuilder& DebuggingCategory = DetailBuilder.EditCategory("Debugging & Tools", LOCTEXT("DebuggingCategory", "Debugging & Tools"), ECategoryPriority::Important);
 	
-	DebuggingCategory.AddCustomRow(LOCTEXT("OpenPathfindingTunerFilter", "Open Pathfinding Tuner")) // Filter text
-	.NameContent()
-	[
-		SNew(STextBlock)
-		.Text(LOCTEXT("OpenPathfindingTunerLabel", "Pathfinding Tuner UI")) // Label text
-		.Font(IDetailLayoutBuilder::GetDetailFont()) // Use standard detail font
-	]
+	TSharedPtr<IPropertyHandle> MovementModeHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, MovementMode));
+
+	CoreCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, TargetActor));
+	CoreCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PathfindingStrategyClass));
+
+	AgentCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, BaseAgentRadius));
+	AgentCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, AgentRadius)).DisplayName(LOCTEXT("AgentRadiusLabel", "Pathfinding Radius (Scaled)"));
+	AgentCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, AvoidanceRadius));
+
+	MovementCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, MovementSpeed));
+	MovementCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, RotationInterpSpeed));
+	MovementCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, RotationAxisLock));
+	MovementCategory.AddProperty(MovementModeHandle);
+	MovementCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PartialPointSplineNum));
+
+	IDetailPropertyRow& SafetyCheckStepSizeRow = MovementCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, SafetyCheckStepSize));
+
+	SafetyCheckStepSizeRow.Visibility(TAttribute<EVisibility>::Create(
+		[MovementModeHandle]() -> EVisibility
+		{
+			if (!MovementModeHandle.IsValid() || !MovementModeHandle->IsValidHandle())
+			{
+				return EVisibility::Collapsed;
+			}
+			
+			TArray<UObject*> OuterObjects;
+			MovementModeHandle->GetOuterObjects(OuterObjects);
+			if (OuterObjects.Num() == 0 || !IsValid(OuterObjects[0]))
+			{
+				return EVisibility::Collapsed;
+			}
+			
+			uint8 MovementModeValue;
+			if (MovementModeHandle->GetValue(MovementModeValue) == FPropertyAccess::Success)
+			{
+				if (static_cast<EPathMovementMode>(MovementModeValue) == EPathMovementMode::Spline)
+				{
+					return EVisibility::Visible;
+				}
+			}
+			return EVisibility::Collapsed;
+		}
+	));
+
+	RepathingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bPeriodicRepath));
+	RepathingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, RepathCooldown));
+	RepathingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, GoalUpdateThreshold));
+	RepathingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PathValidationLookAhead));
+
+	OptimizationCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PathOptimizationCheckInterval));
+	OptimizationCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, OptimizationHeuristicFactor));
+
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bDrawDebugPath));
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, CurrentState));
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, CurrentTargetLocation));
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, FoundPath));
+	
+	DebuggingCategory.AddCustomRow(LOCTEXT("OpenPathfindingTunerFilter", "Open Pathfinding Tuner"))
 	.ValueContent()
+	.HAlign(HAlign_Center)
 	[
 		SNew(SButton)
-		.Text(LOCTEXT("OpenPathfindingTunerButton", "Open Tuner")) // Button text
-		.HAlign(HAlign_Center)
-		.VAlign(VAlign_Center)
-		.OnClicked_Lambda([]() -> FReply // Lambda for button click event
+		.Text(LOCTEXT("OpenPathfindingTunerButton", "Open Pathfinding Tuner"))
+		.OnClicked_Lambda([]() -> FReply
 		{
-			// Invoke the Pathfinding Tuner tab
 			FGlobalTabmanager::Get()->TryInvokeTab(PathfindingTunerTabName);
 			return FReply::Handled();
 		})
 	];
+	
+	DetailBuilder.HideCategory("Pathfinding|Configuration");
+	DetailBuilder.HideCategory("Pathfinding|Dynamic Repath");
+	DetailBuilder.HideCategory("Pathfinding|Spline");
+	DetailBuilder.HideCategory("Pathfinding|Dynamic Goal");
+	DetailBuilder.HideCategory("Pathfinding|Optimization");
+	DetailBuilder.HideCategory("Pathfinding|State");
+	DetailBuilder.HideCategory("Pathfinding");
 }

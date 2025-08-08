@@ -10,7 +10,7 @@ FCatmullRomSpline::FCatmullRomSpline(const TArray<FVector>& FoundPath)
 void FCatmullRomSpline::Initialize(const TArray<FVector>& FoundPath)
 {
 	ControlPoints = FoundPath;
-	DistanceOfPoints.Empty(); // 배열 초기화
+	DistanceOfPoints.Empty();
 
 	if (ControlPoints.Num() < 2)
 	{
@@ -192,19 +192,19 @@ void FCatmullRomSpline::GetCatmullRomPointsForSegment(int32 CurrentSegmentIndex,
 {
 	const int32 NumPoints = ControlPoints.Num();
 
-	// 제어점이 2개 미만일 경우 의미가 없으므로 조기 리턴
+	// Early return if there are fewer than 2 control points, as a segment cannot be formed.
 	if (NumPoints < 2)
 	{
 		return;
 	}
     
-	// 세그먼트의 시작점과 끝점은 항상 고정입니다.
+	// The start and end points of the segment are always fixed as P1 and P2.
 	OutP1 = ControlPoints[CurrentSegmentIndex];
 	OutP2 = ControlPoints[CurrentSegmentIndex + 1];
 
-	// 이전 점(P0) 설정: 첫 번째 세그먼트일 경우 시작점을 중복 사용 (Clamped)
+	// Set the previous point (P0): For the first segment, clamp by using the start point again.
 	OutP0 = (CurrentSegmentIndex > 0) ? ControlPoints[CurrentSegmentIndex - 1] : ControlPoints[CurrentSegmentIndex];
 
-	// 다음 점(P3) 설정: 마지막 세그먼트일 경우 끝점을 중복 사용 (Clamped)
+	// Set the next point (P3): For the last segment, clamp by using the end point again.
 	OutP3 = (CurrentSegmentIndex < NumPoints - 2) ? ControlPoints[CurrentSegmentIndex + 2] : ControlPoints[CurrentSegmentIndex + 1];
 }

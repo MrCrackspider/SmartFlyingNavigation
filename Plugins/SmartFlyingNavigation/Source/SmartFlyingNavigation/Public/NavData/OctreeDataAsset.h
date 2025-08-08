@@ -6,9 +6,6 @@
 #include "Engine/DataAsset.h"
 #include "OctreeDataAsset.generated.h"
 
-// [수정] USTRUCT()를 USTRUCT(BlueprintType)으로 변경합니다.
-// 이 구조체를 사용하는 다른 구조체(FVolumePortalLinks)가 BlueprintType이므로,
-// UHT가 리플렉션 데이터를 올바르게 생성하기 위해 이 변경이 반드시 필요합니다.
 USTRUCT(BlueprintType)
 struct FVolumePortalLink
 {
@@ -24,7 +21,6 @@ struct FVolumePortalLink
 	float MaxAllowedRadius = 0.f;
 };
 
-// [추가된 구조체] 하나의 노드가 가질 수 있는 여러 개의 포털 링크를 담는 컨테이너입니다.
 USTRUCT(BlueprintType)
 struct FVolumePortalLinks
 {
@@ -75,7 +71,6 @@ struct FOctreeNode
 	}
 };
 
-// 커스텀 직렬화를 위한 operator<< 입니다. FOctreeNode만 처리합니다.
 FORCEINLINE FArchive& operator<<(FArchive& Ar, FOctreeNode& Node)
 {
 	for (int32& ChildIndex : Node.ChildrenIndices) { Ar << ChildIndex; }
@@ -86,7 +81,6 @@ FORCEINLINE FArchive& operator<<(FArchive& Ar, FOctreeNode& Node)
 	return Ar;
 }
 
-// [삭제] FVolumePortalLink와 FVolumePortalLinks에 대한 operator<<는 사용하지 않으므로 삭제합니다.
 
 UCLASS(BlueprintType)
 class SMARTFLYINGNAVIGATION_API UOctreeDataAsset : public UPrimaryDataAsset
@@ -102,15 +96,12 @@ public:
 
 	static const FName OctreeAssetType;
 
-	// NodePool은 런타임에 압축 해제되므로 Transient로 선언합니다.
 	UPROPERTY(Transient, VisibleAnywhere, Category = "OctreeData")
 	TArray<FOctreeNode> NodePool;
 
-	// PortalNodes는 표준 UPROPERTY 직렬화 시스템으로 저장되므로 Transient가 아닙니다.
 	UPROPERTY(VisibleAnywhere, Category = "OctreeData")
 	TMap<int32, FVolumePortalLinks> PortalNodes;
 
-	// NodePool 데이터만 담는 압축 데이터입니다.
 	UPROPERTY()
 	TArray<uint8> CompressedNodePool;
 
@@ -120,7 +111,6 @@ public:
 public:
 	void DecompressAndInitialize();
 #if WITH_EDITOR
-	// 이 함수는 이제 NodePool 데이터만 처리합니다.
 	void SetAndCompressBakedData(const TArray<FOctreeNode>& InNodePool, const FIntVector& InMapSize, int32 InMaxDepth);
 #endif
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;

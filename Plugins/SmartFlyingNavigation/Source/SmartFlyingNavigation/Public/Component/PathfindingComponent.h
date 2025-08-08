@@ -113,15 +113,15 @@ public:
 #endif
 #pragma endregion
 
-#pragma region World Partition
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Streaming")
-	TObjectPtr<UWorldPartitionStreamingSourceComponent> StreamingSourceComponent;
-
-	UFUNCTION(BlueprintCallable, Category = "Streaming")
-	void ActivateStreaming();
-	UFUNCTION(BlueprintCallable, Category = "Streaming")
-	void DeactivateStreaming();
-#pragma endregion
+// #pragma region World Partition
+// 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Streaming")
+// 	TObjectPtr<UWorldPartitionStreamingSourceComponent> StreamingSourceComponent;
+//
+// 	UFUNCTION(BlueprintCallable, Category = "Streaming")
+// 	void ActivateStreaming();
+// 	UFUNCTION(BlueprintCallable, Category = "Streaming")
+// 	void DeactivateStreaming();
+// #pragma endregion
 
 #pragma region Avoidance Interface
 
@@ -218,8 +218,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Pathfinding", meta=(ClampMin="0.0", DisplayName="Base Radius"))
 	float BaseAgentRadius = 50.0f;
 	
-	UPROPERTY(EditAnywhere,Category = "Pathfinding|Configuration", BlueprintReadWrite,
-		meta = (AllowPrivateAccess = true))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Pathfinding", meta = (AllowPrivateAccess = true), DisplayName="Avoidance Radius")
 	float AvoidanceRadius = 50.f;
 
 	UPROPERTY(EditAnywhere, Category = "Pathfinding", BlueprintReadWrite, meta = (AllowPrivateAccess = true))
@@ -303,6 +302,7 @@ public:
 	float DistanceAlongSpline = 0.f;
 	FVector CurrentVelocity;
 	int CurrentRequestID;
+	
 #pragma endregion
 
 #pragma region Dependencies & Handles

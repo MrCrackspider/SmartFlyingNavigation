@@ -38,7 +38,7 @@ UCLASS()
 class SMARTFLYINGNAVIGATION_API AOctreeVoxelVolume : public AVoxelVolumeBase
 {
 	GENERATED_BODY()
- 
+
 public:
 	/** Default constructor. */
 	AOctreeVoxelVolume();
@@ -121,6 +121,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Octree")
 	bool IsLocationInBlockedVoxel(const FVector& WorldLocation) const;
+
 protected:
 	//~======================================================================
 	// AActor Overrides
@@ -143,6 +144,7 @@ protected:
 	//~======================================================================
 
 #if WITH_EDITOR
+
 public:
 	/**
 	 * Initiates the process of baking static geometry within this volume into an octree data asset.
@@ -150,25 +152,18 @@ public:
 	 */
 	bool BakeStaticData(UWorld* World, TArray<FOctreeNode>& OutNodePool);
 
-
-	void ConnectPortals_Bake(
-		TArray<FOctreeNode>& InOutMyNodePool,
-		TMap<int32, FVolumePortalLinks>& OutPortalNodes,
-		const TMap<AOctreeVoxelVolume*, TArray<FOctreeNode>>& AllVolumeData,
-		const TArray<AOctreeVoxelVolume*>& AllCreatedVolumes
-	);
-	
-	// 컴포넌트를 복셀화하여 장애물 목록에 추가
-	void VoxelizeComponent(const FBox& ComponentBounds, const FCollisionObjectQueryParams& ObjectQueryParams, TSet<FIntVector>& OutStaticObstacles) const;
+	void VoxelizeComponent(const FBox& ComponentBounds, const FCollisionObjectQueryParams& ObjectQueryParams,
+	                       TSet<FIntVector>& OutStaticObstacles) const;
 	/**
 	 * Scans the volume to identify all static actors that should be treated as obstacles,
 	 * based on the assigned StaticObjectFilter.
 	 *
 	 * @param OutStaticObstacles A set to be populated with the voxel coordinates of detected static obstacles.
 	 */
-	void ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticObstacles, UObject* WorldContextObject, const FBox& ScanWorldBounds) const;
+	void ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticObstacles, UObject* WorldContextObject,
+	                               const FBox& ScanWorldBounds) const;
 #endif
-	
+
 	FVector VoxelIndexToWorld(const FIntVector& VoxelIndex) const;
 
 #if WITH_EDITORONLY_DATA
@@ -183,7 +178,7 @@ protected:
 	 */
 	virtual void UpdateDebugObstacleVisualization() override;
 #endif
-	
+
 	// --- Query Helpers ---
 public:
 	FIntVector WorldToVoxelIndex(const FVector& WorldLocation) const;
@@ -191,13 +186,14 @@ public:
 
 	bool IsIndexValid(const FIntVector& Index) const;
 
-	bool ClampVoxelIndicesToVolume(const FIntVector& InMin, const FIntVector& InMax, FIntVector& OutClampedMin, FIntVector& OutClampedMax) const;
+	bool ClampVoxelIndicesToVolume(const FIntVector& InMin, const FIntVector& InMax, FIntVector& OutClampedMin,
+	                               FIntVector& OutClampedMax) const;
 
 	int32 FindLeafNodeAt(const FVector& WorldPos) const;
 
 	void DrawDebugDynamicObstaclesWithBoxes();
+
 private:
-	
 	//~======================================================================
 	// Dynamic Obstacle Internals
 	//~======================================================================
@@ -261,30 +257,37 @@ public:
 		int32 MaxDepth,
 		int32 CurrentDepth = 0
 	);
-	
+
 #if WITH_EDITOR
+
 private:
-	
 	struct FDebugNodeInfo
 	{
 		int32 NodeIndex;
 		FBox Bounds;
-		EOctreeNodeState State; 
+		EOctreeNodeState State;
 	};
-		
+
 	/** Recursively gathers information about octree nodes for debug visualization. */
-	void GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex, const FBox& NodeBounds, int32 CurrentDepth) const;
+	void GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex, const FBox& NodeBounds,
+	                               int32 CurrentDepth) const;
 
 public:
 	/** Constructs the full package path and asset name for the baked data asset. */
 	bool GetBakedAssetPath(FString& OutPackagePath, FString& OutAssetName) const;
 
 	/** Handles the creation, saving, and assignment of the UOctreeDataAsset. */
-	void SaveOctreeToAsset(const TArray<FOctreeNode>& NodePoolToSave, const TMap<int32, FVolumePortalLinks>& PortalsToSave);
+	void SaveOctreeToAsset(const TArray<FOctreeNode>& NodePoolToSave,
+	                       const TMap<int32, FVolumePortalLinks>& PortalsToSave);
 
 	/** After building the tree, this pre-calculates and stores neighbors for each leaf node to accelerate pathfinding. */
-	void PrecomputeNeighbors_Internal(TArray<FOctreeNode>& InOutNodePool, const FBox& TotalVolumeBounds, int32 MaxDepth);
+	void PrecomputeNeighbors_Internal(TArray<FOctreeNode>& InOutNodePool, const FBox& TotalVolumeBounds,
+	                                  int32 MaxDepth);
 
+	void ConnectPortals_Bake(TArray<FOctreeNode>& InOutMyNodePool,
+	                         TMap<int32, FVolumePortalLinks>& OutPortalNodes,
+	                         const TMap<AOctreeVoxelVolume*, TArray<FOctreeNode>>& AllVolumeData,
+	                         const TArray<AOctreeVoxelVolume*>& AllCreatedVolumes);
 #endif
 	/** Traverses the octree bottom-up to merge child nodes that have the same state, optimizing memory usage. */
 	void OptimizeAndCollapse_Internal(TArray<FOctreeNode>& InOutNodePool, int32 NodeIndex);
@@ -298,7 +301,6 @@ public:
 		int32 MaxDepth
 	);
 
-	
 public:
 	//~======================================================================
 	// Properties
@@ -335,14 +337,13 @@ private:
 	 * For a 128x128x128 volume, a depth of 7 (2^7=128) is appropriate for voxel-level precision.
 	 */
 	UPROPERTY()
-	int32 MaxOctreeDepth=1;
+	int32 MaxOctreeDepth = 1;
 
 	/** The runtime pool of nodes for the static octree, loaded from BakedOctreeData. */
-	/** 로드된 데이터 에셋의 노드 풀을 가리키는 포인터. LoadedDataAsset이 소유권을 가짐. */
 	TArray<FOctreeNode>* StaticNodePoolPtr = nullptr;
 
 	mutable FCriticalSection NodePoolCS;
-	
+
 	/** The index of the root node in the StaticNodePool array. Initialized to -1. */
 	int32 RootNodeIndex = -1;
 
@@ -351,30 +352,23 @@ private:
 
 	/** A timer handle for the periodic update of dynamic obstacles. */
 	FTimerHandle DynamicObstacleTimer;
-	
+
 	// Begin Test
 
-	// 비동기 로딩이 완료되었을 때 호출될 콜백 함수
 	void OnDataAssetLoaded();
 
-	// 현재 볼륨 데이터의 로딩 상태
 	EVolumeLoadState LoadState = EVolumeLoadState::Unloaded;
 
-	// 비동기 로딩 핸들
 	TSharedPtr<FStreamableHandle> AsyncLoadHandle;
 
-	// 로드된 데이터 에셋의 소유권을 관리하기 위한 포인터
 	UPROPERTY()
 	TObjectPtr<UOctreeDataAsset> LoadedDataAsset;
 
 public:
-	// 비동기 데이터 로딩을 요청하는 함수
 	void RequestAsyncLoad();
 
-	// 데이터가 로드되어 길찾기에 사용될 준비가 되었는지 확인하는 함수
 	FORCEINLINE bool IsReadyForNavigation() const { return LoadState == EVolumeLoadState::Loaded; }
 	FORCEINLINE EVolumeLoadState GetLoadState() const { return LoadState; }
-	// 볼륨의 월드 바운드를 가져오는 함수
 	FBox GetVolumeBounds() const;
 	// End Test
 };

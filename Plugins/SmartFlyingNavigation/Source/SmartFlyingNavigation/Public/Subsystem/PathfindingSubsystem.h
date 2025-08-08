@@ -110,7 +110,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Pathfinding", meta = (WorldContext = "WorldContextObject"))
 	int32 RequestPath(const UObject* WorldContextObject, FPathfindingRequest& Request);
 
-	int32 RequestHierarchicalPath(const UObject* WorldContextObject, FHierarchicalPathRequest& Request);
+	//int32 RequestHierarchicalPath(const UObject* WorldContextObject, FHierarchicalPathRequest& Request);
 
 	//~=============================================================================
 	// Tick Interface
@@ -174,7 +174,7 @@ private:
 	//~=============================================================================
 
 	void OnPathfindingCompleted(const FPathfindingRequest& Request, const TArray<FVector>& WorldPath, bool bSuccess);
-	void OnHierarchicalSegmentCompleted(int32 RequestID, const TArray<FVector>& SegmentPath, bool bSuccess);
+	//void OnHierarchicalSegmentCompleted(int32 RequestID, const TArray<FVector>& SegmentPath, bool bSuccess);
 
 	//~=============================================================================
 	// Threading & Task Management
@@ -196,8 +196,8 @@ private:
 	// Hierarchical Pathfinding Internals
 	//~=============================================================================
 
-	bool FindHighLevelPath(const UObject* WorldContextObject, const FHierarchicalPathRequest& Request, TArray<TPair<TSoftObjectPtr<UOctreeDataAsset>, int32>>& OutDataAssetPath);
-	void ProcessNextHierarchicalSegment(const UObject* WorldContextObject, FHierarchicalPathfindingTask& Task);
+	//bool FindHighLevelPath(const UObject* WorldContextObject, const FHierarchicalPathRequest& Request, TArray<TPair<TSoftObjectPtr<UOctreeDataAsset>, int32>>& OutDataAssetPath);
+	//void ProcessNextHierarchicalSegment(const UObject* WorldContextObject, FHierarchicalPathfindingTask& Task);
 
 	//~=============================================================================
 	// Memory Pooling
@@ -218,6 +218,6 @@ private:
 	UPROPERTY()
 	TMap<int32, TObjectPtr<APathfindingStreamingProbe>> ActiveStreamingProbes;
 
-	void CreateStreamingProbeForRequest(const UObject* WorldContextObject, int32 RequestID, const FVector& Location, float Radius);
-	void DestroyStreamingProbeForRequest(const UObject* WorldContextObject, int32 RequestID);
+	// void CreateStreamingProbeForRequest(const UObject* WorldContextObject, int32 RequestID, const FVector& Location, float Radius);
+	// void DestroyStreamingProbeForRequest(const UObject* WorldContextObject, int32 RequestID);
 };

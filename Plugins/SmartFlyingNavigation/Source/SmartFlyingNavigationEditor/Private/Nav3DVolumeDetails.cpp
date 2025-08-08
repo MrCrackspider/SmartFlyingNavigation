@@ -18,7 +18,7 @@ TSharedRef<IDetailCustomization> FNav3DVolumeDetails::MakeInstance()
 
 void FNav3DVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
 {
-    // --- 1. 기존 프로퍼티들을 카테고리에 정리 (이 부분은 그대로 둡니다) ---
+    // --- 1. Organize existing properties into categories (this part remains unchanged) ---
     IDetailCategoryBuilder& VolumeCategory = DetailBuilder.EditCategory("Volume Setup", FText::GetEmpty(), ECategoryPriority::Important);
     VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AVoxelVolumeBase, VoxelExtent));
     VolumeCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AOctreeVoxelVolume, BakedDataSaveDirectory));
@@ -26,10 +26,10 @@ void FNav3DVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
     IDetailCategoryBuilder& DebuggingCategory = DetailBuilder.EditCategory("Debugging", FText::GetEmpty(), ECategoryPriority::Important);
     DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(AOctreeVoxelVolume, bDrawDebugBox));
 
-    // --- 2. "Bake Actions" 카테고리와 새로운 베이크 버튼 추가 ---
+    // --- 2. Add a "Bake Actions" category and a new bake button ---
     IDetailCategoryBuilder& BakeCategory = DetailBuilder.EditCategory("Bake Actions", FText::GetEmpty(), ECategoryPriority::Important);
 
-    // 디테일 패널에서 현재 선택된 오브젝트들의 목록을 가져옵니다.
+    // Get the list of currently selected objects in the details panel.
     TArray<TWeakObjectPtr<UObject>> SelectedObjects;
     DetailBuilder.GetObjectsBeingCustomized(SelectedObjects);
 
@@ -63,24 +63,24 @@ void FNav3DVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
                             return FReply::Handled();
                         }
 
-                        // <<<< 여기가 핵심적인 수정점 >>>>
-                        // 런타임 서브시스템 대신 에디터 서브시스템을 가져옵니다.
+                        // <<<< This is the key modification >>>>
+                        // Get the editor subsystem instead of the runtime subsystem.
                         if (UPathfindingEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UPathfindingEditorSubsystem>())
                         {
-                            // 에디터 서브시스템의 베이크 함수를 호출합니다.
+                            // Call the bake function on the editor subsystem.
                             EditorSubsystem->BakeSpecificVolumes(VolumesToBake);
                         }
                         else
                         {
                             UE_LOG(LogTemp, Error, TEXT("PathfindingEditorSubsystem not found! Cannot start bake."));
                         }
-                        // <<<< 수정 끝 >>>>
+                        // <<<< End of modification >>>>
 
                         return FReply::Handled();
                     })
         ];
 
-    // --- 3. 기존의 "Pathfinding Tuner UI" 버튼은 그대로 유지합니다 ---
+    // --- 3. Keep the existing "Pathfinding Tuner UI" button ---
     IDetailCategoryBuilder& TunerCategory = DetailBuilder.EditCategory("Tuner", FText::GetEmpty(), ECategoryPriority::Important);
     TunerCategory.AddCustomRow(LOCTEXT("OpenPathfindingTunerFilter", "Open Pathfinding Tuner"))
         .NameContent()
