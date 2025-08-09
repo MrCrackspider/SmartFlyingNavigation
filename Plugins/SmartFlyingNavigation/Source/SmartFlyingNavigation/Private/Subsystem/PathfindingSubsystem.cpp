@@ -410,6 +410,5 @@ void UPathfindingSubsystem::OnPathfindingCompleted(const FPathfindingRequest& Re
 	if (Request.RequestingObject.IsValid())
 	{
 		Request.OnWorldPathComplete.ExecuteIfBound(WorldPath, bSuccess);
-		//TasksToProcessThisFrame에서 remove해주기
 	}
 }

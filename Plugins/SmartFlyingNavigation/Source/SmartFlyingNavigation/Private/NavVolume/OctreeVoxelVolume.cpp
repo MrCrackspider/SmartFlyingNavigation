@@ -26,7 +26,7 @@
 #include "Misc/ScopedSlowTask.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #endif
-
+#include "DrawDebugHelpers.h"
 #include "Subsystem/OctreeNavSubsystem.h"
 #include "Engine/StreamableManager.h"
 #include "Engine/AssetManager.h"
@@ -112,6 +112,7 @@ void AOctreeVoxelVolume::PostInitializeComponents()
 void AOctreeVoxelVolume::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	//DrawDebugDynamicObstaclesWithBoxes();
 	// Main logic is handled by BeginPlay initialization and the DynamicObstacleTimer.
 }
 
@@ -589,37 +590,6 @@ void AOctreeVoxelVolume::ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticOb
 	}
 }
 
-FBox AOctreeVoxelVolume::CalculateChildBounds(const FBox& ParentBounds, int32 ChildIndex) const
-{
-	const FVector Center = ParentBounds.GetCenter();
-	const FVector Min = ParentBounds.Min;
-	const FVector Max = ParentBounds.Max;
-
-	// Determine the min/max corners for the child octant based on its index.
-	switch (ChildIndex)
-	{
-	case 0: return FBox(Min, Center); // ---
-	case 1: return FBox(FVector(Center.X, Min.Y, Min.Z), FVector(Max.X, Center.Y, Center.Z)); // +--
-	case 2: return FBox(FVector(Min.X, Center.Y, Min.Z), FVector(Center.X, Max.Y, Center.Z)); // -+-
-	case 3: return FBox(FVector(Center.X, Center.Y, Min.Z), FVector(Max.X, Max.Y, Center.Z)); // ++-
-	case 4: return FBox(FVector(Min.X, Min.Y, Center.Z), FVector(Center.X, Center.Y, Max.Z)); // --+
-	case 5: return FBox(FVector(Center.X, Min.Y, Center.Z), FVector(Max.X, Center.Y, Max.Z)); // +-+
-	case 6: return FBox(FVector(Min.X, Center.Y, Center.Z), FVector(Center.X, Max.Y, Max.Z)); // -++
-	case 7: return FBox(Center, Max); // +++
-	default: return FBox(ForceInit);
-	}
-}
-
-int32 AOctreeVoxelVolume::GetOctantContainingVoxel(const FBox& NodeBounds, const FVector& VoxelWorldPos) const
-{
-	int32 Octant = 0;
-	const FVector Center = NodeBounds.GetCenter();
-	if (VoxelWorldPos.X >= Center.X) Octant |= 1; // Right half
-	if (VoxelWorldPos.Y >= Center.Y) Octant |= 2; // Front half
-	if (VoxelWorldPos.Z >= Center.Z) Octant |= 4; // Top half
-	return Octant;
-}
-
 bool AOctreeVoxelVolume::GetBakedAssetPath(FString& OutPackagePath, FString& OutAssetName) const
 {
 	if (BakedDataSaveDirectory.Path.IsEmpty())
@@ -764,49 +734,6 @@ void AOctreeVoxelVolume::UpdateDebugObstacleVisualization()
 }
 #endif
 
-// ======================================================================
-// Query Helpers - Implementation
-// ======================================================================
-
-FIntVector AOctreeVoxelVolume::WorldToVoxelIndex(const FVector& WorldLocation) const
-{
-	if (VoxelExtent <= 0.f) return FIntVector::ZeroValue;
-
-	const FVector LocalPosition = WorldLocation - GetVolumeBounds().Min;
-	return FIntVector(
-		FMath::FloorToInt(LocalPosition.X / VoxelExtent),
-		FMath::FloorToInt(LocalPosition.Y / VoxelExtent),
-		FMath::FloorToInt(LocalPosition.Z / VoxelExtent)
-	);
-}
-
-FVector AOctreeVoxelVolume::VoxelIndexToWorld(const FIntVector& VoxelIndex) const
-{
-	const FVector VoxelSize(VoxelExtent);
-	return GetVolumeBounds().Min + (FVector(VoxelIndex) * VoxelExtent) + (VoxelSize * 0.5f);
-}
-
-bool AOctreeVoxelVolume::IsIndexValid(const FIntVector& Index) const
-{
-	return Index.X >= 0 && Index.X < MapSize.X &&
-		   Index.Y >= 0 && Index.Y < MapSize.Y &&
-		   Index.Z >= 0 && Index.Z < MapSize.Z;
-}
-
-bool AOctreeVoxelVolume::ClampVoxelIndicesToVolume(const FIntVector& InMin, const FIntVector& InMax, FIntVector& OutClampedMin, FIntVector& OutClampedMax) const
-{
-	OutClampedMin.X = FMath::Max(InMin.X, 0);
-	OutClampedMin.Y = FMath::Max(InMin.Y, 0);
-	OutClampedMin.Z = FMath::Max(InMin.Z, 0);
-
-	OutClampedMax.X = FMath::Min(InMax.X, MapSize.X - 1);
-	OutClampedMax.Y = FMath::Min(InMax.Y, MapSize.Y - 1);
-	OutClampedMax.Z = FMath::Min(InMax.Z, MapSize.Z - 1);
-
-	return OutClampedMin.X <= OutClampedMax.X &&
-		   OutClampedMin.Y <= OutClampedMax.Y &&
-		   OutClampedMin.Z <= OutClampedMax.Z;
-}
 
 int32 AOctreeVoxelVolume::FindLeafNodeAt(const FVector& WorldPos) const
 {
@@ -834,6 +761,113 @@ int32 AOctreeVoxelVolume::FindLeafNodeAt(const FVector& WorldPos) const
 
 	return -1;
 }
+
+
+
+void AOctreeVoxelVolume::GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex, const FBox& NodeBounds, int32 CurrentDepth) const
+{
+	if (!StaticNodePoolPtr || StaticNodePoolPtr->IsEmpty()) return;
+
+	if (!StaticNodePoolPtr->IsValidIndex(NodeIndex) || CurrentDepth > GetMaxOctreeDepth())
+	{
+		return;
+	}
+
+	{
+		FScopeLock Lock(&NodePoolCS);
+	
+		const FOctreeNode& Node = (*StaticNodePoolPtr)[NodeIndex];
+
+		// Add node info if it's a leaf or if we've reached the desired debug draw depth.
+		if (Node.State != EOctreeNodeState::Mixed || CurrentDepth == GetMaxOctreeDepth())
+		{
+			OutNodes.Add({ NodeIndex, NodeBounds, Node.State });
+		}
+		else // If mixed, recurse into children.
+		{
+			for (int i = 0; i < 8; ++i)
+			{
+				if (Node.ChildrenIndices[i] != -1)
+				{
+					GetDebugNodeInfoRecursive(OutNodes, Node.ChildrenIndices[i], CalculateChildBounds(NodeBounds, i), CurrentDepth + 1);
+				}
+			}
+		}
+	}
+}
+
+#endif // WITH_EDITOR
+
+FVector AOctreeVoxelVolume::VoxelIndexToWorld(const FIntVector& VoxelIndex) const
+{
+	const FVector VoxelSize(VoxelExtent);
+	return GetVolumeBounds().Min + (FVector(VoxelIndex) * VoxelExtent) + (VoxelSize * 0.5f);
+}
+
+
+// ======================================================================
+// Query Helpers - Implementation
+// ======================================================================
+
+FIntVector AOctreeVoxelVolume::WorldToVoxelIndex(const FVector& WorldLocation) const
+{
+	if (VoxelExtent <= 0.f) return FIntVector::ZeroValue;
+
+	const FVector LocalPosition = WorldLocation - GetVolumeBounds().Min;
+	return FIntVector(
+		FMath::FloorToInt(LocalPosition.X / VoxelExtent),
+		FMath::FloorToInt(LocalPosition.Y / VoxelExtent),
+		FMath::FloorToInt(LocalPosition.Z / VoxelExtent)
+	);
+}
+
+bool AOctreeVoxelVolume::IsIndexValid(const FIntVector& Index) const
+{
+	return Index.X >= 0 && Index.X < MapSize.X &&
+		   Index.Y >= 0 && Index.Y < MapSize.Y &&
+		   Index.Z >= 0 && Index.Z < MapSize.Z;
+}
+
+
+bool AOctreeVoxelVolume::ClampVoxelIndicesToVolume(const FIntVector& InMin, const FIntVector& InMax, FIntVector& OutClampedMin, FIntVector& OutClampedMax) const
+{
+	OutClampedMin.X = FMath::Max(InMin.X, 0);
+	OutClampedMin.Y = FMath::Max(InMin.Y, 0);
+	OutClampedMin.Z = FMath::Max(InMin.Z, 0);
+
+	OutClampedMax.X = FMath::Min(InMax.X, MapSize.X - 1);
+	OutClampedMax.Y = FMath::Min(InMax.Y, MapSize.Y - 1);
+	OutClampedMax.Z = FMath::Min(InMax.Z, MapSize.Z - 1);
+
+	return OutClampedMin.X <= OutClampedMax.X &&
+		   OutClampedMin.Y <= OutClampedMax.Y &&
+		   OutClampedMin.Z <= OutClampedMax.Z;
+}
+
+
+
+
+FBox AOctreeVoxelVolume::CalculateChildBounds(const FBox& ParentBounds, int32 ChildIndex) const
+{
+	const FVector Center = ParentBounds.GetCenter();
+	const FVector Min = ParentBounds.Min;
+	const FVector Max = ParentBounds.Max;
+
+	// Determine the min/max corners for the child octant based on its index.
+	switch (ChildIndex)
+	{
+	case 0: return FBox(Min, Center); // ---
+	case 1: return FBox(FVector(Center.X, Min.Y, Min.Z), FVector(Max.X, Center.Y, Center.Z)); // +--
+	case 2: return FBox(FVector(Min.X, Center.Y, Min.Z), FVector(Center.X, Max.Y, Center.Z)); // -+-
+	case 3: return FBox(FVector(Center.X, Center.Y, Min.Z), FVector(Max.X, Max.Y, Center.Z)); // ++-
+	case 4: return FBox(FVector(Min.X, Min.Y, Center.Z), FVector(Center.X, Center.Y, Max.Z)); // --+
+	case 5: return FBox(FVector(Center.X, Min.Y, Center.Z), FVector(Max.X, Center.Y, Max.Z)); // +-+
+	case 6: return FBox(FVector(Min.X, Center.Y, Center.Z), FVector(Center.X, Max.Y, Max.Z)); // -++
+	case 7: return FBox(Center, Max); // +++
+	default: return FBox(ForceInit);
+	}
+}
+
 
 void AOctreeVoxelVolume::DrawDebugDynamicObstaclesWithBoxes()
 {
@@ -878,54 +912,22 @@ void AOctreeVoxelVolume::DrawDebugDynamicObstaclesWithBoxes()
                                                  (FVector(VoxelIndex) * VoxelSize) + 
                                                  (VoxelSize * 0.5f);
 
-                DrawDebugBox(
-                    World,
-                    VoxelWorldCenter,
-                    VoxelSize * 0.5f,
-                    FColor::Yellow,
-                    false,
-                    0.0f,
-                    0,
-                    2.0f
-                );
+#if ENABLE_DRAW_DEBUG
+            	DrawDebugBox(
+					World,
+					VoxelWorldCenter,
+					VoxelSize * 0.5f,
+					FColor::Yellow,
+					false,
+					0.0f,
+					0,
+					2.0f
+				);
+#endif
             }
         }
     }
 }
-
-void AOctreeVoxelVolume::GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex, const FBox& NodeBounds, int32 CurrentDepth) const
-{
-	if (!StaticNodePoolPtr || StaticNodePoolPtr->IsEmpty()) return;
-
-	if (!StaticNodePoolPtr->IsValidIndex(NodeIndex) || CurrentDepth > GetMaxOctreeDepth())
-	{
-		return;
-	}
-
-	{
-		FScopeLock Lock(&NodePoolCS);
-	
-		const FOctreeNode& Node = (*StaticNodePoolPtr)[NodeIndex];
-
-		// Add node info if it's a leaf or if we've reached the desired debug draw depth.
-		if (Node.State != EOctreeNodeState::Mixed || CurrentDepth == GetMaxOctreeDepth())
-		{
-			OutNodes.Add({ NodeIndex, NodeBounds, Node.State });
-		}
-		else // If mixed, recurse into children.
-		{
-			for (int i = 0; i < 8; ++i)
-			{
-				if (Node.ChildrenIndices[i] != -1)
-				{
-					GetDebugNodeInfoRecursive(OutNodes, Node.ChildrenIndices[i], CalculateChildBounds(NodeBounds, i), CurrentDepth + 1);
-				}
-			}
-		}
-	}
-}
-
-#endif // WITH_EDITOR
 
 void AOctreeVoxelVolume::OnDataAssetLoaded()
 {
@@ -1048,6 +1050,17 @@ int32 AOctreeVoxelVolume::FindLeafNode_Internal(const TArray<FOctreeNode>& InNod
 		CurrentDepth++;
 	}
 	return -1;
+}
+
+
+int32 AOctreeVoxelVolume::GetOctantContainingVoxel(const FBox& NodeBounds, const FVector& VoxelWorldPos) const
+{
+	int32 Octant = 0;
+	const FVector Center = NodeBounds.GetCenter();
+	if (VoxelWorldPos.X >= Center.X) Octant |= 1; // Right half
+	if (VoxelWorldPos.Y >= Center.Y) Octant |= 2; // Front half
+	if (VoxelWorldPos.Z >= Center.Z) Octant |= 4; // Top half
+	return Octant;
 }
 
 void AOctreeVoxelVolume::OptimizeAndCollapse_Internal(TArray<FOctreeNode>& InOutNodePool, int32 NodeIndex)

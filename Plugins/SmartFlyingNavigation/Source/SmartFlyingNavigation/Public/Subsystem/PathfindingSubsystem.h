@@ -186,7 +186,7 @@ private:
 	int32 CurrentNumWorkerThreads = 5;
 
 	UPROPERTY(Config)
-	int32 MaxCallbacksPerFrame = 100;
+	int32 MaxCallbacksPerFrame = 10;
 
 	FThreadSafeCounter NextRequestID;
 	TQueue<FPathfindingResult, EQueueMode::Mpsc> CompletedTasksQueue;

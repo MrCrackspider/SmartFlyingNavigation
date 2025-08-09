@@ -32,7 +32,7 @@ void FNav3DPathfindingDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuil
 	TSharedPtr<IPropertyHandle> MovementModeHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, MovementMode));
 
 	CoreCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, TargetActor));
-	CoreCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PathfindingStrategyClass));
+	CoreCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, AcceptanceRadius));
 
 	AgentCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, BaseAgentRadius));
 	AgentCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, AgentRadius)).DisplayName(LOCTEXT("AgentRadiusLabel", "Pathfinding Radius (Scaled)"));
@@ -40,48 +40,25 @@ void FNav3DPathfindingDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuil
 
 	MovementCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, MovementSpeed));
 	MovementCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, RotationInterpSpeed));
-	MovementCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, RotationAxisLock));
 	MovementCategory.AddProperty(MovementModeHandle);
 	MovementCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PartialPointSplineNum));
-
-	IDetailPropertyRow& SafetyCheckStepSizeRow = MovementCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, SafetyCheckStepSize));
-
-	SafetyCheckStepSizeRow.Visibility(TAttribute<EVisibility>::Create(
-		[MovementModeHandle]() -> EVisibility
-		{
-			if (!MovementModeHandle.IsValid() || !MovementModeHandle->IsValidHandle())
-			{
-				return EVisibility::Collapsed;
-			}
-			
-			TArray<UObject*> OuterObjects;
-			MovementModeHandle->GetOuterObjects(OuterObjects);
-			if (OuterObjects.Num() == 0 || !IsValid(OuterObjects[0]))
-			{
-				return EVisibility::Collapsed;
-			}
-			
-			uint8 MovementModeValue;
-			if (MovementModeHandle->GetValue(MovementModeValue) == FPropertyAccess::Success)
-			{
-				if (static_cast<EPathMovementMode>(MovementModeValue) == EPathMovementMode::Spline)
-				{
-					return EVisibility::Visible;
-				}
-			}
-			return EVisibility::Collapsed;
-		}
-	));
-
+	
+	
 	RepathingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bPeriodicRepath));
 	RepathingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, RepathCooldown));
 	RepathingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, GoalUpdateThreshold));
-	RepathingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PathValidationLookAhead));
-
+	
 	OptimizationCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PathOptimizationCheckInterval));
 	OptimizationCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, OptimizationHeuristicFactor));
 
 	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bDrawDebugPath));
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, Duration));
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, LineThickness));
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, BoxThickness));
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, BoxHalfSize));
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PathColor));
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PathPointColor));
+	
 	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, CurrentState));
 	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, CurrentTargetLocation));
 	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, FoundPath));

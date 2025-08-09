@@ -76,8 +76,6 @@ void UPathfindingComponent::BeginPlay()
 	}
 	else
 	{
-		// Set default value
-		// TODO: This should ideally be set to the same value as VoxelExtent.
 		GoalUpdateThreshold = 100.0f;
 	}
 }
@@ -86,6 +84,14 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
                                           FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	if (GetMovementMode() == EPathMovementMode::Spline)
+	{
+		if (!IsSplinePathSafe())
+		{
+			SetMovementMode(EPathMovementMode::Linear);
+		}
+	}
 	
 	if (!IsValid(AvoidanceSubsystem) || !AvoidanceSubsystem->GetbUseAvoidance())
 	{
@@ -339,68 +345,81 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 		return;
 	}
 
+
 	// 3. [KEY] Arrival Check: Based on the 'current' position after moving, check if we are close enough to the target.
 	//    A loop is used to perfectly handle cases where multiple waypoints are passed in a single frame.
 	
-	while (!bIsReachDestination && FoundPath.IsValidIndex(CurrentPathDestinationIndex) && CurrentPathDestinationIndex > 0)
+	// [핵심 수정] 웨이포인트 도달/통과 판정 로직 강화
+	while (!bIsReachDestination && FoundPath.IsValidIndex(CurrentPathDestinationIndex))
 	{
 		const FVector& TargetWaypoint = FoundPath[CurrentPathDestinationIndex];
-		const FVector& PrevWaypoint = FoundPath[CurrentPathDestinationIndex - 1];
 
-		// **Vector representing the direction of the current path segment.**
-		const FVector PathSegmentDirection = (TargetWaypoint - PrevWaypoint).GetSafeNormal();
+		// 조건 1: 에이전트가 목표 웨이포인트에 충분히 근접했는가? (거리 기반)
+		// Spline 이동 시 마지막 지점에서 멈추는 경우를 처리합니다.
+		const bool bIsAtWaypoint = FVector::DistSquared(Owner->GetActorLocation(), TargetWaypoint) <= FMath::Square(AcceptanceRadius);
 
-		// **Vector from the target waypoint to the agent's current location.**
-		const FVector VectorToAgent = Owner->GetActorLocation() - TargetWaypoint;
-		
-		// **Use the dot product to check if the agent has passed the target waypoint along the path's direction.**
-		// **A non-negative result means the agent is at or past the waypoint.**
-		if (FVector::DotProduct(VectorToAgent, PathSegmentDirection) >= 0.0f)
+		// 조건 2: 에이전트가 목표 웨이포인트를 '통과'했는가? (내적 기반)
+		// Linear 이동이나 고속으로 중간 지점을 통과하는 경우를 처리합니다.
+		bool bHasPassedWaypoint = false;
+		if (CurrentPathDestinationIndex > 0)
 		{
-			// The target was passed, so proceed to the next waypoint.
+			const FVector& PrevWaypoint = FoundPath[CurrentPathDestinationIndex - 1];
+			const FVector PathSegmentDirection = (TargetWaypoint - PrevWaypoint).GetSafeNormal();
+			if (!PathSegmentDirection.IsNearlyZero())
+			{
+				const FVector VectorToAgent = Owner->GetActorLocation() - TargetWaypoint;
+				bHasPassedWaypoint = FVector::DotProduct(VectorToAgent, PathSegmentDirection) >= 0.0f;
+			}
+		}
+
+		if (bIsAtWaypoint || bHasPassedWaypoint)
+		{
+			// 웨이포인트에 도달했으므로, 다음 단계 처리를 요청합니다.
 			ProgressNextPoint();
 		}
 		else
 		{
-			// The target has not been passed yet, so stop checking for this frame.
+			// 아직 목표 웨이포인트에 도달하지 못했으므로, 이번 프레임의 확인을 중단합니다.
 			break;
 		}
 	}
+	
 }
 
 void UPathfindingComponent::AdjustProgressToSpline(const FVector& MoveDelta)
 {
-	if (!IsValid(PathSplinePtr) || PathSplinePtr->GetNumberOfSplinePoints() < 2)
-	{
-		return;
-	}
-	FVector SplineTangent = PathSplinePtr->GetDirectionAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::World).GetSafeNormal();
-	float ForwardDist = FVector::DotProduct(MoveDelta, SplineTangent);
+	if (!IsValid(PathSplinePtr) || PathSplinePtr->GetNumberOfSplinePoints() < 2) return;
 
-	if (ForwardDist > 0.f)
-	{
-		DistanceAlongSpline += ForwardDist;
-	}
+	const FVector CurrLoc = GetOwner()->GetActorLocation();
+	const float InputKey = PathSplinePtr->FindInputKeyClosestToWorldLocation(CurrLoc);
+	const float Len = PathSplinePtr->GetSplineLength();
+	float S = PathSplinePtr->GetDistanceAlongSplineAtSplineInputKey(InputKey);
+	DistanceAlongSpline = FMath::Clamp(S, 0.f, Len);
 }
 
 void UPathfindingComponent::ProgressNextPoint()
 {
-	// Don't wrap this in an if statement, as partialSplineUpdate is needed even for Linear movement.
 	PartialSplinePointUpdate(CurrentPathDestinationIndex);
 	
+	// 경로의 마지막 웨이포인트를 '처리한 후' 다음으로 넘어갈 차례인지 확인합니다.
 	if (CurrentPathDestinationIndex + 1 >= FoundPath.Num())
 	{
-		const FVector LastPathPoint = FoundPath.Last();
-		const float DistanceToFinalGoalSq = FVector::DistSquared(LastPathPoint, CurrentTargetLocation);
+		// [핵심 수정] 최종 도착 판정: '에이전트의 현재 위치'와 '실제 목표 지점'을 비교합니다.
+		// 이것이 도착 여부를 판정하는 가장 정확한 방법입니다.
+		const float DistanceToFinalGoalSq = FVector::DistSquared(GetOwner()->GetActorLocation(), CurrentTargetLocation);
 
-		if (DistanceToFinalGoalSq <= FMath::Square(GoalUpdateThreshold))
+		if (DistanceToFinalGoalSq <= FMath::Square(AcceptanceRadius))
 		{
+			// 최종 목적지에 성공적으로 도착했습니다.
 			OnDestinationReached.Broadcast();
 			StopMovement();
-			return;
+			return; // 모든 이동을 종료합니다.
 		}
 		else
 		{
+			// 경로의 끝까지는 왔지만, 실제 목표와는 아직 거리가 멉니다.
+			// (예: 목표가 그 사이에 움직인 경우)
+			// 새로운 경로를 요청합니다.
 			FoundPath.Empty();
 			PreferredVelocity = FVector::ZeroVector;
 			CurrentVelocity = FVector::ZeroVector;
@@ -410,8 +429,8 @@ void UPathfindingComponent::ProgressNextPoint()
 		}
 	}
 	
+	// 아직 중간 경로이므로, 다음 웨이포인트로 진행합니다.
 	DetermineMovementModeForNextPath();
-
 	++CurrentPathDestinationIndex;
 }
 
@@ -544,7 +563,7 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
     }
 
 	int32 JoinIdx = -1;
-    const int32 StartIdx = FMath::Max(1, ClosestSegIdx); // 최소 1부터
+    const int32 StartIdx = FMath::Max(1, ClosestSegIdx);
     for (int32 j = StartIdx; j < Path.Num(); ++j)
     {
         if (FVector::DotProduct(Path[j] - CurrentLocation, ForwardDir) <= 0.f) continue;
@@ -607,12 +626,23 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
         PathSplinePtr->AddSplinePoint(FoundPath[i], ESplineCoordinateSpace::World, false);
     PathSplinePtr->UpdateSpline();
 
-    DistanceAlongSpline = 0.f;
+	if (AActor* Owner = GetOwner())
+	{
+		PathSplinePtr->SetLocationAtSplinePoint(0, Owner->GetActorLocation(), ESplineCoordinateSpace::World);
+		const float Key0 = PathSplinePtr->FindInputKeyClosestToWorldLocation(Owner->GetActorLocation());
+		const float Len  = PathSplinePtr->GetSplineLength();
+		float S = PathSplinePtr->GetDistanceAlongSplineAtSplineInputKey(Key0);
+		DistanceAlongSpline = FMath::Clamp(S, 0.f, Len);
+	}
+
+	const bool bSplineSafe = IsSplinePathSafe();
+	SetMovementMode(bSplineSafe ? EPathMovementMode::Spline : EPathMovementMode::Linear);
 
     DetermineMovementModeForNextPath();
 
-    if (bDrawDebugPath) DrawDebugPath();
-
+#if WITH_EDITOR
+	if (bDrawDebugPath) DrawDebugPath();
+#endif
     if (bPeriodicRepath)
         GetWorld()->GetTimerManager().SetTimer(RepathCooldownTimer, this, &UPathfindingComponent::PeriodicRepath, RepathCooldown, false);
 }
@@ -797,75 +827,71 @@ void UPathfindingComponent::UpdateSplinePreferredVelocity(float DeltaTime)
 {
 	AActor* Owner = GetOwner();
 	if (!Owner || !IsValid(PathSplinePtr) || PathSplinePtr->GetNumberOfSplinePoints() < 2)
+	{ PreferredVelocity = FVector::ZeroVector; return; }
+
+	if (!IsSplinePathSafe())
 	{
-		PreferredVelocity = FVector::ZeroVector;
+		SetMovementMode(EPathMovementMode::Linear);
+		UpdateLinearPreferredVelocity(DeltaTime);
 		return;
 	}
 
-	const FVector CurrentLocation = Owner->GetActorLocation();
+	const float Len = PathSplinePtr->GetSplineLength();
+	const float Key = PathSplinePtr->FindInputKeyClosestToWorldLocation(Owner->GetActorLocation());
+	float S = PathSplinePtr->GetDistanceAlongSplineAtSplineInputKey(Key);
+	S = FMath::Clamp(S, 0.f, Len);
+	const float Remain = FMath::Max(0.f, Len - S);
 
-	float ClosestInputKey = PathSplinePtr->FindInputKeyClosestToWorldLocation(CurrentLocation);
+	const float LookBase = FMath::Max(AgentRadius, 50.f);
+	const float LookAhead = FMath::Clamp(S + FMath::Min(LookBase, Remain), 0.f, FMath::Max(0.f, Len - KINDA_SMALL_NUMBER));
+	const FVector Dir = PathSplinePtr->GetDirectionAtDistanceAlongSpline(LookAhead, ESplineCoordinateSpace::World);
 
-	float CurrentDistanceOnSpline = PathSplinePtr->GetDistanceAlongSplineAtSplineInputKey(ClosestInputKey);
+	const float Voxel = Cast<AVoxelVolumeBase>(GetCurrentVolume())->VoxelExtent;
+	const float BrakeDist = FMath::Max(2.f * AgentRadius, 2.f * Voxel);
 
-	float LookAheadDistance = CurrentDistanceOnSpline + 50.0f;
-
-	const FVector SplineDirection = PathSplinePtr->GetDirectionAtDistanceAlongSpline(LookAheadDistance, ESplineCoordinateSpace::World);
-
-	PreferredVelocity = SplineDirection * MovementSpeed;
+	const float SpeedScale = FMath::Clamp(Remain / BrakeDist, 0.f, 1.f);
+	PreferredVelocity = Dir * (MovementSpeed * SpeedScale);
 }
 
 bool UPathfindingComponent::IsSplinePathSafe() const
 {
-	// Using this breaks HPA* (Hierarchical Pathfinding A*).
-	AOctreeVoxelVolume* VoxelVolume = Cast<AOctreeVoxelVolume>(GetCurrentVolume());
-	if (!IsValid(PathSplinePtr) || !IsValid(VoxelVolume))
-	{
-		return true;
-	}
+	AOctreeVoxelVolume* V = Cast<AOctreeVoxelVolume>(GetCurrentVolume());
+	if (!IsValid(PathSplinePtr) || PathSplinePtr->GetNumberOfSplinePoints() < 2) return false;
+	if (!IsValid(V) || V->GetRootNodeIndex() == -1) return false;
 
-	const float SplineLength = PathSplinePtr->GetSplineLength();
+	const float Len = PathSplinePtr->GetSplineLength();
+	if (Len <= KINDA_SMALL_NUMBER) return false;
 
-	if (SplineLength < SafetyCheckStepSize)
+	const FVector Curr = GetOwner()->GetActorLocation();
+	const float Key = PathSplinePtr->FindInputKeyClosestToWorldLocation(Curr);
+	float S = PathSplinePtr->GetDistanceAlongSplineAtSplineInputKey(Key);
+	S = FMath::Clamp(S, 0.f, Len);
+
+	const float Voxel = Cast<AVoxelVolumeBase>(V)->VoxelExtent;
+	const float Step  = FMath::Max(10.f, FMath::Min(AgentRadius * 0.5f, Voxel * 0.5f));
+	const float Look  = FMath::Max(AgentRadius * 4.f, Voxel * 2.f);
+	const float E     = FMath::Min(S + Look, Len);
+
+	constexpr int32 RingSamples = 8;
+	for (float d = S; d <= E; d += Step)
 	{
-		if (SplineLength > KINDA_SMALL_NUMBER && VoxelVolume->IsLocationInBlockedVoxel(
-			PathSplinePtr->GetLocationAtDistanceAlongSpline(SplineLength, ESplineCoordinateSpace::World)))
+		const FVector C = PathSplinePtr->GetLocationAtDistanceAlongSpline(d, ESplineCoordinateSpace::World);
+		const FVector T = PathSplinePtr->GetDirectionAtDistanceAlongSpline(d, ESplineCoordinateSpace::World).GetSafeNormal();
+
+		const FVector Up = FVector::UpVector;
+		FVector N = T.Cross(Up); if (N.IsNearlyZero()) N = T.Cross(FVector::RightVector);
+		N = N.GetSafeNormal();
+		const FVector B = (T ^ N).GetSafeNormal();
+
+		if (V->IsLocationInBlockedVoxel(C)) return false;
+
+		const float R = AgentRadius;
+		for (int i = 0; i < RingSamples; ++i)
 		{
-			return false;
+			const float ang = (2.f * PI * i) / RingSamples;
+			const FVector Off = (N * FMath::Cos(ang) + B * FMath::Sin(ang)) * R;
+			if (V->IsLocationInBlockedVoxel(C + Off)) return false;
 		}
-		return true;
 	}
-
-	// Begin Test
-	const float CurrentDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex - 1);
-	const float NextDistance = PathSplinePtr->GetDistanceAlongSplineAtSplinePoint(CurrentPathDestinationIndex);
-	
-	for (float Distance = CurrentDistance; Distance <= NextDistance; Distance += SafetyCheckStepSize)
-	{
-		const FVector CenterLocation = PathSplinePtr->GetLocationAtDistanceAlongSpline(
-			Distance, ESplineCoordinateSpace::World);
-	
-		const TArray<FVector> TestOffsets = {
-			FVector::ZeroVector,
-			FVector(AgentRadius, 0.f, 0.f),
-			FVector(-AgentRadius, 0.f, 0.f),
-			FVector(0.f, AgentRadius, 0.f),
-			FVector(0.f, -AgentRadius, 0.f),
-			FVector(0.f, 0.f, AgentRadius),
-			FVector(0.f, 0.f, -AgentRadius)
-		};
-	
-		for (const FVector& Offset : TestOffsets)
-		{
-			const FVector TestLocation = CenterLocation + Offset;
-	
-			if (VoxelVolume->IsLocationInBlockedVoxel(TestLocation))
-			{
-				return false;
-			}
-		} 
-	}
-	// End Test
-
 	return true;
 }
