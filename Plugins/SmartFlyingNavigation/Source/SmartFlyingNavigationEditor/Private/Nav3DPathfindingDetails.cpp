@@ -10,10 +10,12 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Editor.h" 
-#include "IPropertyUtilities.h"
+
 #include "Framework/Application/SlateApplication.h" 
 #include "Widgets/Docking/SDockTab.h"
 #include "PathfindingTunerTabName.h"
+
+#define LOCTEXT_NAMESPACE "FNav3DPathfindingDetails"
 
 TSharedRef<IDetailCustomization> FNav3DPathfindingDetails::MakeInstance()
 {
@@ -31,50 +33,74 @@ void FNav3DPathfindingDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuil
 	
 	TSharedPtr<IPropertyHandle> MovementModeHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, MovementMode));
 
-	CoreCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, TargetActor));
-	CoreCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, AcceptanceRadius));
+	CoreCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, TargetActor))
+		.ToolTip(LOCTEXT("TargetActor_Tooltip", "The actor that this agent will attempt to move towards. Its location is used as the pathfinding destination."));
 
-	AgentCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, BaseAgentRadius));
-	AgentCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, AgentRadius)).DisplayName(LOCTEXT("AgentRadiusLabel", "Pathfinding Radius (Scaled)"));
-	AgentCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, AvoidanceRadius));
+	CoreCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, AcceptanceRadius))
+		.ToolTip(LOCTEXT("AcceptanceRadius_Tooltip", "The distance from a waypoint or the final destination at which it is considered 'reached'. Prevents the agent from circling its target."));
 
-	MovementCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, MovementSpeed));
-	MovementCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, RotationInterpSpeed));
-	MovementCategory.AddProperty(MovementModeHandle);
-	MovementCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PartialPointSplineNum));
-	
-	
-	RepathingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bPeriodicRepath));
-	RepathingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, RepathCooldown));
-	RepathingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, GoalUpdateThreshold));
-	
-	OptimizationCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PathOptimizationCheckInterval));
-	OptimizationCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, OptimizationHeuristicFactor));
+	AgentCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, BaseAgentRadius))
+		.ToolTip(LOCTEXT("BaseAgentRadius_Tooltip", "The agent's fundamental radius, assuming its scale is 1.0. The actual pathfinding radius is this value multiplied by the actor's scale."));
 
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bDrawDebugPath));
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, Duration));
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, LineThickness));
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, BoxThickness));
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, BoxHalfSize));
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PathColor));
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PathPointColor));
+	AgentCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, AgentRadius))
+		.DisplayName(LOCTEXT("AgentRadiusLabel", "Pathfinding Radius (Scaled)"))
+		.ToolTip(LOCTEXT("AgentRadius_Tooltip", "The final, calculated radius used for pathfinding (BaseAgentRadius * Actor Scale). This is a read-only value for debugging."));
+
+	AgentCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, AvoidanceRadius))
+			.ToolTip(LOCTEXT("AvoidanceRadius_Tooltip", "The 'personal space' radius for real-time dynamic avoidance. For predictable results, it is recommended to set this value equal to the 'Pathfinding Radius (Scaled)'."));
 	
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, CurrentState));
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, CurrentTargetLocation));
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, FoundPath));
+	MovementCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, MovementSpeed))
+		.ToolTip(LOCTEXT("MovementSpeed_Tooltip", "The target speed (in UU/s) at which the agent moves along its calculated path."));
+
+	MovementCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, RotationInterpSpeed))
+		.ToolTip(LOCTEXT("RotationInterpSpeed_Tooltip", "Controls how quickly the agent rotates to face its direction of travel. Higher values result in sharper turns."));
+
+	MovementCategory.AddProperty(MovementModeHandle)
+		.ToolTip(LOCTEXT("MovementMode_Tooltip", "Read-Only: Shows the current movement strategy (Spline or Linear). This is determined automatically by the component for optimal, safe movement."));
+
+	MovementCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PartialPointSplineNum))
+		.ToolTip(LOCTEXT("PartialPointSplineNum_Tooltip", "The number of future path points to use when generating the spline for smooth following."));
+
+	RepathingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bPeriodicRepath))
+		.ToolTip(LOCTEXT("bPeriodicRepath_Tooltip", "If true, the agent will automatically request a new path on a timer, defined by Repath Cooldown. Essential for tracking moving targets."));
+
+	RepathingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, RepathCooldown))
+		.ToolTip(LOCTEXT("RepathCooldown_Tooltip", "The time in seconds to wait between automatic path requests when bPeriodicRepath is enabled."));
+
+	RepathingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, GoalUpdateThreshold))
+		.ToolTip(LOCTEXT("GoalUpdateThreshold_Tooltip", "Triggers a new path request only if the target has moved more than this distance (in cm) since the last path was calculated. A performance-saving alternative to periodic repathing."));
 	
-	DebuggingCategory.AddCustomRow(LOCTEXT("OpenPathfindingTunerFilter", "Open Pathfinding Tuner"))
-	.ValueContent()
-	.HAlign(HAlign_Center)
-	[
-		SNew(SButton)
-		.Text(LOCTEXT("OpenPathfindingTunerButton", "Open Pathfinding Tuner"))
-		.OnClicked_Lambda([]() -> FReply
-		{
-			FGlobalTabmanager::Get()->TryInvokeTab(PathfindingTunerTabName);
-			return FReply::Handled();
-		})
-	];
+	// --- Debugging & Tools Category ---
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bDrawDebugPath))
+		.ToolTip(LOCTEXT("bDrawDebugPath_Tooltip", "If true, the agent's calculated path will be visualized in the world."));
+
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, Duration))
+		.ToolTip(LOCTEXT("Duration_Tooltip", "How long (in seconds) the debug path visualization persists in the viewport."));
+
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, LineThickness))
+		.ToolTip(LOCTEXT("LineThickness_Tooltip", "The thickness of the debug path lines."));
+
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, BoxThickness))
+		.ToolTip(LOCTEXT("BoxThickness_Tooltip", "The thickness of the outline for the debug boxes at each waypoint."));
+
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, BoxHalfSize))
+		.ToolTip(LOCTEXT("BoxHalfSize_Tooltip", "The size of the debug boxes drawn at each waypoint."));
+
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PathColor))
+		.ToolTip(LOCTEXT("PathColor_Tooltip", "The color of the debug path lines connecting waypoints."));
+
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PathPointColor))
+		.ToolTip(LOCTEXT("PathPointColor_Tooltip", "The color of the debug boxes at each waypoint."));
+	
+	// --- 상태 변수 (Read-Only) ---
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, CurrentState))
+		.ToolTip(LOCTEXT("CurrentState_Tooltip", "Read-Only: Shows the agent's current high-level behavior (e.g., Idle, FollowPath)."));
+
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, CurrentTargetLocation))
+		.ToolTip(LOCTEXT("CurrentTargetLocation_Tooltip", "Read-Only: The world location the agent is currently trying to reach."));
+
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, FoundPath))
+		.ToolTip(LOCTEXT("FoundPath_Tooltip", "Read-Only: The array of FVectors representing the waypoints of the current path."));
 	
 	DetailBuilder.HideCategory("Pathfinding|Configuration");
 	DetailBuilder.HideCategory("Pathfinding|Dynamic Repath");
@@ -84,3 +110,4 @@ void FNav3DPathfindingDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuil
 	DetailBuilder.HideCategory("Pathfinding|State");
 	DetailBuilder.HideCategory("Pathfinding");
 }
+#undef LOCTEXT_NAMESPACE

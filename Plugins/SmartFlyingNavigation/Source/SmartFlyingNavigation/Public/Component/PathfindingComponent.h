@@ -92,17 +92,12 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Pathfinding|Event")
 	FOnDestinationReached OnDestinationReached;
 	
-	void SetbPeriodicRepath(bool NewValue) { bPeriodicRepath = NewValue; }
-
 	void CreateOctreeDataSnapshot(const AOctreeVoxelVolume* OctreeVolume, FOctreePathfindingData& SnapshotData) const;
 
 	bool HasReachedDestination() const { return CurrentPathDestinationIndex >= FoundPath.Num(); }
 
 	UFUNCTION(BlueprintCallable, Category = "Pathfinding")
 	void StopMovement();
-
-	void SetRepathCooldown(float NewCoolDown) { RepathCooldown = NewCoolDown; }
-	float GetRepathCooldown() const { return RepathCooldown; }
 
 #if WITH_EDITOR
 	// A function called when a property is changed in the editor.
@@ -222,7 +217,7 @@ public:
 
 	UPROPERTY(Category = "Pathfinding|Configuration", EditAnywhere, BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
-	bool bPeriodicRepath = false;
+	bool bPeriodicRepath = true;
 	
 	UPROPERTY(Category = "Pathfinding|Dynamic Repath", EditAnywhere, BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
@@ -275,19 +270,11 @@ public:
 	UPROPERTY(Category = "Pathfinding|Dynamic Goal", EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = "true"))
 	float GoalUpdateThreshold = 100.f; // The target must move this distance (cm) or more to re-explore
 
-	UPROPERTY(Category = "Pathfinding|Optimization", EditAnywhere, BlueprintReadWrite,
-		meta = (AllowPrivateAccess = "true"))
-	float PathOptimizationCheckInterval = 1.0f; // Shortcut check every second
-
-	UPROPERTY(Category = "Pathfinding|Optimization", EditAnywhere, BlueprintReadWrite,
-		meta = (AllowPrivateAccess = "true", ClampMin = "0.1", ClampMax = "1.0"))
-	float OptimizationHeuristicFactor = 0.8f; // Re-search when the straight-line distance is shorter than 80% of the remaining path.
-
 #pragma endregion
 
 #pragma region Internal State
 
-	UPROPERTY(Category = "Pathfinding|Dynamic Repath", EditAnywhere, BlueprintReadWrite,
+	UPROPERTY(Category = "Pathfinding|Dynamic Repath", VisibleAnywhere, BlueprintReadWrite,
 		meta = (AllowPrivateAccess = true))
 	EPathMovementMode MovementMode = EPathMovementMode::Spline;
 
@@ -326,7 +313,10 @@ public:
 	
 private:
 	UPROPERTY()
-	TObjectPtr<USplineComponent> PathSplinePtr; 
+	TObjectPtr<USplineComponent> PathSplinePtr;
+
+	FVector LastKnownTargetLocation;
+	
 #pragma endregion
 
 	UFUNCTION()

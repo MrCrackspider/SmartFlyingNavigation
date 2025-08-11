@@ -69,15 +69,6 @@ void UPathfindingComponent::BeginPlay()
 			PathfindingStrategy->Initialize();
 		}
 	}
-
-	if (AVoxelVolumeBase* StartingVolume = GetCurrentVolume())
-	{
-		GoalUpdateThreshold = StartingVolume->VoxelExtent;
-	}
-	else
-	{
-		GoalUpdateThreshold = 100.0f;
-	}
 }
 
 void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
@@ -85,6 +76,15 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
+
+	if (!bPeriodicRepath && IsValid(TargetActor))
+	{
+		if (FVector::DistSquared(TargetActor->GetActorLocation(), LastKnownTargetLocation) > FMath::Square(GoalUpdateThreshold))
+		{
+			RequestPathToTargetActor();
+		}
+	}
+	
 	if (GetMovementMode() == EPathMovementMode::Spline)
 	{
 		if (!IsSplinePathSafe())
@@ -163,6 +163,7 @@ bool UPathfindingComponent::RequestPathToLocation(const FVector& TargetLocation)
 
 	const FVector StartLocation = GetOwner()->GetActorLocation();
 	AOctreeVoxelVolume* StartVolume = NavSubsystem->GetVolumeChunkAt(StartLocation);
+	LastKnownTargetLocation = TargetLocation;
 	
 	// --- 2. If the start volume is not ready, pend the request. ---
 	if (!StartVolume || !StartVolume->IsReadyForNavigation())
@@ -401,25 +402,18 @@ void UPathfindingComponent::ProgressNextPoint()
 {
 	PartialSplinePointUpdate(CurrentPathDestinationIndex);
 	
-	// 경로의 마지막 웨이포인트를 '처리한 후' 다음으로 넘어갈 차례인지 확인합니다.
 	if (CurrentPathDestinationIndex + 1 >= FoundPath.Num())
 	{
-		// [핵심 수정] 최종 도착 판정: '에이전트의 현재 위치'와 '실제 목표 지점'을 비교합니다.
-		// 이것이 도착 여부를 판정하는 가장 정확한 방법입니다.
 		const float DistanceToFinalGoalSq = FVector::DistSquared(GetOwner()->GetActorLocation(), CurrentTargetLocation);
 
 		if (DistanceToFinalGoalSq <= FMath::Square(AcceptanceRadius))
 		{
-			// 최종 목적지에 성공적으로 도착했습니다.
 			OnDestinationReached.Broadcast();
 			StopMovement();
-			return; // 모든 이동을 종료합니다.
+			return;
 		}
 		else
 		{
-			// 경로의 끝까지는 왔지만, 실제 목표와는 아직 거리가 멉니다.
-			// (예: 목표가 그 사이에 움직인 경우)
-			// 새로운 경로를 요청합니다.
 			FoundPath.Empty();
 			PreferredVelocity = FVector::ZeroVector;
 			CurrentVelocity = FVector::ZeroVector;
@@ -429,7 +423,6 @@ void UPathfindingComponent::ProgressNextPoint()
 		}
 	}
 	
-	// 아직 중간 경로이므로, 다음 웨이포인트로 진행합니다.
 	DetermineMovementModeForNextPath();
 	++CurrentPathDestinationIndex;
 }
@@ -615,7 +608,7 @@ void UPathfindingComponent::HandleWorldPathResult(const TArray<FVector>& Path, b
         }
     }
 
-    FoundPath = MoveTemp(NewPath);
+   FoundPath = MoveTemp(NewPath);
 
     bIsReachDestination = false;
     CurrentState = EPathfindingState::FollowPath;
