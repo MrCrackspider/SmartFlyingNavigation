@@ -11,6 +11,7 @@
 #include "Editor.h"
 #include "PathfindingEditorSubsystem.h"
 
+#define LOCTEXT_NAMESPACE "FNav3DVolumeDetails"
 TSharedRef<IDetailCustomization> FNav3DVolumeDetails::MakeInstance()
 {
 	return MakeShareable(new FNav3DVolumeDetails);
@@ -39,45 +40,6 @@ void FNav3DVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
             SNew(STextBlock)
                 .Text(LOCTEXT("BakeActionLabel", "Bake Actions"))
                 .Font(IDetailLayoutBuilder::GetDetailFont())
-        ]
-        .ValueContent()
-        [
-            SNew(SButton)
-                .Text(LOCTEXT("BakeSelectedButton", "Bake Selected Volume(s)"))
-                .ToolTipText(LOCTEXT("BakeSelectedButton_Tooltip", "Bakes the navigation data for the currently selected volume(s), including portal connections between them."))
-                .HAlign(HAlign_Center)
-                .OnClicked_Lambda([SelectedObjects]() -> FReply
-                    {
-                        TArray<AOctreeVoxelVolume*> VolumesToBake;
-                        for (const TWeakObjectPtr<UObject>& ObjPtr : SelectedObjects)
-                        {
-                            if (AOctreeVoxelVolume* Volume = Cast<AOctreeVoxelVolume>(ObjPtr.Get()))
-                            {
-                                VolumesToBake.Add(Volume);
-                            }
-                        }
-
-                        if (VolumesToBake.IsEmpty())
-                        {
-                            UE_LOG(LogTemp, Warning, TEXT("No AOctreeVoxelVolume selected to bake."));
-                            return FReply::Handled();
-                        }
-
-                        // <<<< This is the key modification >>>>
-                        // Get the editor subsystem instead of the runtime subsystem.
-                        if (UPathfindingEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UPathfindingEditorSubsystem>())
-                        {
-                            // Call the bake function on the editor subsystem.
-                            EditorSubsystem->BakeSpecificVolumes(VolumesToBake);
-                        }
-                        else
-                        {
-                            UE_LOG(LogTemp, Error, TEXT("PathfindingEditorSubsystem not found! Cannot start bake."));
-                        }
-                        // <<<< End of modification >>>>
-
-                        return FReply::Handled();
-                    })
         ];
 
     // --- 3. Keep the existing "Pathfinding Tuner UI" button ---
@@ -100,3 +62,4 @@ void FNav3DVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
                     })
         ];
 }
+#undef LOCTEXT_NAMESPACE
