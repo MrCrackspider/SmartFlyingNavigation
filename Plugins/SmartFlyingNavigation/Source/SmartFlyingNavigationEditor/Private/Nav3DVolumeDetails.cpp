@@ -34,14 +34,6 @@ void FNav3DVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
     TArray<TWeakObjectPtr<UObject>> SelectedObjects;
     DetailBuilder.GetObjectsBeingCustomized(SelectedObjects);
 
-    BakeCategory.AddCustomRow(LOCTEXT("BakeButtonFilter", "Bake Volume"))
-        .NameContent()
-        [
-            SNew(STextBlock)
-                .Text(LOCTEXT("BakeActionLabel", "Bake Actions"))
-                .Font(IDetailLayoutBuilder::GetDetailFont())
-        ];
-
     // --- 3. Keep the existing "Pathfinding Tuner UI" button ---
     IDetailCategoryBuilder& TunerCategory = DetailBuilder.EditCategory("Tuner", FText::GetEmpty(), ECategoryPriority::Important);
     TunerCategory.AddCustomRow(LOCTEXT("OpenPathfindingTunerFilter", "Open Pathfinding Tuner"))
