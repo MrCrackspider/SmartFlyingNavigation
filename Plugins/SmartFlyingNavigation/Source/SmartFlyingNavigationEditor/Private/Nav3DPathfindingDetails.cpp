@@ -15,8 +15,6 @@
 #include "Widgets/Docking/SDockTab.h"
 #include "PathfindingTunerTabName.h"
 
-#define LOCTEXT_NAMESPACE "FNav3DPathfindingDetails"
-
 TSharedRef<IDetailCustomization> FNav3DPathfindingDetails::MakeInstance()
 {
 	return MakeShareable(new FNav3DPathfindingDetails);
@@ -60,15 +58,9 @@ void FNav3DPathfindingDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuil
 
 	MovementCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PartialPointSplineNum))
 		.ToolTip(LOCTEXT("PartialPointSplineNum_Tooltip", "The number of future path points to use when generating the spline for smooth following."));
-
-	RepathingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bPeriodicRepath))
-		.ToolTip(LOCTEXT("bPeriodicRepath_Tooltip", "If true, the agent will automatically request a new path on a timer, defined by Repath Cooldown. Essential for tracking moving targets."));
-
+	
 	RepathingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, RepathCooldown))
 		.ToolTip(LOCTEXT("RepathCooldown_Tooltip", "The time in seconds to wait between automatic path requests when bPeriodicRepath is enabled."));
-
-	RepathingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, GoalUpdateThreshold))
-		.ToolTip(LOCTEXT("GoalUpdateThreshold_Tooltip", "Triggers a new path request only if the target has moved more than this distance (in cm) since the last path was calculated. A performance-saving alternative to periodic repathing."));
 	
 	// --- Debugging & Tools Category ---
 	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bDrawDebugPath))
@@ -110,4 +102,3 @@ void FNav3DPathfindingDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuil
 	DetailBuilder.HideCategory("Pathfinding|State");
 	DetailBuilder.HideCategory("Pathfinding");
 }
-#undef LOCTEXT_NAMESPACE

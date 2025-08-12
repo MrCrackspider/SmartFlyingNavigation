@@ -201,6 +201,7 @@ void UPathfindingEditorSubsystem::BakeAndConnectVolumes_Internal(const TArray<AO
 	{
 		if (!IsValid(Volume)) continue;
 		TArray<FOctreeNode> NodePool;
+
 		if (Volume->BakeStaticData(InWorld, NodePool))
 		{
 			BakedVolumeData.Add(Volume, NodePool);

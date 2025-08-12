@@ -416,6 +416,7 @@ bool AOctreeVoxelVolume::IsRegionEmpty_Internal(int32 NodeIndex, const FBox& Nod
 
 bool AOctreeVoxelVolume::BakeStaticData(UWorld* World, TArray<FOctreeNode>& OutNodePool)
 {
+		
 	const FBox VolumeBounds = GetVolumeBounds();
 	if (!VolumeBounds.IsValid || !World) return false;
 
@@ -1301,10 +1302,6 @@ void AOctreeVoxelVolume::ConnectPortals_Bake(
 					}
 					else
 					{
-						FString StateString = (NeighborNode.State == EOctreeNodeState::Solid) ? TEXT("Solid") : TEXT("Mixed");
-						UE_LOG(LogTemp, Warning, TEXT(">>> FAILED: Portal creation for '%s' (Node %d) failed. Neighbor node %d in '%s' is not empty (State: %s)."),
-							*GetName(), MyNodeIndex, *NeighborVolume->GetName(), NeighborNodeIndex, *StateString);
-
 #if WITH_EDITOR
 						DrawDebugBox(World, NeighborNode.Bounds.GetCenter(), NeighborNode.Bounds.GetExtent(), FColor::Red, false, 30.0f, 0, 10.0f);
 #endif

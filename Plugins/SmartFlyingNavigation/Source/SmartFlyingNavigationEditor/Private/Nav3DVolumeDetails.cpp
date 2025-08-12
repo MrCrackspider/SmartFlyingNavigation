@@ -11,7 +11,6 @@
 #include "Editor.h"
 #include "PathfindingEditorSubsystem.h"
 
-#define LOCTEXT_NAMESPACE "FNav3DVolumeDetails"
 TSharedRef<IDetailCustomization> FNav3DVolumeDetails::MakeInstance()
 {
 	return MakeShareable(new FNav3DVolumeDetails);
@@ -33,7 +32,7 @@ void FNav3DVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
     // Get the list of currently selected objects in the details panel.
     TArray<TWeakObjectPtr<UObject>> SelectedObjects;
     DetailBuilder.GetObjectsBeingCustomized(SelectedObjects);
-
+    
     // --- 3. Keep the existing "Pathfinding Tuner UI" button ---
     IDetailCategoryBuilder& TunerCategory = DetailBuilder.EditCategory("Tuner", FText::GetEmpty(), ECategoryPriority::Important);
     TunerCategory.AddCustomRow(LOCTEXT("OpenPathfindingTunerFilter", "Open Pathfinding Tuner"))
@@ -54,4 +53,3 @@ void FNav3DVolumeDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
                     })
         ];
 }
-#undef LOCTEXT_NAMESPACE

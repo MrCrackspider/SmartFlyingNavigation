@@ -98,7 +98,18 @@ public:
 	void SetMaxOctreeDepth(int32 Depth) { MaxOctreeDepth = Depth; }
 
 	/** Returns the configured maximum depth of the octree. */
-	FORCEINLINE int32 GetMaxOctreeDepth() const { return static_cast<int>(std::log2(GetMapSize().X)); }
+	FORCEINLINE int32 GetMaxOctreeDepth() const
+	{
+		if (MapSize.X <= 0)
+		{
+			UE_LOG(LogTemp, Error, TEXT("AOctreeVoxelVolume::GetMaxOctreeDepth - MapSize.X is invalid (%d). Returning default depth 1."), MapSize.X);
+			return 1;
+		}
+
+		const int32 CalculatedDepth = FMath::FloorToInt(FMath::Log2(static_cast<float>(MapSize.X)));
+
+		return FMath::Max(0, CalculatedDepth);
+	}
 
 	/**
 	 * Sets the filter used to identify static objects during the baking process.

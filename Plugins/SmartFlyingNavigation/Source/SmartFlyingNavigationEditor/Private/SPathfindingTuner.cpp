@@ -57,7 +57,9 @@ void SPathfindingTuner::Construct(const FArguments& InArgs)
 	DetailsViewArgs.bLockable = false;
 
 	AgentDetailsView = PropertyEditorModule.CreateDetailView(DetailsViewArgs);
-
+	MapSizeOptions.Add(MakeShared<int32>(128));
+	MapSizeOptions.Add(MakeShared<int32>(256));
+	
 	ChildSlot
 	[
 		SNew(SScrollBox)
@@ -71,6 +73,15 @@ void SPathfindingTuner::Construct(const FArguments& InArgs)
 				.Padding(4.f)
 				[
 					BuildPerformanceSettingsSection()
+				]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(2)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.Padding(4.f)
+				[
+					BuildAvoidanceSettingsSection()
 				]
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(2)
@@ -188,77 +199,6 @@ TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
 					.MaxValue(64)
 					.MinSliderValue(1)
 					.MaxSliderValue(16)
-				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f, 5.0f)
-			[
-				SNew(SHorizontalBox)
-				.ToolTipText(LOCTEXT("UseAvoidanceTooltip", "Enables or disables agent avoidance behavior globally."))
-
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.4f)
-				.VAlign(VAlign_Center)
-				.Padding(0, 0, 10, 0)
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("UseAvoidanceLabel", "Use Agent Avoidance"))
-					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-				]
-
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.6f)
-				.VAlign(VAlign_Center)
-				[
-					SNew(SCheckBox)
-					.IsChecked_Lambda([AvoidanceCDO]() -> ECheckBoxState
-					{
-						if (AvoidanceCDO)
-						{
-							return AvoidanceCDO->GetbUseAvoidance()
-								       ? ECheckBoxState::Checked
-								       : ECheckBoxState::Unchecked;
-						}
-						return ECheckBoxState::Undetermined;
-					})
-					.OnCheckStateChanged(this, &SPathfindingTuner::OnbAvoidanceComitted)
-				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f, 5.0f)
-			[
-				SNew(SHorizontalBox)
-				.ToolTipText(LOCTEXT("ShowAvoidanceVelocityDebugTooltip",
-				                     "If enabled, shows a debug line representing the agent's avoidance velocity."))
-
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.4f)
-				.VAlign(VAlign_Center)
-				.Padding(0, 0, 10, 0)
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("ShowAvoidanceVelocityDebugLabel", "Show Velocity Debug Line"))
-					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-				]
-
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.6f)
-				.VAlign(VAlign_Center)
-				[
-					SNew(SCheckBox)
-					.IsChecked_Lambda([AvoidanceCDO]() -> ECheckBoxState
-					{
-						if (AvoidanceCDO)
-						{
-							return AvoidanceCDO->GetbShowVelocityDebugLine()
-								       ? ECheckBoxState::Checked
-								       : ECheckBoxState::Unchecked;
-						}
-						return ECheckBoxState::Undetermined;
-					})
-					.OnCheckStateChanged(this, &SPathfindingTuner::OnbAvoidanceVelocityDebugComitted)
 				]
 			]
 		]
@@ -538,6 +478,216 @@ TSharedRef<SWidget> SPathfindingTuner::BuildBakedDataSettingsSection()
 		.OnAreaExpansionChanged(this, &SPathfindingTuner::OnBakedDataCategoryExpansionChanged);
 }
 
+TSharedRef<SWidget> SPathfindingTuner::BuildAvoidanceSettingsSection()
+{
+	const UPathfindingTunerSettings* TunerSettings = GetDefault<UPathfindingTunerSettings>();
+	const UAvoidanceSubsystem* AvoidanceCDO = GetDefault<UAvoidanceSubsystem>();
+
+	return SNew(SExpandableArea)
+		.HeaderContent()
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("AvoidanceSettingsCategory", "Avoidance Tuning"))
+			.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
+			.ShadowOffset(FVector2D(1.0f, 1.0f))
+		]
+		.BodyContent()
+		[
+			SNew(SVerticalBox)
+
+			// Informational Note
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(4.0f, 4.0f, 4.0f, 12.0f)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.Padding(FMargin(8.0f))
+				[
+					SNew(SHorizontalBox)
+
+					// Info Icon
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					.Padding(0.0f, 0.0f, 6.0f, 0.0f)
+					[
+						SNew(SImage)
+						.Image(FAppStyle::GetBrush("Icons.Info"))
+					]
+
+					// Description Text
+					+ SHorizontalBox::Slot()
+					.FillWidth(1.0f)
+					.VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("AvoidanceWarningText", "Note: Incorrectly tuned parameters can result in poor or non-functional avoidance behavior."))
+						.Font(FAppStyle::GetFontStyle("PropertyWindow.ItalicFont"))
+						.ColorAndOpacity(FSlateColor(FLinearColor(0.8f, 0.8f, 0.8f)))
+						.AutoWrapText(true)
+					]
+				]
+			]
+
+			// Use Agent Avoidance
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+			[
+				SNew(SHorizontalBox)
+				.ToolTipText(LOCTEXT("UseAvoidanceTooltip", "Enables or disables agent avoidance behavior globally."))
+				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center).Padding(0, 0, 10, 0)
+				[
+					SNew(STextBlock).Text(LOCTEXT("UseAvoidanceLabel", "Use Agent Avoidance")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+				]
+				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
+				[
+					SNew(SCheckBox)
+					.IsChecked_Lambda([AvoidanceCDO]() { return AvoidanceCDO ? (AvoidanceCDO->GetbUseAvoidance() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked) : ECheckBoxState::Undetermined; })
+					.OnCheckStateChanged(this, &SPathfindingTuner::OnbAvoidanceComitted)
+				]
+			]
+
+			// Show Velocity Debug Line
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+			[
+				SNew(SHorizontalBox)
+				.ToolTipText(LOCTEXT("ShowAvoidanceVelocityDebugTooltip", "If enabled, shows a debug line representing the agent's avoidance velocity."))
+				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center).Padding(0, 0, 10, 0)
+				[
+					SNew(STextBlock).Text(LOCTEXT("ShowAvoidanceVelocityDebugLabel", "Show Velocity Debug Line")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+				]
+				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
+				[
+					SNew(SCheckBox)
+					.IsChecked_Lambda([AvoidanceCDO]() { return AvoidanceCDO ? (AvoidanceCDO->GetbShowVelocityDebugLine() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked) : ECheckBoxState::Undetermined; })
+					.OnCheckStateChanged(this, &SPathfindingTuner::OnbAvoidanceVelocityDebugComitted)
+				]
+			]
+			
+			// TimeHorizon
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+			[
+				SNew(SHorizontalBox)
+				.ToolTipText(LOCTEXT("TimeHorizonTooltip", "How far in the future to predict collisions (in seconds)."))
+				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center).Padding(0, 0, 10, 0)
+				[
+					SNew(STextBlock).Text(LOCTEXT("TimeHorizonLabel", "Time Horizon")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+				]
+				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
+				[
+					SNew(SNumericEntryBox<float>)
+					.Value_Lambda([AvoidanceCDO]() -> TOptional<float> { return AvoidanceCDO ? TOptional(AvoidanceCDO->GetTimeHorizon()) : TOptional<float>(); })
+					.OnValueCommitted(this, &SPathfindingTuner::OnTimeHorizonCommitted)
+				]
+			]
+
+			// MaxNeighbors
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+			[
+				SNew(SHorizontalBox)
+				.ToolTipText(LOCTEXT("MaxNeighborsTooltip", "Maximum number of other agents to consider for avoidance.\nHigher values can improve avoidance quality but may cause performance degradation."))
+				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center).Padding(0, 0, 10, 0)
+				[
+					SNew(STextBlock).Text(LOCTEXT("MaxNeighborsLabel", "Max Neighbors")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+				]
+				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
+				[
+					SNew(SNumericEntryBox<int32>)
+					.Value_Lambda([AvoidanceCDO]() -> TOptional<int32> { return AvoidanceCDO ? TOptional(AvoidanceCDO->GetMaxNeighbors()) : TOptional<int32>(); })
+					.OnValueCommitted(this, &SPathfindingTuner::OnMaxNeighborsCommitted)
+					.MinValue(0).MaxValue(32)
+				]
+			]
+
+			// GridCellSize
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+			[
+				SNew(SHorizontalBox)
+				.ToolTipText(LOCTEXT("GridCellSizeTooltip", "Size of the grid cells used for broad-phase neighbor search.\nIt is highly recommended to match this value with the 'Voxel Extent' for optimal performance."))
+				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center).Padding(0, 0, 10, 0)
+				[
+					SNew(STextBlock).Text(LOCTEXT("GridCellSizeLabel", "Grid Cell Size")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+				]
+				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
+				[
+					SNew(SNumericEntryBox<float>)
+					.Value_Lambda([AvoidanceCDO]() -> TOptional<float> { return AvoidanceCDO ? TOptional(AvoidanceCDO->GetGridCellSize()) : TOptional<float>(); })
+					.OnValueCommitted(this, &SPathfindingTuner::OnGridCellSizeCommitted)
+				]
+			]
+
+			// SymmetryBreakingRangeMultiplier
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+			[
+				SNew(SHorizontalBox)
+				.ToolTipText(LOCTEXT("SymmetryBreakingTooltip", "Multiplier to break symmetry when agents are head-on."))
+				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center).Padding(0, 0, 10, 0)
+				[
+					SNew(STextBlock).Text(LOCTEXT("SymmetryBreakingLabel", "Symmetry Breaking Multiplier")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+				]
+				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
+				[
+					SNew(SNumericEntryBox<float>)
+					.Value_Lambda([AvoidanceCDO]() -> TOptional<float> { return AvoidanceCDO ? TOptional(AvoidanceCDO->GetSymmetryBreakingRangeMultiplier()) : TOptional<float>(); })
+					.OnValueCommitted(this, &SPathfindingTuner::OnSymmetryBreakingRangeMultiplierCommitted)
+				]
+			]
+
+			// SolverIterations
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+			[
+				SNew(SHorizontalBox)
+				.ToolTipText(LOCTEXT("SolverIterationsTooltip", "Number of iterations to run the velocity solver."))
+				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center).Padding(0, 0, 10, 0)
+				[
+					SNew(STextBlock).Text(LOCTEXT("SolverIterationsLabel", "Solver Iterations")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+				]
+				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
+				[
+					SNew(SNumericEntryBox<int32>)
+					.Value_Lambda([AvoidanceCDO]() -> TOptional<int32> { return AvoidanceCDO ? TOptional(AvoidanceCDO->GetSolverIterations()) : TOptional<int32>(); })
+					.OnValueCommitted(this, &SPathfindingTuner::OnSolverIterationsCommitted)
+					.MinValue(1).MaxValue(20)
+				]
+			]
+			
+			// SideBiasMagnitude
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+			[
+				SNew(SHorizontalBox)
+				.ToolTipText(LOCTEXT("SideBiasMagnitudeTooltip", "Magnitude of the bias to encourage agents to pass on a specific side."))
+				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center).Padding(0, 0, 10, 0)
+				[
+					SNew(STextBlock).Text(LOCTEXT("SideBiasMagnitudeLabel", "Side Bias Magnitude")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+				]
+				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
+				[
+					SNew(SNumericEntryBox<float>)
+					.Value_Lambda([AvoidanceCDO]() -> TOptional<float> { return AvoidanceCDO ? TOptional(AvoidanceCDO->GetSideBiasMagnitude()) : TOptional<float>(); })
+					.OnValueCommitted(this, &SPathfindingTuner::OnSideBiasMagnitudeCommitted)
+				]
+			]
+
+			// InterpSpeed
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+			[
+				SNew(SHorizontalBox)
+				.ToolTipText(LOCTEXT("InterpSpeedTooltip", "Interpolation speed for smoothing the final velocity."))
+				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center).Padding(0, 0, 10, 0)
+				[
+					SNew(STextBlock).Text(LOCTEXT("InterpSpeedLabel", "Interpolation Speed")).Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+				]
+				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
+				[
+					SNew(SNumericEntryBox<float>)
+					.Value_Lambda([AvoidanceCDO]() -> TOptional<float> { return AvoidanceCDO ? TOptional(AvoidanceCDO->GetInterpSpeed()) : TOptional<float>(); })
+					.OnValueCommitted(this, &SPathfindingTuner::OnInterpSpeedCommitted)
+				]
+			]
+		]
+		.InitiallyCollapsed(!TunerSettings->bIsAvoidanceCategoryExpanded)
+		.OnAreaExpansionChanged(this, &SPathfindingTuner::OnAvoidanceCategoryExpansionChanged);	
+}
 TSharedRef<SWidget> SPathfindingTuner::BuildVoxelDebugSettingsSection()
 {
 	const UPathfindingTunerSettings* TunerSettings = GetDefault<UPathfindingTunerSettings>();
@@ -1228,6 +1378,97 @@ void SPathfindingTuner::OnbAvoidanceComitted(ECheckBoxState NewState)
 	}
 }
 
+void SPathfindingTuner::OnTimeHorizonCommitted(float NewValue, ETextCommit::Type CommitType)
+{
+    if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
+    {
+        if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
+        {
+            AvoidanceCDO->SetTimeHorizon(NewValue);
+            AvoidanceCDO->SaveConfig();
+            Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+        }
+    }
+}
+
+void SPathfindingTuner::OnMaxNeighborsCommitted(int32 NewValue, ETextCommit::Type CommitType)
+{
+    if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
+    {
+        if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
+        {
+            AvoidanceCDO->SetMaxNeighbors(NewValue);
+            AvoidanceCDO->SaveConfig();
+            Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+        }
+    }
+}
+
+void SPathfindingTuner::OnGridCellSizeCommitted(float NewValue, ETextCommit::Type CommitType)
+{
+    if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
+    {
+        if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
+        {
+            AvoidanceCDO->SetGridCellSize(NewValue);
+            AvoidanceCDO->SaveConfig();
+            Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+        }
+    }
+}
+
+void SPathfindingTuner::OnSymmetryBreakingRangeMultiplierCommitted(float NewValue, ETextCommit::Type CommitType)
+{
+    if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
+    {
+        if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
+        {
+            AvoidanceCDO->SetSymmetryBreakingRangeMultiplier(NewValue);
+            AvoidanceCDO->SaveConfig();
+            Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+        }
+    }
+}
+
+void SPathfindingTuner::OnSolverIterationsCommitted(int32 NewValue, ETextCommit::Type CommitType)
+{
+    if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
+    {
+        if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
+        {
+            AvoidanceCDO->SetSolverIterations(NewValue);
+            AvoidanceCDO->SaveConfig();
+            Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+        }
+    }
+}
+
+void SPathfindingTuner::OnSideBiasMagnitudeCommitted(float NewValue, ETextCommit::Type CommitType)
+{
+    if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
+    {
+        if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
+        {
+            AvoidanceCDO->SetSideBiasMagnitude(NewValue);
+            AvoidanceCDO->SaveConfig();
+            Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+        }
+    }
+}
+
+void SPathfindingTuner::OnInterpSpeedCommitted(float NewValue, ETextCommit::Type CommitType)
+{
+    if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
+    {
+        if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
+        {
+            AvoidanceCDO->SetInterpSpeed(NewValue);
+            AvoidanceCDO->SaveConfig();
+            Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+        }
+    }
+}
+
 void SPathfindingTuner::OnbAvoidanceVelocityDebugComitted(ECheckBoxState NewState)
 {
 	if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
@@ -1267,11 +1508,16 @@ bool SPathfindingTuner::AreOnlyAgentsSelected() const
 FReply SPathfindingTuner::OnBakeButtonClicked()
 {
 	TArray<AOctreeVoxelVolume*> SelectedVolumes;
-	for (const TWeakObjectPtr<AActor>& WeakActor : LastSelectedActors)
+	if (USelection* SelectedActors = GEditor->GetSelectedActors())
 	{
-		if (AOctreeVoxelVolume* Volume = Cast<AOctreeVoxelVolume>(WeakActor.Get()))
+		TArray<AActor*> Actors;
+		SelectedActors->GetSelectedObjects<AActor>(Actors);
+		for (AActor* Actor : Actors)
 		{
-			SelectedVolumes.Add(Volume);
+			if (AOctreeVoxelVolume* Volume = Cast<AOctreeVoxelVolume>(Actor))
+			{
+				SelectedVolumes.Add(Volume);
+			}
 		}
 	}
 
@@ -1374,6 +1620,16 @@ FReply SPathfindingTuner::OnRequestPathButtonClicked()
 //=================================================================================================
 // UI State & Expansion Handlers
 //=================================================================================================
+
+void SPathfindingTuner::OnAvoidanceCategoryExpansionChanged(bool bIsExpanded)
+{
+	if (UPathfindingTunerSettings* TunerSettings = GetMutableDefault<UPathfindingTunerSettings>())
+	{
+		TunerSettings->bIsAvoidanceCategoryExpanded = bIsExpanded;
+		TunerSettings->SaveConfig();
+	}
+}
+
 
 void SPathfindingTuner::OnPerformanceCategoryExpansionChanged(bool bIsExpanded)
 {

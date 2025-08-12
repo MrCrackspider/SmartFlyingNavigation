@@ -36,7 +36,9 @@ private:
     TSharedRef<SWidget> BuildOctreeVolumeSettingsSection();
     TSharedRef<SWidget> BuildVoxelDebugSettingsSection();
     TSharedRef<SWidget> BuildBakedDataSettingsSection();
+    TSharedRef<SWidget> BuildAvoidanceSettingsSection();
 
+   
     // TSharedRef<SWidget> BuildAgentSettingsSection();
     // TSharedRef<SWidget> BuildAgentDebugSection();
     //TSharedRef<SWidget> BuildWorldBakeSection();
@@ -69,6 +71,7 @@ private:
     //=================================================================================================
     // UI State & Expansion Handlers
     //=================================================================================================
+    void OnAvoidanceCategoryExpansionChanged(bool bIsExpanded);
     void OnPerformanceCategoryExpansionChanged(bool bIsExpanded);
     void OnOctreeSettingsCategoryExpansionChanged(bool bIsExpanded);
     void OnBakedDataCategoryExpansionChanged(bool bIsExpanded);
@@ -121,6 +124,14 @@ private:
     void OnbAvoidanceComitted(ECheckBoxState NewState);
     void OnbAvoidanceVelocityDebugComitted(ECheckBoxState NewState);
 
+    void OnTimeHorizonCommitted(float NewValue, ETextCommit::Type CommitType);
+    void OnMaxNeighborsCommitted(int32 NewValue, ETextCommit::Type CommitType);
+    void OnGridCellSizeCommitted(float NewValue, ETextCommit::Type CommitType);
+    void OnSymmetryBreakingRangeMultiplierCommitted(float NewValue, ETextCommit::Type CommitType);
+    void OnSolverIterationsCommitted(int32 NewValue, ETextCommit::Type CommitType);
+    void OnSideBiasMagnitudeCommitted(float NewValue, ETextCommit::Type CommitType);
+    void OnInterpSpeedCommitted(float NewValue, ETextCommit::Type CommitType);
+    
     // --- Agent Settings ---
     bool AreOnlyAgentsSelected() const;
     // FText GetSelectedAgentName() const;

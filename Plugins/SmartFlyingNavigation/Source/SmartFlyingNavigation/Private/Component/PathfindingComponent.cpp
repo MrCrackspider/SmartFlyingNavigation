@@ -75,15 +75,6 @@ void UPathfindingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
                                           FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-
-	if (!bPeriodicRepath && IsValid(TargetActor))
-	{
-		if (FVector::DistSquared(TargetActor->GetActorLocation(), LastKnownTargetLocation) > FMath::Square(GoalUpdateThreshold))
-		{
-			RequestPathToTargetActor();
-		}
-	}
 	
 	if (GetMovementMode() == EPathMovementMode::Spline)
 	{
@@ -332,7 +323,7 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 	{
 		const FRotator CurrentRotation = Owner->GetActorRotation();
 		const FRotator TargetRotation = MoveDelta.ToOrientationRotator();
-		FRotator InterpolatedRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, 5.f);
+		FRotator InterpolatedRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, RotationInterpSpeed);
     
 		Owner->SetActorRotation(InterpolatedRotation);
 	}
@@ -350,17 +341,12 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 	// 3. [KEY] Arrival Check: Based on the 'current' position after moving, check if we are close enough to the target.
 	//    A loop is used to perfectly handle cases where multiple waypoints are passed in a single frame.
 	
-	// [핵심 수정] 웨이포인트 도달/통과 판정 로직 강화
 	while (!bIsReachDestination && FoundPath.IsValidIndex(CurrentPathDestinationIndex))
 	{
 		const FVector& TargetWaypoint = FoundPath[CurrentPathDestinationIndex];
 
-		// 조건 1: 에이전트가 목표 웨이포인트에 충분히 근접했는가? (거리 기반)
-		// Spline 이동 시 마지막 지점에서 멈추는 경우를 처리합니다.
 		const bool bIsAtWaypoint = FVector::DistSquared(Owner->GetActorLocation(), TargetWaypoint) <= FMath::Square(AcceptanceRadius);
 
-		// 조건 2: 에이전트가 목표 웨이포인트를 '통과'했는가? (내적 기반)
-		// Linear 이동이나 고속으로 중간 지점을 통과하는 경우를 처리합니다.
 		bool bHasPassedWaypoint = false;
 		if (CurrentPathDestinationIndex > 0)
 		{
@@ -375,12 +361,10 @@ void UPathfindingComponent::ApplyMovement(const FVector& FinalVelocity, float De
 
 		if (bIsAtWaypoint || bHasPassedWaypoint)
 		{
-			// 웨이포인트에 도달했으므로, 다음 단계 처리를 요청합니다.
 			ProgressNextPoint();
 		}
 		else
 		{
-			// 아직 목표 웨이포인트에 도달하지 못했으므로, 이번 프레임의 확인을 중단합니다.
 			break;
 		}
 	}
