@@ -35,4 +35,4 @@ In Play In Editor (PIE) mode, call pathfinding functions (e.g., `Request Path to
 For detailed visual examples, screenshots, and comprehensive documentation, please refer to the [TeamHamDev GitHub Pages website](https://teamhamdev.github.io/).
 
 *   [Quick-Start Guide](https://teamhamdev.github.io/docs/quick-start-guide/)
-*   [Component Reference](https://teamhamdev.github.io/docs/component-reference/)
+*   [Class Reference](https://teamhamdev.github.io/docs/component-reference/)
