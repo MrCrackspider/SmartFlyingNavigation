@@ -35,6 +35,9 @@ public:
 	UPROPERTY(Config)
 	bool bAgentDebugSettingsExpanded;
 
+	UPROPERTY(Config)
+	bool bIsAvoidanceCategoryExpanded = true;
+	
 	// Begin Test
 	/** The size of the chunks (in world units) to use when baking the entire world. */
 	UPROPERTY(Config)

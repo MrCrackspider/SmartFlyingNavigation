@@ -21,16 +21,6 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
 void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    bIsTaskRunning = false;
-    AsyncTask = nullptr;
-
-    TimeHorizon = 1.f;
-    MaxNeighbors = 8;
-    GridCellSize = 100.f;
-    SymmetryBreakingRangeMultiplier = 8.f;
-    SolverIterations = 5;
-    SideBiasMagnitude = 10.f;
-    InterpSpeed = 1.f;
 }
 
 void UAvoidanceSubsystem::PostInitialize()
