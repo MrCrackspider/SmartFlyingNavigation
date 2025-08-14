@@ -1,3 +1,36 @@
+
+# Unreal Engine Standard Ignores
+#################################
+# Generated build artifacts
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# IDE and solution files
+*.sln
+*.suo
+*.sdf
+*.VC.db
+*.VC.opendb
+.vs/
+.idea/
+
+# Plugins: Generated files within plugins
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+Plugins/*/Saved/
+
+# Specific Content Folder Exclusions
+####################################
+# Ignore folders with large, auto-generated, or baked data.
+# 이 규칙이 GitHub Push 오류를 직접적으로 해결합니다.
+Content/Pathfinding/BakedData/
+
+# 만약 다른 폴더도 문제가 된다면 여기에 추가할 수 있습니다. 예를 들어:
+# Content/Level/AvoidanceLevel/
+
 Saved/
 LocalBuilds/
 *.csproj.*
@@ -26,6 +59,7 @@ Engine/Documentation/*
 *.csprojAssemblyReference.cache
 Binaries/
 **/DA_*.uasset
+
 
 #Linux Debug Files
 *.sym
