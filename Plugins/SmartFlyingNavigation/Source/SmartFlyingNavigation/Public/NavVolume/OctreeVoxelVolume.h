@@ -1,24 +1,23 @@
-﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
+// Copyright © 2025 TeamHamDev. All Rights Reserved.
 
 #pragma once
 
-#include <cmath>
-
 #include "CoreMinimal.h"
 #include "NavVolume/VoxelVolumeBase.h"
-#include "NavData/StaticVoxelChunkData.h"
-#include "NavData/OctreeDataAsset.h"
+#include "NavCore/NavNodeTypes.h"
+#include "NavCore/NavDistanceField.h"
+#include "NavCore/OctreePathfindingData.h"
 #include "OctreeVoxelVolume.generated.h"
 
+class AOctreeVoxelVolume;
 class UDynamicObstacleComponent;
 class UVoxelObstacleProfile;
 class UOctreeNavSubsystem;
-struct FStreamableHandle;
+struct FOctreePathfindingData;
 
 UENUM(BlueprintType)
 enum class EVolumeLoadState : uint8
 {
-	//Unloading,
 	Unloaded,
 	Loading,
 	Loaded,
@@ -27,69 +26,45 @@ enum class EVolumeLoadState : uint8
 
 /**
  * @class AOctreeVoxelVolume
- * @brief A navigation volume that employs a hybrid data structure for pathfinding.
+ * @brief A navigation volume chunk backed by a pre-baked static octree.
  *
- * This volume combines a pre-baked static octree for unchanging world geometry with a dynamic
- * bitmask grid for moving obstacles. This dual approach allows for highly efficient queries
- * against the static environment while providing fast, real-time updates for dynamic entities
- * like characters or physics objects.
+ * Static geometry queries run against the baked octree loaded from the world
+ * navigation manifest. Dynamic obstacles are tracked in a sparse bitmask grid
+ * that is updated periodically at runtime.
  */
-UCLASS()
+UCLASS(Config = Game)
 class SMARTFLYINGNAVIGATION_API AOctreeVoxelVolume : public AVoxelVolumeBase
 {
 	GENERATED_BODY()
 
 public:
-	/** Default constructor. */
 	AOctreeVoxelVolume();
-
-	//~======================================================================
-	// Core Public API
-	//~======================================================================
-
-	/**
-	 * Registers a component to be treated as a dynamic obstacle.
-	 * The component's bounds will be voxelized and updated periodically.
-	 *
-	 * @param ObstacleComponent The component to register.
-	 */
-	void RegisterDynamicObstacle(UDynamicObstacleComponent* ObstacleComponent);
-
-	/**
-	 * Unregisters a dynamic obstacle component.
-	 * Its occupied voxels will be cleared from the dynamic obstacle grid.
-	 *
-	 * @param ObstacleComponent The component to unregister.
-	 */
-	void UnregisterDynamicObstacle(UDynamicObstacleComponent* ObstacleComponent);
 
 	//~======================================================================
 	// Accessors
 	//~======================================================================
 
-	/** Returns a thread-safe copy of the node pool for the static octree. */
-	FORCEINLINE const TArray<FOctreeNode>* GetNodePoolPtr() const { return StaticNodePoolPtr; }
-	// ...
-	/** Returns the index of the root node within the static node pool. */
+	FORCEINLINE const TArray<FOctreeNode>* GetNodePoolPtr() const
+	{
+		return (ChunkData && ChunkData->NodePool.Num() > 0) ? &ChunkData->NodePool : nullptr;
+	}
+
+	FORCEINLINE const FAirwayGraph* GetAirwayGraphPtr() const
+	{
+		return (ChunkData && !ChunkData->AirwayGraph.IsEmpty()) ? &ChunkData->AirwayGraph : nullptr;
+	}
+
+	/** Baked navigation distance field, or nullptr when the chunk was baked without one. */
+	FORCEINLINE const FNavDistanceField* GetDistanceField() const
+	{
+		return (ChunkData && ChunkData->DistanceField.IsValid()) ? &ChunkData->DistanceField : nullptr;
+	}
+
+	/** Returns the index of the root node within the node pool. */
 	FORCEINLINE int32 GetRootNodeIndex() const { return RootNodeIndex; }
-
-
-	/** Returns a thread-safe copy of the bitmask used for dynamic obstacles. */
-	FORCEINLINE TArray<F128BitChunk> GetDynamicObstacleBitmask() const { return DynamicObstacleBitmask; }
 
 	/** Returns the filter used to identify static objects during the baking process. */
 	TObjectPtr<UVoxelObstacleProfile> GetStaticObstacleProfile() const { return StaticObjectProfile; }
-
-	/** Returns the data asset where the baked octree data is stored. */
-	TSoftObjectPtr<UOctreeDataAsset> GetBakedOctreeData() const { return BakedOctreeData; }
-
-	/** 
-	 * Sets the data asset to use for the baked octree.
-	 * @param NewData The new data asset to assign.
-	 */
-
-	// void SetBakedOctreeData(TObjectPtr<UOctreeDataAsset> NewData) { BakedOctreeData = NewData; }
-	void SetBakedOctreeData(UOctreeDataAsset* NewData) { BakedOctreeData = NewData; }
 
 	/**
 	 * Sets the maximum depth for the octree.
@@ -113,7 +88,6 @@ public:
 
 	/**
 	 * Sets the filter used to identify static objects during the baking process.
-	 * @param Filter The new filter to use.
 	 */
 	void SetStaticObstacleProfile(TObjectPtr<UVoxelObstacleProfile> Profile) { StaticObjectProfile = Profile; }
 
@@ -121,70 +95,42 @@ public:
 	// Debugging
 	//~======================================================================
 
-	/**
-	 * Collects the voxel indices of all known obstacles for debugging purposes.
-	 * This includes static obstacles from the octree and dynamic obstacles from the grid.
-	 *
-	 * @param OutObstacleIndices TArray to be populated with the indices of obstacle voxels.
-	 */
-	void GetDebugObstacleVoxelIndices(TArray<FIntVector>& OutObstacleIndices) const;
-
 	UFUNCTION(BlueprintCallable, Category = "Octree")
 	bool IsLocationInBlockedVoxel(const FVector& WorldLocation) const;
+
+	/**
+	 * Builds a thread-safe snapshot for async pathfinding.
+	 * @param bSnapshotDynamicObstacles When false, the (allocating) dynamic obstacle
+	 *        snapshot is skipped — use for game-thread-only static queries.
+	 */
+	void CreatePathfindingDataView(FOctreePathfindingData& OutData, bool bSnapshotDynamicObstacles = true) const;
+
+	/**
+	 * Game-thread point/segment safety probes. Cheap: no dynamic obstacle snapshot
+	 * is allocated; dynamic obstacles are tested directly against the world registry.
+	 */
+	bool IsPointBlockedForAgent(const FVector& Location, float AgentRadius, bool bCheckStatic = true,
+	                            bool bCheckDynamic = true) const;
+	bool IsSegmentBlockedForAgent(const FVector& Start, const FVector& End, float AgentRadius,
+	                              bool bCheckStatic = true, bool bCheckDynamic = true) const;
 
 protected:
 	//~======================================================================
 	// AActor Overrides
 	//~======================================================================
 
-	/**
-	 * Called when the game starts or when spawned.
-	 * Initializes the volume, loads baked octree data, and sets up the dynamic obstacle update timer.
-	 */
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-
 	virtual void PostInitializeComponents() override;
 
-	/** Called every frame. */
-	virtual void Tick(float DeltaTime) override;
-
-	//~======================================================================
-	// Editor & Baking
-	//~======================================================================
-
-#if WITH_EDITOR
-
 public:
-	/**
-	 * Initiates the process of baking static geometry within this volume into an octree data asset.
-	 * This function should only be called from the editor.
-	 */
-	bool BakeStaticData(UWorld* World, TArray<FOctreeNode>& OutNodePool);
-
-	void VoxelizeComponent(const FBox& ComponentBounds, const FCollisionObjectQueryParams& ObjectQueryParams,
-	                       TSet<FIntVector>& OutStaticObstacles) const;
-	/**
-	 * Scans the volume to identify all static actors that should be treated as obstacles,
-	 * based on the assigned StaticObjectFilter.
-	 *
-	 * @param OutStaticObstacles A set to be populated with the voxel coordinates of detected static obstacles.
-	 */
-	void ScanForAllStaticObstacles(TSet<FIntVector>& OutStaticObstacles, UObject* WorldContextObject,
-	                               const FBox& ScanWorldBounds) const;
-#endif
-
 	FVector VoxelIndexToWorld(const FIntVector& VoxelIndex) const;
 
 #if WITH_EDITORONLY_DATA
 
-	UPROPERTY(meta=(ContentDir))
-	FDirectoryPath BakedDataSaveDirectory;
-
 protected:
 	/**
 	 * Overrides the base class visualization to draw the octree structure for debugging.
-	 * This is called automatically in the editor when debug drawing is enabled.
 	 */
 	virtual void UpdateDebugObstacleVisualization() override;
 #endif
@@ -193,7 +139,6 @@ protected:
 public:
 	FIntVector WorldToVoxelIndex(const FVector& WorldLocation) const;
 
-
 	bool IsIndexValid(const FIntVector& Index) const;
 
 	bool ClampVoxelIndicesToVolume(const FIntVector& InMin, const FIntVector& InMax, FIntVector& OutClampedMin,
@@ -201,55 +146,20 @@ public:
 
 	int32 FindLeafNodeAt(const FVector& WorldPos) const;
 
-	void DrawDebugDynamicObstaclesWithBoxes();
-
 private:
-	//~======================================================================
-	// Dynamic Obstacle Internals
-	//~======================================================================
-
-	/** Initializes the dynamic obstacle grid based on the volume's dimensions. */
-	void InitializeDynamicLayer();
-
-	/** Periodically updates the state of all registered dynamic obstacles. Called by a timer. */
-	void UpdateDynamicObstacles();
-
-	/**
-	 * Voxelizes the bounding box of a dynamic obstacle, setting or clearing the corresponding bits in the grid.
-	 * @param InBounds The world-space bounding box of the obstacle.
-	 * @param bAsObstacle True to mark the voxels as obstacles, false to clear them.
-	 */
-	void UpdateVoxelStateForBounds(const FBox& InBounds, bool bAsObstacle);
-
-	/**
-	 * Sets the state of a single voxel in the dynamic obstacle bitmask.
-	 * @param Index The 3D index of the voxel to modify.
-	 * @param bIsObstacle True to set the voxel as an obstacle, false to clear it.
-	 */
-	void UpdateDynamicVoxelState(const FIntVector& Index, bool bIsObstacle);
-
 	//~======================================================================
 	// Query Helpers
 	//~======================================================================
 
 	/**
 	 * Internal recursive function to check for collisions within the static octree.
-	 * @param QueryBox The box to check for intersections.
-	 * @return True if the region is empty, false if it contains an obstacle.
 	 */
 	bool IsRegionEmpty(const FBox& QueryBox) const;
 
-	/**
-	 * The recursive implementation for checking a region against the static octree.
-	 * @param NodeIndex The index of the current node being checked.
-	 * @param NodeBounds The bounding box of the current node.
-	 * @param QueryBox The original query box.
-	 * @return True if the region is empty, false otherwise.
-	 */
 	bool IsRegionEmpty_Internal(int32 NodeIndex, const FBox& NodeBounds, const FBox& QueryBox) const;
 
 	//~======================================================================
-	// Baking Internals
+	// Octree Geometry Helpers
 	//~======================================================================
 
 	/** Calculates the bounding box for one of the 8 children of a parent node. */
@@ -257,16 +167,6 @@ private:
 
 	/** Determines which of the 8 octants a given voxel belongs to within a node's bounds. */
 	int32 GetOctantContainingVoxel(const FBox& NodeBounds, const FVector& VoxelWorldPos) const;
-
-public:
-	/** Traverses the octree to find the leaf node containing a specific world position. For bake-time use only. */
-	int32 FindLeafNode_Internal(
-		const TArray<FOctreeNode>& InNodePool,
-		int32 CurrentNodeIndex,
-		const FVector& WorldPos,
-		int32 MaxDepth,
-		int32 CurrentDepth = 0
-	);
 
 #if WITH_EDITOR
 
@@ -277,58 +177,26 @@ private:
 		FBox Bounds;
 		EOctreeNodeState State;
 	};
-
-	/** Recursively gathers information about octree nodes for debug visualization. */
-	void GetDebugNodeInfoRecursive(TArray<FDebugNodeInfo>& OutNodes, int32 NodeIndex, const FBox& NodeBounds,
-	                               int32 CurrentDepth) const;
-
-public:
-	/** Constructs the full package path and asset name for the baked data asset. */
-	bool GetBakedAssetPath(FString& OutPackagePath, FString& OutAssetName) const;
-
-	/** Handles the creation, saving, and assignment of the UOctreeDataAsset. */
-	void SaveOctreeToAsset(const TArray<FOctreeNode>& NodePoolToSave,
-	                       const TMap<int32, FVolumePortalLinks>& PortalsToSave);
-
-	/** After building the tree, this pre-calculates and stores neighbors for each leaf node to accelerate pathfinding. */
-	void PrecomputeNeighbors_Internal(TArray<FOctreeNode>& InOutNodePool, const FBox& TotalVolumeBounds,
-	                                  int32 MaxDepth);
-
-	void ConnectPortals_Bake(TArray<FOctreeNode>& InOutMyNodePool,
-	                         TMap<int32, FVolumePortalLinks>& OutPortalNodes,
-	                         const TMap<AOctreeVoxelVolume*, TArray<FOctreeNode>>& AllVolumeData,
-	                         const TArray<AOctreeVoxelVolume*>& AllCreatedVolumes);
 #endif
-	/** Traverses the octree bottom-up to merge child nodes that have the same state, optimizing memory usage. */
-	void OptimizeAndCollapse_Internal(TArray<FOctreeNode>& InOutNodePool, int32 NodeIndex);
-
-	/** Recursively inserts a single obstacle voxel into the octree during the baking process. */
-	void InsertObstacleRecursive_Internal(
-		TArray<FOctreeNode>& InOutNodePool,
-		int32 NodeIndex,
-		const FIntVector& ObstacleVoxel,
-		int32 CurrentDepth,
-		int32 MaxDepth
-	);
 
 public:
 	//~======================================================================
-	// Properties
+	// Bake Filter Settings
 	//~======================================================================
 
+	/** Collision channels to include when baking. Actors on these channels will be treated as obstacles. */
+	UPROPERTY(EditAnywhere, Category = "Octree|Baking", meta = (DisplayName = "Obstacle Channels"))
+	TArray<TEnumAsByte<ECollisionChannel>> BakeCollisionChannels = { ECC_WorldStatic };
+
+	/** When true, actors/components with bCanEverAffectNavigation=false are skipped (follows UE convention). */
+	UPROPERTY(EditAnywhere, Category = "Octree|Baking", meta = (DisplayName = "Respect CanAffectNavigation"))
+	bool bRespectCanAffectNavigation = true;
 
 	/**
-	 * The data asset containing the pre-baked octree for static geometry.
-	 * This asset is loaded at runtime to initialize the static collision data.
+	 * (Optional, Advanced) A profile asset for complex filtering rules.
+	 * When assigned, this overrides the direct collision channel settings above.
 	 */
-	UPROPERTY()
-	TSoftObjectPtr<UOctreeDataAsset> BakedOctreeData;
-
-	/**
-	 * A filter that defines which actors and components should be considered static obstacles
-	 * during the baking process.
-	 */
-	UPROPERTY()
+	UPROPERTY(EditAnywhere, Category = "Octree|Baking", AdvancedDisplay, meta = (DisplayName = "Advanced: Obstacle Profile Override"))
 	TObjectPtr<UVoxelObstacleProfile> StaticObjectProfile;
 
 #if WITH_EDITORONLY_DATA
@@ -342,43 +210,49 @@ private:
 	//~======================================================================
 	// Runtime Data Members
 	//~======================================================================
+
 	/**
 	 * The maximum depth of the octree. Determines the smallest possible node size.
-	 * For a 128x128x128 volume, a depth of 7 (2^7=128) is appropriate for voxel-level precision.
 	 */
 	UPROPERTY()
 	int32 MaxOctreeDepth = 1;
 
-	/** The runtime pool of nodes for the static octree, loaded from BakedOctreeData. */
-	TArray<FOctreeNode>* StaticNodePoolPtr = nullptr;
+	/**
+	 * The baked chunk payload. Swapped under ChunkDataCS and never mutated after load.
+	 * Shared (thread-safe) so pathfinding snapshots keep the data alive while
+	 * worker tasks are in flight, even if the volume streams out mid-task.
+	 */
+	TSharedPtr<FLoadedNavChunkData, ESPMode::ThreadSafe> ChunkData;
 
-	mutable FCriticalSection NodePoolCS;
+	int32 LoadedChunkId = INDEX_NONE;
 
-	/** The index of the root node in the StaticNodePool array. Initialized to -1. */
+	/** Allocated bytes of the loaded payload (node pool + airway + distance field), for stats. */
+	int64 LoadedChunkBytes = 0;
+
+	mutable FCriticalSection ChunkDataCS;
+
+	/** The index of the root node in the node pool. Initialized to -1. */
 	int32 RootNodeIndex = -1;
-
-	/** A bitmask grid representing the locations of dynamic obstacles in real-time. */
-	TArray<F128BitChunk> DynamicObstacleBitmask;
-
-	/** A timer handle for the periodic update of dynamic obstacles. */
-	FTimerHandle DynamicObstacleTimer;
-
-	// Begin Test
-
-	void OnDataAssetLoaded();
 
 	EVolumeLoadState LoadState = EVolumeLoadState::Unloaded;
 
-	TSharedPtr<FStreamableHandle> AsyncLoadHandle;
-
-	UPROPERTY()
-	TObjectPtr<UOctreeDataAsset> LoadedDataAsset;
-
 public:
-	void RequestAsyncLoad();
+	bool InitializeFromManifestPayload(int32 ChunkId, TArray<FOctreeNode>&& InNodePool,
+	                                   FAirwayGraph&& InAirwayGraph,
+	                                   FNavDistanceField&& InDistanceField);
 
 	FORCEINLINE bool IsReadyForNavigation() const { return LoadState == EVolumeLoadState::Loaded; }
 	FORCEINLINE EVolumeLoadState GetLoadState() const { return LoadState; }
+	FORCEINLINE int32 GetLoadedChunkId() const { return LoadedChunkId; }
+	FORCEINLINE int64 GetLoadedChunkBytes() const { return LoadedChunkBytes; }
+
+	/** Per-part memory of the loaded payload, for diagnostics (sfn.DumpNavStats). */
+	void GetLoadedChunkMemoryBreakdown(int64& OutNodePoolBytes, int64& OutAirwayBytes, int64& OutDistanceFieldBytes) const
+	{
+		OutNodePoolBytes = ChunkData ? ChunkData->NodePool.GetAllocatedSize() : 0;
+		OutAirwayBytes = ChunkData ? ChunkData->AirwayGraph.GetAllocatedBytes() : 0;
+		OutDistanceFieldBytes = ChunkData ? ChunkData->DistanceField.GetAllocatedBytes() : 0;
+	}
+
 	FBox GetVolumeBounds() const;
-	// End Test
 };

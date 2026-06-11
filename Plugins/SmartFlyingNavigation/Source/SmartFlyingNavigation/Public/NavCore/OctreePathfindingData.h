@@ -3,19 +3,78 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "NavData/StaticVoxelChunkData.h"
-#include "NavData/OctreeDataAsset.h"
+#include "NavCore/NavNodeTypes.h"
+#include "NavCore/NavDistanceField.h"
+#include "NavCore/DynamicObstacleRegistry.h"
 
+/**
+ * Baked navigation payload for one chunk. Owned via thread-safe shared pointer:
+ * the volume holds the authoritative reference and every pathfinding snapshot
+ * holds another, so in-flight worker tasks keep the data alive even when the
+ * volume streams out or re-initializes mid-task.
+ */
+struct FLoadedNavChunkData
+{
+	TArray<FOctreeNode> NodePool;
+	FAirwayGraph AirwayGraph;
+	FNavDistanceField DistanceField;
+};
+
+/**
+ * Thread-safe snapshot of navigation data for async pathfinding.
+ * Dynamic obstacles are an owned snapshot of analytic primitives, composited
+ * with the static distance field as min(static clearance, primitive distance).
+ */
 struct FOctreePathfindingData
 {
+	/**
+	 * Keep-alive reference for the chunk payload. StaticNodePoolPtr,
+	 * AirwayGraphPtr, and DistanceFieldPtr point into this object.
+	 */
+	TSharedPtr<const FLoadedNavChunkData, ESPMode::ThreadSafe> ChunkDataRef;
+
 	const TArray<FOctreeNode>* StaticNodePoolPtr = nullptr;
+	const FAirwayGraph* AirwayGraphPtr = nullptr;
 	int32 RootNodeIndex = -1;
 	int32 MaxOctreeDepth = 0;
 	FBox VolumeBounds;
 
-	TArray<F128BitChunk> DynamicObstacleBitmask;
+	/** Owned snapshot of dynamic obstacle primitives relevant to this volume. */
+	TArray<FDynamicObstaclePrim> DynamicObstacles;
+
 	FIntVector MapSize;
 	float VoxelSize = 100.0f;
+
+	/** Baked navigation distance field for this chunk (read-only after load; safe on worker threads). */
+	const FNavDistanceField* DistanceFieldPtr = nullptr;
+
+	/** Snapshot of the sfn.Path.UseSDF cvar at view-creation time. */
+	bool bUseDistanceField = true;
+
+	FORCEINLINE bool ShouldUseDistanceField() const
+	{
+		return bUseDistanceField && DistanceFieldPtr && DistanceFieldPtr->IsValid();
+	}
+
+	FORCEINLINE bool HasDynamicObstacleData() const
+	{
+		return DynamicObstacles.Num() > 0;
+	}
+
+	/** Minimum distance from a point to any dynamic obstacle (large value when none). */
+	float DynamicObstacleDistance(const FVector& Point) const
+	{
+		float MinDistance = TNumericLimits<float>::Max();
+		for (const FDynamicObstaclePrim& Prim : DynamicObstacles)
+		{
+			MinDistance = FMath::Min(MinDistance, Prim.Distance(Point));
+			if (MinDistance <= 0.f)
+			{
+				break;
+			}
+		}
+		return MinDistance;
+	}
 
 	int32 FindNearestValidLeafForAgent(const FVector& Origin, float AgentRadius, float InitialSearchRadius,
 	                                   int32 MaxIterations) const
@@ -44,8 +103,7 @@ struct FOctreePathfindingData
 
 				const FVector CandidateCenter = LeafNode.Bounds.GetCenter();
 
-				const bool bIsStaticallySafe = !CheckForSolidNodesInCapsule(
-					CandidateCenter, CandidateCenter, AgentRadius);
+				const bool bIsStaticallySafe = !IsPointBlockedForAgent(CandidateCenter, AgentRadius, true, false);
 				const bool bIsDynamicallySafe = !IsRegionDynamicallyBlocked(
 					FBox::BuildAABB(CandidateCenter, FVector(AgentRadius)));
 
@@ -278,114 +336,98 @@ public:
 		}
 	}
 
-	bool IsPathDynamicallyBlocked_Sweep(const FVector& Start, const FVector& End, float AgentRadius) const
+	/** Sphere-traced dynamic obstacle test along a segment using exact primitive distances. */
+	bool IsPathDynamicallyBlocked(const FVector& Start, const FVector& End, float AgentRadius) const
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(Octree_IsPathDynamicallyBlocked);
+
+		if (AgentRadius <= 0.f || DynamicObstacles.Num() == 0)
+		{
+			return false;
+		}
+
+		const FVector Delta = End - Start;
+		const float TotalDistance = Delta.Size();
+		const float MinStep = FMath::Max(AgentRadius * 0.25f, 10.f);
+
+		if (TotalDistance < KINDA_SMALL_NUMBER)
+		{
+			return DynamicObstacleDistance(Start) < AgentRadius;
+		}
+
+		const FVector Direction = Delta / TotalDistance;
+
+		float Travelled = 0.f;
+		while (Travelled < TotalDistance)
+		{
+			const FVector Sample = Start + Direction * Travelled;
+			const float Distance = DynamicObstacleDistance(Sample);
+			if (Distance < AgentRadius)
+			{
+				return true;
+			}
+
+			Travelled += FMath::Max(Distance - AgentRadius, MinStep);
+		}
+
+		return DynamicObstacleDistance(End) < AgentRadius;
+	}
+
+	/** Conservative AABB-vs-primitive overlap test for a region. */
+	bool IsRegionDynamicallyBlocked(const FBox& QueryBox) const
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(Octree_IsRegionDynamicallyBlocked);
+
+		for (const FDynamicObstaclePrim& Prim : DynamicObstacles)
+		{
+			if (Prim.GetBounds().Intersect(QueryBox))
+			{
+				// Refine with the exact distance to the box center.
+				if (Prim.Distance(QueryBox.GetCenter()) <= QueryBox.GetExtent().GetMax())
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	bool IsPointBlockedForAgent(const FVector& Location, float AgentRadius, bool bCheckStatic = true,
+	                            bool bCheckDynamic = true) const
+	{
+		return IsSegmentBlockedForAgent(Location, Location, AgentRadius, bCheckStatic, bCheckDynamic);
+	}
+
+	bool IsSegmentBlockedForAgent(const FVector& Start, const FVector& End, float AgentRadius,
+	                              bool bCheckStatic = true, bool bCheckDynamic = true) const
 	{
 		if (AgentRadius <= 0.f)
 		{
 			return false;
 		}
 
-		const FVector PathVector = End - Start;
-		const float TotalDistance = PathVector.Size();
-		if (TotalDistance < KINDA_SMALL_NUMBER)
+		if (bCheckStatic)
 		{
-			return IsRegionDynamicallyBlocked(FBox::BuildAABB(Start, FVector(AgentRadius)));
-		}
-
-		const FVector Direction = PathVector / TotalDistance;
-
-		const float StepSize = AgentRadius * .1f;
-
-		for (float Distance = 0; Distance < TotalDistance; Distance += StepSize)
-		{
-			const FVector CurrentPosition = Start + Direction * Distance;
-
-			const FBox QueryBox = FBox::BuildAABB(CurrentPosition, FVector(AgentRadius));
-			if (IsRegionDynamicallyBlocked(QueryBox))
+			// Sphere tracing against the baked distance field replaces the per-step
+			// octree capsule descent (typically 3-8 samples per segment instead of dozens).
+			if (ShouldUseDistanceField())
+			{
+				if (!DistanceFieldPtr->IsSegmentClear(Start, End, AgentRadius))
+				{
+					return true;
+				}
+			}
+			else if (CheckForSolidNodesInCapsule(Start, End, AgentRadius))
 			{
 				return true;
 			}
 		}
 
-		const FBox EndQueryBox = FBox::BuildAABB(End, FVector(AgentRadius));
-		if (IsRegionDynamicallyBlocked(EndQueryBox))
+		if (bCheckDynamic && IsPathDynamicallyBlocked(Start, End, AgentRadius))
 		{
 			return true;
 		}
 
-		return false;
-	}
-
-	bool IsRegionDynamicallyBlocked(const FBox& QueryBox) const
-	{
-		TRACE_CPUPROFILER_EVENT_SCOPE(Octree_IsRegionDynamicallyBlocked);
-
-		const FIntVector MinCorner = WorldToVoxelIndex(QueryBox.Min);
-		const FIntVector MaxCorner = WorldToVoxelIndex(QueryBox.Max);
-
-		const FIntVector ClampedMin(FMath::Max(MinCorner.X, 0), FMath::Max(MinCorner.Y, 0), FMath::Max(MinCorner.Z, 0));
-		const FIntVector ClampedMax(FMath::Min(MaxCorner.X, MapSize.X - 1), FMath::Min(MaxCorner.Y, MapSize.Y - 1),
-		                            FMath::Min(MaxCorner.Z, MapSize.Z - 1));
-
-		if (ClampedMin.X > ClampedMax.X || ClampedMin.Y > ClampedMax.Y || ClampedMin.Z > ClampedMax.Z) return false;
-		if (DynamicObstacleBitmask.Num() == 0) return false;
-
-		auto CreateMask = [](int32 StartBit, int32 EndBit) -> __m128i
-		{
-			uint64 LowMask = (StartBit < 64) ? (~0ULL << StartBit) : 0;
-			if (EndBit < 64) LowMask &= (~0ULL >> (63 - EndBit));
-			uint64 HighMask = (EndBit >= 64) ? (~0ULL >> (127 - EndBit)) : 0;
-			if (StartBit >= 64) HighMask &= (~0ULL << (StartBit - 64));
-			return _mm_set_epi64x(HighMask, LowMask);
-		};
-
-		const int32 ChunksPerRow = MapSize.X / 128;
-		for (int32 z = ClampedMin.Z; z <= ClampedMax.Z; ++z)
-		{
-			for (int32 y = ClampedMin.Y; y <= ClampedMax.Y; ++y)
-			{
-				const int32 RowStartChunkIndex = (z * MapSize.Y + y) * ChunksPerRow;
-				const int32 StartChunkIndex = RowStartChunkIndex + ClampedMin.X / 128;
-				const int32 EndChunkIndex = RowStartChunkIndex + ClampedMax.X / 128;
-				const int32 StartBitInChunk = ClampedMin.X % 128;
-				const int32 EndBitInChunk = ClampedMax.X % 128;
-
-				if (StartChunkIndex == EndChunkIndex)
-				{
-					if (!DynamicObstacleBitmask.IsValidIndex(StartChunkIndex)) continue;
-					const __m128i Mask = CreateMask(StartBitInChunk, EndBitInChunk);
-					const __m128i ChunkData = _mm_loadu_si128(
-						reinterpret_cast<const __m128i*>(&DynamicObstacleBitmask[StartChunkIndex]));
-					if (_mm_testz_si128(ChunkData, Mask) == 0) return true;
-				}
-				else
-				{
-					if (DynamicObstacleBitmask.IsValidIndex(StartChunkIndex))
-					{
-						__m128i StartMask = CreateMask(StartBitInChunk, 127);
-						__m128i ChunkData = _mm_loadu_si128(
-							reinterpret_cast<const __m128i*>(&DynamicObstacleBitmask[StartChunkIndex]));
-						if (_mm_testz_si128(ChunkData, StartMask) == 0) return true;
-					}
-
-					for (int32 i = StartChunkIndex + 1; i < EndChunkIndex; ++i)
-					{
-						if (!DynamicObstacleBitmask.IsValidIndex(i)) continue;
-						const __m128i MiddleChunkData = _mm_loadu_si128(
-							reinterpret_cast<const __m128i*>(&DynamicObstacleBitmask[i]));
-						if (_mm_testz_si128(MiddleChunkData, _mm_set1_epi32(-1)) == 0) return true;
-					}
-
-					if (DynamicObstacleBitmask.IsValidIndex(EndChunkIndex))
-					{
-						__m128i EndMask = CreateMask(0, EndBitInChunk);
-						__m128i ChunkData = _mm_loadu_si128(
-							reinterpret_cast<const __m128i*>(&DynamicObstacleBitmask[EndChunkIndex]));
-						if (_mm_testz_si128(ChunkData, EndMask) == 0) return true;
-					}
-				}
-			}
-		}
 		return false;
 	}
 };

@@ -1,7 +1,10 @@
 ﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
 
 #include "Subsystem/AvoidanceSubsystem.h"
+#include "Subsystem/OctreeNavSubsystem.h"
 #include "Component/PathfindingComponent.h"
+#include "NavCore/DynamicObstacleRegistry.h"
+#include "NavCore/SmartFlyingNavStats.h"
 #include "GameFramework/Actor.h"
 #include "Stats/Stats.h"
 #include "Engine/Engine.h"
@@ -18,6 +21,8 @@ static void GenerateAgentConstraints_ThreadSafe(const FAgentThreadData& CurrentA
 static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadData& CurrentAgent, const FVector& PreferredVelocity, const TArray<const FAgentThreadData*>& NearbyAgents, float SymmetryBreakingRangeMultiplier, float SideBiasMagnitude);
 
 
+UAvoidanceSubsystem::~UAvoidanceSubsystem() = default;
+
 void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
@@ -26,6 +31,7 @@ void UAvoidanceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 void UAvoidanceSubsystem::PostInitialize()
 {
     Super::PostInitialize();
+    ApplyMobileLowSpecSettings();
 }
 
 void UAvoidanceSubsystem::Deinitialize()
@@ -33,8 +39,7 @@ void UAvoidanceSubsystem::Deinitialize()
     if (AsyncTask)
     {
         AsyncTask->EnsureCompletion();
-        delete AsyncTask;
-        AsyncTask = nullptr;
+        AsyncTask.Reset();
     }
     Super::Deinitialize();
 }
@@ -48,6 +53,31 @@ void UAvoidanceSubsystem::RegisterAgent(UPathfindingComponent* AgentComponent)
     }
 }
 
+void UAvoidanceSubsystem::GatherDynamicObstacleData(TArray<FDynamicObstacleThreadData>& OutObstacles) const
+{
+    OutObstacles.Reset();
+
+    const UWorld* World = GetWorld();
+    const UOctreeNavSubsystem* NavSubsystem = World ? World->GetSubsystem<UOctreeNavSubsystem>() : nullptr;
+    if (!NavSubsystem)
+    {
+        return;
+    }
+
+    TArray<FDynamicObstaclePrim> Prims;
+    NavSubsystem->GetObstacleRegistry().Snapshot(Prims);
+
+    OutObstacles.Reserve(Prims.Num());
+    for (const FDynamicObstaclePrim& Prim : Prims)
+    {
+        const float BoundingRadius = Prim.GetBoundingRadius();
+        if (BoundingRadius > 0.f)
+        {
+            OutObstacles.Emplace(FDynamicObstacleThreadData{ Prim.Center, Prim.Velocity, BoundingRadius });
+        }
+    }
+}
+
 void UAvoidanceSubsystem::UnregisterAgent(UPathfindingComponent* AgentComponent)
 {
     if (AgentComponent)
@@ -57,12 +87,66 @@ void UAvoidanceSubsystem::UnregisterAgent(UPathfindingComponent* AgentComponent)
     }
 }
 
+void UAvoidanceSubsystem::SetbUseAvoidance(bool IsUse)
+{
+    bUseAvoidance = IsUse;
+    if (!IsUse)
+    {
+        AvoidanceMode = ESmartFlyingAvoidanceMode::None;
+    }
+    else if (AvoidanceMode == ESmartFlyingAvoidanceMode::None)
+    {
+        AvoidanceMode = ESmartFlyingAvoidanceMode::Simple;
+    }
+}
+
 void UAvoidanceSubsystem::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     SCOPE_CYCLE_COUNTER(STAT_AvoidanceSubsystem_Tick);
-    if (!bUseAvoidance)
+
+#if STATS
+    SET_DWORD_STAT(STAT_SFN_Agents, RegisteredAgentComponents.Num());
+    if (const UWorld* StatsWorld = GetWorld())
     {
+        if (const UOctreeNavSubsystem* StatsNav = StatsWorld->GetSubsystem<UOctreeNavSubsystem>())
+        {
+            SET_DWORD_STAT(STAT_SFN_Obstacles, StatsNav->GetObstacleRegistry().Num());
+        }
+    }
+#endif
+
+    if (!GetbUseAvoidance())
+    {
+        return;
+    }
+
+    if (AvoidanceMode == ESmartFlyingAvoidanceMode::Simple)
+    {
+        TickSimpleAvoidance(DeltaTime);
+        return;
+    }
+
+    float EffectiveAvoidanceUpdateInterval = 0.f;
+#if PLATFORM_ANDROID
+    EffectiveAvoidanceUpdateInterval = bUseMobileLowSpecSettings ? MobileAvoidanceUpdateInterval : 0.f;
+#endif
+
+    AvoidanceUpdateAccumulator += DeltaTime;
+    if (!bIsTaskRunning && EffectiveAvoidanceUpdateInterval > 0.f && AvoidanceUpdateAccumulator < EffectiveAvoidanceUpdateInterval)
+    {
+        for (UPathfindingComponent* AgentComponent : RegisteredAgentComponents)
+        {
+            if (!AgentComponent)
+            {
+                continue;
+            }
+
+            AgentComponent->UpdateSteering(DeltaTime);
+            const FVector Vel = AgentComponent->GetPreferredVelocity();
+            AgentComponent->ApplyMovement(Vel, DeltaTime);
+            AgentComponent->CurrentVelocity = Vel;
+        }
         return;
     }
 
@@ -81,58 +165,71 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
                 FVector FinalVelocity;
 
                 const TArray<FPlane>& AgentConstraints = ResultPair.Value.AgentConstraints;
-                const TArray<FPlane>& VoxelConstraints = ResultPair.Value.VoxelConstraints;
                 const FVector& ActualPreferredVelocity = ResultPair.Value.ActualPreferredVelocity;
 
-                const FVector SafeVelocity = SolveOptimalVelocity(VoxelConstraints, ActualPreferredVelocity);
-                const FVector FinalOptimalVelocity = SolveOptimalVelocity(AgentConstraints, SafeVelocity);
+                // Solve agent avoidance constraints only.
+                // Wall avoidance is handled by collision sweep + AddActorWorldOffset(sweep=true).
+                const FVector FinalOptimalVelocity = SolveOptimalVelocity(AgentConstraints, ActualPreferredVelocity);
 
+                // Apply velocity smoothing. InterpSpeed should be high enough (10+) for responsive avoidance.
+                // Too low → agent can't follow ORCA output → spinning behavior.
                 const FVector CurrentVelocity = Agent->GetCurrentVelocity();
-                FVector InterpolatedVelocity = FMath::VInterpTo(CurrentVelocity, FinalOptimalVelocity, DeltaTime, InterpSpeed);
-                FinalVelocity = InterpolatedVelocity;
+                const float EffectiveInterpSpeed = FMath::Max(InterpSpeed, 5.0f);
+                FinalVelocity = FMath::VInterpTo(CurrentVelocity, FinalOptimalVelocity, DeltaTime, EffectiveInterpSpeed);
 
                 FHitResult HitResult;
                 const FVector AgentLocation = Agent->GetOwner()->GetActorLocation();
                 const FVector MoveDelta = FinalVelocity * DeltaTime;
 
-                FCollisionShape OverlapSphere = FCollisionShape::MakeSphere(Agent->GetAvoidanceRadius());
-                FCollisionQueryParams OverlapParams(TEXT("PenetrationCheck"), false);
-                if (Agent->GetOwner())
+                if (!Agent->bExecutorHandlesCollision)
                 {
-                    OverlapParams.AddIgnoredActor(Agent->GetOwner());
-                }
-
-                if (MoveDelta.SizeSquared() > KINDA_SMALL_NUMBER)
-                {
-                    bool bWillCollide = GetWorld()->SweepSingleByChannel(
-                        HitResult,
-                        AgentLocation,
-                        AgentLocation + MoveDelta,
-                        FQuat::Identity,
-                        ECC_WorldStatic,
-                        OverlapSphere,
-                        OverlapParams
-                    );
-
-                    if (bWillCollide)
+                    // Use AgentRadius (physical size) for collision, not AvoidanceRadius (ORCA buffer).
+                FCollisionShape OverlapSphere = FCollisionShape::MakeSphere(Agent->GetAgentRadius());
+                    FCollisionQueryParams OverlapParams(TEXT("PenetrationCheck"), false);
+                    if (Agent->GetOwner())
                     {
-                        if (FMath::IsNearlyZero(HitResult.Time))
+                        OverlapParams.AddIgnoredActor(Agent->GetOwner());
+                    }
+
+                    if (MoveDelta.SizeSquared() > KINDA_SMALL_NUMBER)
+                    {
+                        bool bWillCollide = GetWorld()->SweepSingleByChannel(
+                            HitResult,
+                            AgentLocation,
+                            AgentLocation + MoveDelta,
+                            FQuat::Identity,
+                            ECC_WorldStatic,
+                            OverlapSphere,
+                            OverlapParams
+                        );
+
+                        if (bWillCollide)
                         {
-                            FinalVelocity = SafeVelocity;
-                        }
-                        else
-                        {
-                            const float TimeOfImpact = HitResult.Time;
-                            const FVector MovementToImpact = MoveDelta * TimeOfImpact;
-                            const float RemainingTime = DeltaTime * (1.f - TimeOfImpact);
-                            const FVector RemainingVelocity = FVector::VectorPlaneProject(FinalVelocity, HitResult.ImpactNormal);
-                            const FVector FinalMoveDelta = MovementToImpact + RemainingVelocity * RemainingTime;
-                            FinalVelocity = FinalMoveDelta / DeltaTime;
+                            if (FMath::IsNearlyZero(HitResult.Time))
+                            {
+                                // Already touching a wall. Slide along the wall surface.
+                                FinalVelocity = FVector::VectorPlaneProject(FinalVelocity, HitResult.ImpactNormal);
+                            }
+                            else
+                            {
+                                // Will collide partway - slide along the wall after impact.
+                                const float TimeOfImpact = HitResult.Time;
+                                const FVector MovementToImpact = MoveDelta * TimeOfImpact;
+                                const float RemainingTime = DeltaTime * (1.f - TimeOfImpact);
+                                const FVector SlideVelocity = FVector::VectorPlaneProject(FinalVelocity, HitResult.ImpactNormal);
+                                const FVector FinalMoveDelta = MovementToImpact + SlideVelocity * RemainingTime;
+                                FinalVelocity = FinalMoveDelta / DeltaTime;
+                            }
                         }
                     }
                 }
 
-                Agent->ApplyMovement(FinalVelocity.GetClampedToMaxSize(Agent->GetMovementSpeed()), DeltaTime);
+                const FVector ClampedVelocity = FinalVelocity.GetClampedToMaxSize(Agent->GetMovementSpeed());
+                Agent->ApplyMovement(ClampedVelocity, DeltaTime);
+
+                // Update the agent's CurrentVelocity with the actual avoidance-adjusted result.
+                // This is critical: ORCA uses CurrentVelocity from the previous frame to compute relative velocities.
+                Agent->CurrentVelocity = ClampedVelocity;
 
                 if (Agent->GetMovementMode() == EPathMovementMode::Spline && !Agent->IsOnSplineLine() && Agent->FoundPath.Num() > 0)
                 {
@@ -147,19 +244,39 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
         }
 
         AsyncTask->EnsureCompletion();
-        delete AsyncTask;
-        AsyncTask = nullptr;
+        AsyncTask.Reset();
         bIsTaskRunning = false;
+    }
+
+    if (bIsTaskRunning)
+    {
+        for (UPathfindingComponent* AgentComponent : RegisteredAgentComponents)
+        {
+            if (!AgentComponent)
+            {
+                continue;
+            }
+
+            AgentComponent->UpdateSteering(DeltaTime);
+            const FVector Vel = AgentComponent->GetPreferredVelocity();
+            AgentComponent->ApplyMovement(Vel, DeltaTime);
+            AgentComponent->CurrentVelocity = Vel;
+        }
+        return;
     }
 
     if (!bIsTaskRunning)
     {
+        AvoidanceUpdateAccumulator = 0.f;
         if (RegisteredAgentComponents.Num() < 2)
         {
             if (RegisteredAgentComponents.Num() == 1 && RegisteredAgentComponents[0])
             {
-                RegisteredAgentComponents[0]->UpdateSteering(DeltaTime);
-                RegisteredAgentComponents[0]->ApplyMovement(RegisteredAgentComponents[0]->GetPreferredVelocity(), DeltaTime);
+                UPathfindingComponent* Solo = RegisteredAgentComponents[0];
+                Solo->UpdateSteering(DeltaTime);
+                const FVector Vel = Solo->GetPreferredVelocity();
+                Solo->ApplyMovement(Vel, DeltaTime);
+                Solo->CurrentVelocity = Vel;
             }
             return;
         }
@@ -172,23 +289,31 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
 
             if (AgentComponent && AgentComponent->GetOwner())
             {
-                AgentDataForThread.Emplace(FAgentThreadData{
-                    AgentComponent->GetUniqueID(),
-                    AgentComponent->GetOwner()->GetActorLocation(),
-                    AgentComponent->GetOwner()->GetActorUpVector(),
-                    AgentComponent->GetCurrentVelocity(),
-                    AgentComponent->GetPreferredVelocity(),
-                    AgentComponent->GetAvoidanceRadius(),
-                    AgentComponent->GetMovementSpeed()
-                    });
+                FAgentThreadData AgentData;
+                AgentData.AgentId = AgentComponent->GetUniqueID();
+                AgentData.Position = AgentComponent->GetOwner()->GetActorLocation();
+                AgentData.UpVector = AgentComponent->GetOwner()->GetActorUpVector();
+                AgentData.CurrentVelocity = AgentComponent->GetCurrentVelocity();
+                AgentData.PreferredVelocity = AgentComponent->GetPreferredVelocity();
+                AgentData.AvoidanceRadius = AgentComponent->GetAvoidanceRadius();
+                AgentData.MovementSpeed = AgentComponent->GetMovementSpeed();
+
+                AgentDataForThread.Emplace(MoveTemp(AgentData));
             }
         }
+        // Collect dynamic obstacle snapshots from the world obstacle registry.
+        TArray<FDynamicObstacleThreadData> DynamicObstacleData;
+        if (bAvoidDynamicObstacles)
+        {
+            GatherDynamicObstacleData(DynamicObstacleData);
+        }
+
         {
             FScopeLock Lock(&ResultsCriticalSection);
             AvoidanceResults.Empty();
         }
 
-        AsyncTask = new FAsyncTask<FParallelAvoidanceTask>(GetWorld(), MoveTemp(AgentDataForThread), AvoidanceResults, ResultsCriticalSection, TimeHorizon, MaxNeighbors, GridCellSize, SymmetryBreakingRangeMultiplier, SideBiasMagnitude);
+        AsyncTask = MakeUnique<FAsyncTask<FParallelAvoidanceTask>>(GetWorld(), MoveTemp(AgentDataForThread), AvoidanceResults, ResultsCriticalSection, TimeHorizon, MaxNeighbors, GridCellSize, SymmetryBreakingRangeMultiplier, SideBiasMagnitude, MoveTemp(DynamicObstacleData));
         AsyncTask->StartBackgroundTask();
         bIsTaskRunning = true;
     }
@@ -199,6 +324,69 @@ TStatId UAvoidanceSubsystem::GetStatId() const
     RETURN_QUICK_DECLARE_CYCLE_STAT(UAvoidanceSubsystem, STATGROUP_Tickables);
 }
 
+void UAvoidanceSubsystem::TickSimpleAvoidance(float DeltaTime)
+{
+    TArray<UPathfindingComponent*> ValidAgents;
+    ValidAgents.Reserve(RegisteredAgentComponents.Num());
+
+    for (UPathfindingComponent* AgentComponent : RegisteredAgentComponents)
+    {
+        if (AgentComponent && AgentComponent->GetOwner())
+        {
+            AgentComponent->UpdateSteering(DeltaTime);
+            ValidAgents.Add(AgentComponent);
+        }
+    }
+
+    for (UPathfindingComponent* Agent : ValidAgents)
+    {
+        AActor* Owner = Agent->GetOwner();
+        if (!Owner)
+        {
+            continue;
+        }
+
+        FVector FinalVelocity = Agent->GetPreferredVelocity();
+        FVector Separation = FVector::ZeroVector;
+        int32 UsedNeighbors = 0;
+
+        const FVector AgentLocation = Owner->GetActorLocation();
+        for (UPathfindingComponent* OtherAgent : ValidAgents)
+        {
+            if (OtherAgent == Agent || !OtherAgent->GetOwner())
+            {
+                continue;
+            }
+
+            const FVector ToAgent = AgentLocation - OtherAgent->GetOwner()->GetActorLocation();
+            const float DistanceSq = ToAgent.SizeSquared();
+            const float DesiredDistance = Agent->GetAvoidanceRadius() + OtherAgent->GetAvoidanceRadius();
+            if (DesiredDistance <= KINDA_SMALL_NUMBER || DistanceSq <= KINDA_SMALL_NUMBER || DistanceSq > FMath::Square(DesiredDistance))
+            {
+                continue;
+            }
+
+            const float Distance = FMath::Sqrt(DistanceSq);
+            const float Weight = 1.f - (Distance / DesiredDistance);
+            Separation += (ToAgent / Distance) * Weight;
+
+            if (++UsedNeighbors >= FMath::Max(1, MobileMaxNeighbors))
+            {
+                break;
+            }
+        }
+
+        if (!Separation.IsNearlyZero())
+        {
+            FinalVelocity += Separation.GetSafeNormal() * Agent->GetMovementSpeed() * 0.5f;
+        }
+
+        const FVector ClampedVelocity = FinalVelocity.GetClampedToMaxSize(Agent->GetMovementSpeed());
+        Agent->ApplyMovement(ClampedVelocity, DeltaTime);
+        Agent->CurrentVelocity = ClampedVelocity;
+    }
+}
+
 void UAvoidanceSubsystem::RunAvoidanceCalculation(
     const UWorld* World,
     const TArray<FAgentThreadData>& AgentData,
@@ -207,7 +395,8 @@ void UAvoidanceSubsystem::RunAvoidanceCalculation(
     const int32 InMaxNeighbors,
     const float InGridCellSize,
     const float InSymmetryBreakingRangeMultiplier,
-    const float InSideBiasMagnitude)
+    const float InSideBiasMagnitude,
+    const TArray<FDynamicObstacleThreadData>& DynamicObstacles)
 {
     if (!World || AgentData.Num() < 1 || InGridCellSize <= 0) return;
 
@@ -287,8 +476,74 @@ void UAvoidanceSubsystem::RunAvoidanceCalculation(
         TArray<FPlane> AgentConstraints;
         GenerateAgentConstraints_ThreadSafe(Agent, ActualPreferredVelocity, NearbyAgents, AgentConstraints, InTimeHorizon);
 
+        // Wall avoidance is handled by collision sweep in Tick() + AddActorWorldOffset(sweep=true).
+        // No VoxelConstraints needed - removes expensive per-agent SweepMultiByObjectType from background thread.
         TArray<FPlane> VoxelConstraints;
-        GenerateVoxelConstraints_ThreadSafe(World, Agent, ActualPreferredVelocity, VoxelConstraints, InTimeHorizon);
+
+        // Generate ORCA constraints from dynamic obstacles (treated as moving agents with known velocity).
+        for (const FDynamicObstacleThreadData& Obstacle : DynamicObstacles)
+        {
+            const FVector RelativePosition = Obstacle.Position - Agent.Position;
+            const float DistSq = RelativePosition.SizeSquared();
+            const float CombinedRadius = Agent.AvoidanceRadius + Obstacle.Radius;
+            const float InteractionRange = CombinedRadius * 3.0f;
+
+            // Skip obstacles that are too far away.
+            if (DistSq > FMath::Square(InteractionRange)) continue;
+
+            const FVector RelativeVelocity = ActualPreferredVelocity - Obstacle.Velocity;
+            const float CombinedRadiusSq = FMath::Square(CombinedRadius);
+            float EffectiveTimeHorizon = InTimeHorizon;
+
+            // TTC calculation.
+            const float RelativeVelSq = RelativeVelocity.SizeSquared();
+            if (RelativeVelSq > KINDA_SMALL_NUMBER)
+            {
+                const float Dot = FVector::DotProduct(RelativePosition, RelativeVelocity);
+                const float Discriminant = FMath::Square(Dot) - RelativeVelSq * (DistSq - CombinedRadiusSq);
+                if (Discriminant >= 0.f)
+                {
+                    const float TTC = (-Dot - FMath::Sqrt(Discriminant)) / RelativeVelSq;
+                    if (TTC > 0.f)
+                    {
+                        EffectiveTimeHorizon = FMath::Min(InTimeHorizon, TTC);
+                    }
+                }
+            }
+
+            FVector u = FVector::ZeroVector;
+            if (DistSq > CombinedRadiusSq)
+            {
+                const float InvTau = 1.0f / EffectiveTimeHorizon;
+                const FVector w = RelativeVelocity - RelativePosition * InvTau;
+                const float wSq = w.SizeSquared();
+                const float VOptRadius = CombinedRadius * InvTau;
+                if (FVector::DotProduct(w, RelativePosition) < 0.0f &&
+                    FMath::Square(FVector::DotProduct(w, RelativePosition)) > wSq * FMath::Square(VOptRadius))
+                {
+                    const float wLen = FMath::Sqrt(wSq);
+                    const FVector nw = w / wLen;
+                    u = nw * VOptRadius - w;
+                }
+            }
+            else
+            {
+                // Penetrating - push apart.
+                const float Dist = FMath::Sqrt(DistSq);
+                FVector PushDir = (Dist > KINDA_SMALL_NUMBER) ? -RelativePosition / Dist : FVector(1, 0, 0);
+                u = PushDir * ((CombinedRadius - Dist) / EffectiveTimeHorizon + 0.01f);
+            }
+
+            if (!u.IsNearlyZero(KINDA_SMALL_NUMBER))
+            {
+                // Full responsibility on the agent (obstacle doesn't cooperate).
+                const FVector nCorrection = u.GetSafeNormal();
+                if (!nCorrection.IsNearlyZero(KINDA_SMALL_NUMBER))
+                {
+                    AgentConstraints.Emplace(ActualPreferredVelocity + u, nCorrection);
+                }
+            }
+        }
 
         OutResults.Add(Agent.AgentId, { Agent.AgentId, AgentConstraints, VoxelConstraints, Agent.PreferredVelocity, ActualPreferredVelocity });
     }
@@ -301,41 +556,36 @@ static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadDa
         return PreferredVelocity;
     }
 
-    const FAgentThreadData* ObstacleAgent = nullptr;
-    float MinThreatDistSq = TNumericLimits<float>::Max();
+    // Accumulate weighted bias from ALL nearby agents (not just the closest).
+    // This handles multi-agent convergence scenarios.
+    FVector AccumulatedBias = FVector::ZeroVector;
+    const FVector ForwardVector = PreferredVelocity.GetSafeNormal();
+    const FVector UpVector = CurrentAgent.UpVector;
 
     for (const FAgentThreadData* AgentB : NearbyAgents)
     {
         const FVector ToAgentB = AgentB->Position - CurrentAgent.Position;
         const float DistToAgentBSq = ToAgentB.SizeSquared();
         const float CombinedRadius = CurrentAgent.AvoidanceRadius + AgentB->AvoidanceRadius;
+        const float ThresholdSq = FMath::Square(CombinedRadius * SymmetryBreakingRangeMultiplier);
 
-        if (DistToAgentBSq < FMath::Square(CombinedRadius * SymmetryBreakingRangeMultiplier))
+        if (DistToAgentBSq < ThresholdSq && DistToAgentBSq > KINDA_SMALL_NUMBER)
         {
-            if (DistToAgentBSq < MinThreatDistSq)
+            const float Weight = 1.0f - FMath::Sqrt(DistToAgentBSq) / (CombinedRadius * SymmetryBreakingRangeMultiplier);
+            FVector SideVector = FVector::CrossProduct(ForwardVector, UpVector).GetSafeNormal();
+
+            if (!SideVector.IsNearlyZero())
             {
-                MinThreatDistSq = DistToAgentBSq;
-                ObstacleAgent = AgentB;
+                const float DotWithSide = FVector::DotProduct(ToAgentB, SideVector);
+                if (DotWithSide > 0.0f) SideVector *= -1.0f;
+                AccumulatedBias += SideVector * Weight;
             }
         }
     }
 
-    if (ObstacleAgent)
+    if (!AccumulatedBias.IsNearlyZero())
     {
-        const FVector ForwardVector = PreferredVelocity.GetSafeNormal();
-        const FVector UpVector = CurrentAgent.UpVector;
-        FVector SideVector = FVector::CrossProduct(ForwardVector, UpVector);
-
-        const FVector ToObstacleAgent = ObstacleAgent->Position - CurrentAgent.Position;
-        SideVector.Normalize();
-        const float DotWithSide = FVector::DotProduct(ToObstacleAgent, SideVector);
-        if (DotWithSide > 0.0f)
-        {
-            SideVector *= -1.0f;
-        }
-
-        FVector ActualPreferredVelocity = PreferredVelocity + SideVector * CurrentAgent.MovementSpeed * SideBiasMagnitude;
-        return ActualPreferredVelocity;
+        return PreferredVelocity + AccumulatedBias.GetSafeNormal() * CurrentAgent.MovementSpeed * SideBiasMagnitude;
     }
     return PreferredVelocity;
 }
@@ -371,13 +621,16 @@ static void GenerateAgentConstraints_ThreadSafe(const FAgentThreadData& CurrentA
             }
         }
 
-        if (DistSq > CombinedRadiusSq && !bIsCollidingOrApproaching) continue;
+        // Deadlock buffer: also generate constraints for close-but-stationary agents.
+        const float DeadlockBuffer = CombinedRadius * 1.5f;
+        if (DistSq > FMath::Square(DeadlockBuffer) && !bIsCollidingOrApproaching) continue;
 
         const float InverseEffectiveTimeHorizon = 1.0f / EffectiveTimeHorizon;
         FVector u = FVector::ZeroVector;
 
         if (DistSq > CombinedRadiusSq)
         {
+            // Non-colliding case: standard ORCA velocity obstacle.
             const FVector w = RelativeVelocity - RelativePosition * InverseEffectiveTimeHorizon;
             const float w_sq = w.SizeSquared();
             const float VOptRadius = CombinedRadius * InverseEffectiveTimeHorizon;
@@ -390,10 +643,28 @@ static void GenerateAgentConstraints_ThreadSafe(const FAgentThreadData& CurrentA
                 u = (n_w * VOptRadius - w);
             }
         }
+        else
+        {
+            // Penetrating case: agents are overlapping. Push apart.
+            const float Dist = FMath::Sqrt(DistSq);
+            FVector PushDir;
+            if (Dist > KINDA_SMALL_NUMBER)
+            {
+                PushDir = -RelativePosition / Dist;
+            }
+            else
+            {
+                // Completely overlapping - pick arbitrary perpendicular direction.
+                PushDir = FVector::CrossProduct(CurrentAgent.UpVector, FVector::ForwardVector).GetSafeNormal();
+                if (PushDir.IsNearlyZero()) PushDir = FVector(1, 0, 0);
+            }
+            const float PenetrationDepth = CombinedRadius - Dist;
+            u = PushDir * (PenetrationDepth * InverseEffectiveTimeHorizon + 0.01f);
+        }
 
         if (!u.IsNearlyZero(KINDA_SMALL_NUMBER))
         {
-            float Responsibility = 0.5f;
+            const float Responsibility = 0.5f;
             const FVector w_correction = u * Responsibility;
             const FVector n_correction = u.GetSafeNormal();
             if (!n_correction.IsNearlyZero(KINDA_SMALL_NUMBER))
@@ -417,6 +688,9 @@ static void GenerateVoxelConstraints_ThreadSafe(const UWorld* World, const FAgen
     FCollisionQueryParams CollisionParams(TEXT("VoxelAvoidance_ThreadSafe"), false);
     CollisionParams.bTraceComplex = true;
 
+    // Wall avoidance is handled by the collision sweep in Tick(), not by ORCA constraints.
+    // ORCA constraints for walls cause circling behavior because PreferredVelocity
+    // points toward the waypoint (through the wall) while wall constraints push tangentially.
     TArray<FHitResult> HitResults;
     bool bHasHits = World->SweepMultiByObjectType(
         HitResults,
@@ -473,22 +747,151 @@ static void GenerateVoxelConstraints_ThreadSafe(const UWorld* World, const FAgen
 
 FVector UAvoidanceSubsystem::SolveOptimalVelocity(const TArray<FPlane>& Constraints, const FVector& PreferredVelocity) const
 {
-    FVector NewVelocity = PreferredVelocity;
-    for (int32 i = 0; i < SolverIterations; ++i)
+    // Incremental half-plane LP solver for 3D ORCA.
+    // Processes constraints one by one. For each new violated constraint:
+    // 1. Project onto the plane
+    // 2. If a previous constraint is violated, optimize along the intersection line
+    // 3. If infeasible, find the safest velocity
+
+    if (Constraints.Num() == 0)
     {
-        bool bViolated = false;
-        for (const FPlane& Constraint : Constraints)
-        {
-            const float ViolationDepth = Constraint.PlaneDot(NewVelocity);
-            if (ViolationDepth < 0.0f)
-            {
-                NewVelocity -= (FVector)Constraint * ViolationDepth * (1.01f);
-                bViolated = true;
-            }
-        }
-        if (!bViolated) break;
+        return PreferredVelocity;
     }
-    return NewVelocity;
+
+    FVector Result = PreferredVelocity;
+
+    for (int32 i = 0; i < Constraints.Num(); ++i)
+    {
+        const FVector Normal_i(Constraints[i].X, Constraints[i].Y, Constraints[i].Z);
+        const float Dist_i = Constraints[i].PlaneDot(Result);
+
+        if (Dist_i >= 0.0f)
+        {
+            continue; // Already satisfied.
+        }
+
+        // Project result onto plane i.
+        FVector Candidate = Result - Normal_i * Dist_i;
+        bool bFeasible = true;
+
+        // Check all previous constraints.
+        for (int32 j = 0; j < i; ++j)
+        {
+            const FVector Normal_j(Constraints[j].X, Constraints[j].Y, Constraints[j].Z);
+
+            if (Constraints[j].PlaneDot(Candidate) >= -KINDA_SMALL_NUMBER)
+            {
+                continue; // Previous constraint still satisfied.
+            }
+
+            // Planes i and j conflict. Find their intersection line.
+            const FVector LineDir = FVector::CrossProduct(Normal_i, Normal_j);
+
+            if (LineDir.SizeSquared() < KINDA_SMALL_NUMBER)
+            {
+                // Parallel planes.
+                if (FVector::DotProduct(Normal_i, Normal_j) > 0.0f)
+                {
+                    continue; // Compatible - use the more restrictive.
+                }
+                bFeasible = false;
+                break;
+            }
+
+            const FVector L = LineDir.GetSafeNormal();
+
+            // Find a point on the intersection line using Cramer's rule.
+            // Solve: n_i · P = W_i and n_j · P = W_j, with P = a*n_i + b*n_j
+            const float d = FVector::DotProduct(Normal_i, Normal_j);
+            const float det = 1.0f - d * d;
+
+            if (FMath::Abs(det) < KINDA_SMALL_NUMBER)
+            {
+                bFeasible = false;
+                break;
+            }
+
+            const float InvDet = 1.0f / det;
+            const float a = (Constraints[i].W - Constraints[j].W * d) * InvDet;
+            const float b = (Constraints[j].W - Constraints[i].W * d) * InvDet;
+            const FVector LinePoint = a * Normal_i + b * Normal_j;
+
+            // Optimize along the line: find t closest to PreferredVelocity.
+            float tOpt = FVector::DotProduct(PreferredVelocity - LinePoint, L);
+
+            // Clamp t against all previous constraints (0..j-1).
+            for (int32 k = 0; k < j; ++k)
+            {
+                const FVector Normal_k(Constraints[k].X, Constraints[k].Y, Constraints[k].Z);
+                const float Numerator = Constraints[k].PlaneDot(LinePoint);
+                const float Denominator = FVector::DotProduct(Normal_k, L);
+
+                if (FMath::Abs(Denominator) < KINDA_SMALL_NUMBER)
+                {
+                    if (Numerator < -KINDA_SMALL_NUMBER)
+                    {
+                        bFeasible = false;
+                        break;
+                    }
+                    continue;
+                }
+
+                const float tBound = -Numerator / Denominator;
+                if (Denominator > 0.0f)
+                {
+                    // Upper bound.
+                    tOpt = FMath::Min(tOpt, tBound);
+                }
+                else
+                {
+                    // Lower bound.
+                    tOpt = FMath::Max(tOpt, tBound);
+                }
+            }
+
+            if (!bFeasible) break;
+
+            Candidate = LinePoint + L * tOpt;
+            break; // Only handle first violated previous constraint.
+        }
+
+        if (bFeasible)
+        {
+            Result = Candidate;
+        }
+        else
+        {
+            // Infeasible: minimize penetration depth across all constraints seen so far.
+            // Project preferred velocity onto each plane and pick the least-violating result.
+            float BestScore = -TNumericLimits<float>::Max();
+            FVector BestVelocity = FVector::ZeroVector;
+
+            for (int32 k = 0; k <= i; ++k)
+            {
+                const FVector Nk(Constraints[k].X, Constraints[k].Y, Constraints[k].Z);
+                const float Dk = Constraints[k].PlaneDot(PreferredVelocity);
+                const FVector Proj = PreferredVelocity - Nk * Dk;
+
+                // Score = minimum distance to satisfaction across all other constraints.
+                float MinDist = TNumericLimits<float>::Max();
+                for (int32 m = 0; m <= i; ++m)
+                {
+                    const float PlaneDist = Constraints[m].PlaneDot(Proj);
+                    MinDist = FMath::Min(MinDist, PlaneDist);
+                }
+
+                if (MinDist > BestScore)
+                {
+                    BestScore = MinDist;
+                    BestVelocity = Proj;
+                }
+            }
+
+            Result = BestVelocity;
+        }
+    }
+
+    return Result;
 }
 
 void UAvoidanceSubsystem::DebugVisualizeVelocities(const UPathfindingComponent* Agent, const FThreadAvoidanceResult& Result, const FVector& FinalOptimalVelocity) const
@@ -504,4 +907,46 @@ void UAvoidanceSubsystem::DebugVisualizeVelocities(const UPathfindingComponent* 
     DrawDebugLine(World, LineStart, LineStart + Result.PreferredVelocity * LineLengthMultiplier, FColor::Blue, false, -1, 0, 2.f);
     DrawDebugLine(World, LineStart, LineStart + Result.ActualPreferredVelocity * LineLengthMultiplier, FColor::Yellow, false, -1, 0, 3.f);
     DrawDebugLine(World, LineStart, LineStart + FinalOptimalVelocity * LineLengthMultiplier, FColor::Red, false, -1, 0, 5.f);
+}
+
+void UAvoidanceSubsystem::ApplyMobileLowSpecSettings()
+{
+#if PLATFORM_ANDROID
+    if (AvoidanceMode == ESmartFlyingAvoidanceMode::ORCA)
+    {
+        if (bUseMobileLowSpecSettings)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("SmartFlyingNavigation: High ORCA avoidance is too expensive for low-spec Android. Downgrading to Simple avoidance because bUseMobileLowSpecSettings is enabled."));
+            if (GEngine)
+            {
+                GEngine->AddOnScreenDebugMessage(-1, 8.f, FColor::Yellow, TEXT("SmartFlyingNavigation: Android downgraded High ORCA avoidance to Simple."));
+            }
+            AvoidanceMode = ESmartFlyingAvoidanceMode::Simple;
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("SmartFlyingNavigation: High ORCA avoidance is enabled on Android. This is supported, but may exceed CPU/RAM budgets on low-spec devices."));
+            if (GEngine)
+            {
+                GEngine->AddOnScreenDebugMessage(-1, 8.f, FColor::Yellow, TEXT("SmartFlyingNavigation: High ORCA avoidance on Android may exceed low-spec budgets."));
+            }
+        }
+    }
+
+    if (!bUseMobileLowSpecSettings)
+    {
+        return;
+    }
+
+    MaxNeighbors = FMath::Min(MaxNeighbors, MobileMaxNeighbors);
+    SolverIterations = FMath::Min(SolverIterations, 2);
+    TimeHorizon = FMath::Min(TimeHorizon, 0.75f);
+    SymmetryBreakingRangeMultiplier = FMath::Min(SymmetryBreakingRangeMultiplier, 4.f);
+    bShowVelocityDebugLine = false;
+
+    if (bMobileDisableDynamicObstacleAvoidance)
+    {
+        bAvoidDynamicObstacles = false;
+    }
+#endif
 }

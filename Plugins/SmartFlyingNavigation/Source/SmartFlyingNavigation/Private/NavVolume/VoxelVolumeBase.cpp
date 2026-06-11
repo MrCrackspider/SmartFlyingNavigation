@@ -28,14 +28,16 @@ AVoxelVolumeBase::AVoxelVolumeBase()
 	VolumeBox->SetCollisionResponseToAllChannels(ECR_Ignore);
 	VolumeBox->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	
-#if WITH_EDITOR
-	// Create HISM components for debug visualization.
+	// Create HISM components for debug visualization. They exist on all platforms
+	// (empty at runtime) so cooked Blueprint subclasses referencing the inherited
+	// components can resolve their imports outside the editor.
 	DebugSolidNodesComponent = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("DebugSolidNodesComponent"));
 	DebugSolidNodesComponent->SetupAttachment(VolumeBox);
-	
+
 	DebugMixedNodesComponent = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("DebugMixedNodesComponent"));
 	DebugMixedNodesComponent->SetupAttachment(VolumeBox);
 
+#if WITH_EDITOR
 	// Set default paths for debug materials.
 	DebugSolidNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/SmartFlyingNavigation/Debug/Material/MI_NavDebugSolidVoxel.MI_NavDebugSolidVoxel'");
 	DebugMixedNodeMaterialPath = TEXT("/Script/Engine.MaterialInstanceConstant'/SmartFlyingNavigation/Debug/Material/MI_NavDebugMixedVoxel.MI_NavDebugMixedVoxel'");

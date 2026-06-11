@@ -1,7 +1,9 @@
-﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
+// Copyright © 2025 TeamHamDev. All Rights Reserved.
 
 
 #include "Utility/Parallel/ParallelAvoidanceTask.h"
+#include "Subsystem/AvoidanceSubsystem.h"
+#include "NavCore/SmartFlyingNavStats.h"
 
 FParallelAvoidanceTask::FParallelAvoidanceTask(
     UWorld* InWorld,
@@ -12,7 +14,8 @@ FParallelAvoidanceTask::FParallelAvoidanceTask(
     const int32 InMaxNeighbors,
     const float InGridCellSize,
     const float InSymmetryBreakingRangeMultiplier,
-    const float InSideBiasMagnitude)
+    const float InSideBiasMagnitude,
+    TArray<FDynamicObstacleThreadData>&& InDynamicObstacles)
     : World(InWorld)
     , AgentData(MoveTemp(InAgentData))
     , Results(InResults)
@@ -22,11 +25,14 @@ FParallelAvoidanceTask::FParallelAvoidanceTask(
     , GridCellSize(InGridCellSize)
     , SymmetryBreakingRangeMultiplier(InSymmetryBreakingRangeMultiplier)
     , SideBiasMagnitude(InSideBiasMagnitude)
+    , DynamicObstacles(MoveTemp(InDynamicObstacles))
 {
 }
 
 void FParallelAvoidanceTask::DoWork()
 {
+    SCOPE_CYCLE_COUNTER(STAT_SFN_AvoidanceSolve);
+
     TMap<uint32, FThreadAvoidanceResult> TempResults;
 
     UAvoidanceSubsystem::RunAvoidanceCalculation(
@@ -37,7 +43,8 @@ void FParallelAvoidanceTask::DoWork()
         MaxNeighbors,
         GridCellSize,
         SymmetryBreakingRangeMultiplier,
-        SideBiasMagnitude
+        SideBiasMagnitude,
+        DynamicObstacles
     );
 
     FScopeLock Lock(&ResultsLock);

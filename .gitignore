@@ -28,6 +28,9 @@ Plugins/*/Saved/
 # 이 규칙이 GitHub Push 오류를 직접적으로 해결합니다.
 Content/Pathfinding/BakedData/
 
+# Packaged game builds (APK/zip exceed GitHub's 100 MB file limit)
+Packaged/
+
 # 만약 다른 폴더도 문제가 된다면 여기에 추가할 수 있습니다. 예를 들어:
 # Content/Level/AvoidanceLevel/
 

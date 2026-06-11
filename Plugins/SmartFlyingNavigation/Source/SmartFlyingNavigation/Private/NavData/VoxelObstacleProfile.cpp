@@ -12,6 +12,29 @@ bool UVoxelObstacleProfile::DoesActorMatch(const AActor* InActor, const UPrimiti
 		return false;
 	}
 
+	// 1.5. Exclude Check: If any exclusion criterion matches, always reject.
+	if (InPrimitiveComponent && ExcludeChannels.Num() > 0)
+	{
+		if (ExcludeChannels.Contains(InPrimitiveComponent->GetCollisionObjectType()))
+		{
+			return false;
+		}
+	}
+	if (ExcludeTags.Num() > 0)
+	{
+		for (const FName& Tag : ExcludeTags)
+		{
+			if (InActor->ActorHasTag(Tag))
+			{
+				return false;
+			}
+		}
+	}
+	if (ExcludeMarkerComponentClass && InActor->FindComponentByClass(ExcludeMarkerComponentClass))
+	{
+		return false;
+	}
+
 	// 2. Check if any criteria are actually set.
 	const bool bHasAnyCriteria = CollisionChannels.Num() > 0 ||
 								 ActorTags.Num() > 0 ||

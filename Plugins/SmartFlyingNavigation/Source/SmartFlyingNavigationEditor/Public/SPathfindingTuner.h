@@ -3,19 +3,20 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "NavData/OctreeDataAsset.h"
 #include "IDetailsView.h"
+#include "Subsystem/AvoidanceSubsystem.h"
 #include "Widgets/SCompoundWidget.h"
 
 class UPathfindingSubsystem;
 class UAvoidanceSubsystem;
 class UOctreeNavSubsystem;
 class UPathfindingTunerSettings;
+class UWorld;
 class AActor;
 class ULandscapeComponent;
 class AOctreeVoxelVolume;
-struct FAssetData; 
-struct FWorldBakeResult;
+struct FAssetData;
+struct FLoadedNavVolumeSummary;
 
 class SPathfindingTuner : public SCompoundWidget
 {
@@ -37,6 +38,7 @@ private:
     TSharedRef<SWidget> BuildVoxelDebugSettingsSection();
     TSharedRef<SWidget> BuildBakedDataSettingsSection();
     TSharedRef<SWidget> BuildAvoidanceSettingsSection();
+    TSharedRef<SWidget> BuildWorldPartitionWorkflowSection();
 
    
     // TSharedRef<SWidget> BuildAgentSettingsSection();
@@ -75,6 +77,7 @@ private:
     void OnPerformanceCategoryExpansionChanged(bool bIsExpanded);
     void OnOctreeSettingsCategoryExpansionChanged(bool bIsExpanded);
     void OnBakedDataCategoryExpansionChanged(bool bIsExpanded);
+    void OnWorldPartitionWorkflowExpansionChanged(bool bIsExpanded);
     // void OnAgentSettingsCategoryExpansionChanged(bool bIsExpanded);
     void OnDebugSettingsCategoryExpansionChanged(bool bIsExpanded);
     void OnAgentDebugCategoryExpansionChanged(bool bIsExpanded);
@@ -90,14 +93,11 @@ private:
     // --- Octree Volume Settings ---
     bool AreOnlyOctreeVolumesSelected() const;
     FText GetSelectedVolumeDisplayText() const;
-    FText GetBakedDataSaveDirectoryAsText() const;
-    void OnBakedDataSaveDirectoryTextCommitted(const FText& InText, ETextCommit::Type CommitInfo);
 
     FString GetObstacleProfilePath() const;
     void OnObstacleProfileChanged(const FAssetData& AssetData);
     FText GetObstacleProfileFullPathAsText() const;
 
-    FReply OnBrowseButtonClicked();
     // TOptional<int32> GetMaxOctreeDepth() const;
     // void OnMaxOctreeDepthCommitted(int32 NewValue, ETextCommit::Type CommitType);
     
@@ -108,9 +108,8 @@ private:
     void OnMapSizeSelectionChanged(TSharedPtr<int32> NewSelection, ESelectInfo::Type SelectType);
 
     // --- Baked Data Settings ---
-    FString GetBakedOctreeDataPath() const;
-    void OnBakedOctreeDataChanged(const FAssetData& AssetData);
-    FText GetBakedDataFullPathAsText() const;
+    /** True when any selected volume needs a (re-)bake according to the world manifest. */
+    bool IsAnySelectedVolumeBakeStale(TArray<FText>* OutReasons = nullptr) const;
 
     // --- Debug Settings ---
     TOptional<ECheckBoxState> GetDrawDebugBoxState() const;
@@ -131,6 +130,17 @@ private:
     void OnSolverIterationsCommitted(int32 NewValue, ETextCommit::Type CommitType);
     void OnSideBiasMagnitudeCommitted(float NewValue, ETextCommit::Type CommitType);
     void OnInterpSpeedCommitted(float NewValue, ETextCommit::Type CommitType);
+
+    /** Finds the live AvoidanceSubsystem in the PIE world, if PIE is active. Returns nullptr otherwise. */
+    UAvoidanceSubsystem* GetPIEAvoidanceSubsystem() const;
+
+    /** Applies a value to both the CDO (for persistence) and the live PIE instance (for immediate effect). */
+    template<typename ValueType>
+    void ApplyAvoidanceSetting(ValueType NewValue, void (UAvoidanceSubsystem::*Setter)(ValueType));
+
+    /** Reads an avoidance value, preferring the PIE instance when active. */
+    template<typename ValueType>
+    TOptional<ValueType> ReadAvoidanceSetting(ValueType (UAvoidanceSubsystem::*Getter)() const) const;
     
     // --- Agent Settings ---
     bool AreOnlyAgentsSelected() const;
@@ -167,6 +177,8 @@ private:
     //
     // // --- Actions ---
     FReply OnBakeButtonClicked();
+    FReply OnBakeLoadedVolumesButtonClicked();
+    FReply OnSelectLoadedVolumesButtonClicked();
     // FReply OnBakeWorldButtonClicked();
     // FReply OnCalculateVolumesClicked();
     //
@@ -174,6 +186,11 @@ private:
     void ShowWarningMessage(const FText& Message) const;
     FReply OnRequestPathButtonClicked();
     bool IsPIEActive() const;
+    UWorld* GetEditorWorld() const;
+    bool IsWorldPartitionEnabled() const;
+    FLoadedNavVolumeSummary GetLoadedNavVolumeSummary() const;
+    FText GetLoadedNavVolumeSummaryText() const;
+    FText GetLoadedNavVolumeDetailText() const;
 
 private:
     //=================================================================================================
@@ -274,4 +291,35 @@ TArray<T*> SPathfindingTuner::GetSelectedComponentsOfType() const
         }
     }
     return SelectedComponents;
+}
+
+template<typename ValueType>
+void SPathfindingTuner::ApplyAvoidanceSetting(ValueType NewValue, void (UAvoidanceSubsystem::*Setter)(ValueType))
+{
+    if (UAvoidanceSubsystem* CDO = GetMutableDefault<UAvoidanceSubsystem>())
+    {
+        (CDO->*Setter)(NewValue);
+        CDO->SaveConfig();
+    }
+    // Also push to live PIE instance for immediate effect.
+    if (UAvoidanceSubsystem* PIE = GetPIEAvoidanceSubsystem())
+    {
+        (PIE->*Setter)(NewValue);
+    }
+    Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+}
+
+template<typename ValueType>
+TOptional<ValueType> SPathfindingTuner::ReadAvoidanceSetting(ValueType (UAvoidanceSubsystem::*Getter)() const) const
+{
+    // Prefer the live PIE instance value when PIE is active.
+    if (const UAvoidanceSubsystem* PIE = GetPIEAvoidanceSubsystem())
+    {
+        return (PIE->*Getter)();
+    }
+    if (const UAvoidanceSubsystem* CDO = GetDefault<UAvoidanceSubsystem>())
+    {
+        return (CDO->*Getter)();
+    }
+    return TOptional<ValueType>();
 }

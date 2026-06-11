@@ -6,6 +6,7 @@
 #include "Editor.h"
 #include "Editor/EditorEngine.h"
 #include "Engine/Selection.h"
+#include "Engine/World.h"
 #include "Internationalization/Text.h"
 #include "Styling/AppStyle.h"
 #include "Framework/Application/SlateApplication.h"
@@ -39,6 +40,7 @@
 #include "Containers/UnrealString.h"
 
 #include "PathfindingEditorSubsystem.h"
+#include "WorldPartition/WorldPartition.h"
 
 
 #define LOCTEXT_NAMESPACE "PathfindingTuner"
@@ -62,29 +64,59 @@ void SPathfindingTuner::Construct(const FArguments& InArgs)
 	
 	ChildSlot
 	[
-		SNew(SScrollBox)
-		+ SScrollBox::Slot()
+		SNew(SVerticalBox)
+
+		// ── Status Header ──
+		+ SVerticalBox::Slot().AutoHeight()
 		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight().Padding(2)
+			SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush("DetailsView.CategoryTop"))
+			.Padding(FMargin(8.f, 6.f))
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("PluginTitle", "Smart Flying Navigation"))
+					.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
+				]
+				+ SHorizontalBox::Slot().FillWidth(1.f).HAlign(HAlign_Right).VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text_Lambda([this]() -> FText {
+						return IsPIEActive()
+							? LOCTEXT("PIEStatusActive", "PIE Active")
+							: LOCTEXT("PIEStatusInactive", "Editor");
+					})
+					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+					.ColorAndOpacity_Lambda([this]() -> FSlateColor {
+						return IsPIEActive()
+							? FSlateColor(FLinearColor(0.2f, 0.8f, 0.3f))
+							: FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f));
+					})
+				]
+			]
+		]
+
+		// ── Scrollable Content ──
+		+ SVerticalBox::Slot().FillHeight(1.f)
+		[
+			SNew(SScrollBox)
+
+			// ═══════════════════════════════════════════
+			// GROUP 1: Volume Setup & Baking (Editor workflow)
+			// ═══════════════════════════════════════════
+			+ SScrollBox::Slot().Padding(4, 4, 4, 0)
 			[
 				SNew(SBorder)
 				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
 				.Padding(4.f)
 				[
-					BuildPerformanceSettingsSection()
+					BuildWorldPartitionWorkflowSection()
 				]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(2)
-			[
-				SNew(SBorder)
-				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-				.Padding(4.f)
-				[
-					BuildAvoidanceSettingsSection()
-				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(2)
+
+			+ SScrollBox::Slot().Padding(4, 4, 4, 0)
 			[
 				SNew(SBorder)
 				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
@@ -93,16 +125,8 @@ void SPathfindingTuner::Construct(const FArguments& InArgs)
 					BuildOctreeVolumeSettingsSection()
 				]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(2)
-			[
-				SNew(SBorder)
-				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-				.Padding(4.f)
-				[
-					BuildVoxelDebugSettingsSection()
-				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(2)
+
+			+ SScrollBox::Slot().Padding(4, 2, 4, 0)
 			[
 				SNew(SBorder)
 				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
@@ -111,7 +135,44 @@ void SPathfindingTuner::Construct(const FArguments& InArgs)
 					BuildBakedDataSettingsSection()
 				]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(2)
+
+			// ═══════════════════════════════════════════
+			// GROUP 2: Runtime Tuning (PIE-relevant settings)
+			// ═══════════════════════════════════════════
+			+ SScrollBox::Slot().Padding(4, 8, 4, 0)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.Padding(4.f)
+				[
+					BuildAvoidanceSettingsSection()
+				]
+			]
+
+			+ SScrollBox::Slot().Padding(4, 2, 4, 0)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.Padding(4.f)
+				[
+					BuildPerformanceSettingsSection()
+				]
+			]
+
+			// ═══════════════════════════════════════════
+			// GROUP 3: Debug & Inspection
+			// ═══════════════════════════════════════════
+			+ SScrollBox::Slot().Padding(4, 8, 4, 0)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.Padding(4.f)
+				[
+					BuildVoxelDebugSettingsSection()
+				]
+			]
+
+			+ SScrollBox::Slot().Padding(4, 2, 4, 4)
 			[
 				SNew(SBorder)
 				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
@@ -121,7 +182,7 @@ void SPathfindingTuner::Construct(const FArguments& InArgs)
 					+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
 					[
 						SNew(STextBlock)
-						.Text(LOCTEXT("SelectedAgentDetails", "Selected Agent Details (Pathfinding Component)"))
+						.Text(LOCTEXT("SelectedAgentDetails", "Selected Agent Details"))
 						.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
 					]
 					+ SVerticalBox::Slot().AutoHeight()
@@ -154,6 +215,79 @@ SPathfindingTuner::~SPathfindingTuner()
 // UI Section Builders
 //=================================================================================================
 
+TSharedRef<SWidget> SPathfindingTuner::BuildWorldPartitionWorkflowSection()
+{
+	const UPathfindingTunerSettings* TunerSettings = GetDefault<UPathfindingTunerSettings>();
+
+	return SNew(SExpandableArea)
+		.HeaderContent()
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("WorldPartitionWorkflowCategory", "World Partition Workflow"))
+				.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
+				.ShadowOffset(FVector2D(1.0f, 1.0f))
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.f).HAlign(HAlign_Right).VAlign(VAlign_Center).Padding(8, 0, 0, 0)
+			[
+				SNew(STextBlock)
+				.Text_Lambda([this]() -> FText {
+					return IsWorldPartitionEnabled()
+						? LOCTEXT("WorldPartitionEnabledBadge", "World Partition")
+						: LOCTEXT("WorldPartitionDisabledBadge", "Standard World");
+				})
+				.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+				.ColorAndOpacity_Lambda([this]() -> FSlateColor {
+					return IsWorldPartitionEnabled()
+						? FSlateColor(FLinearColor(0.3f, 0.7f, 1.0f))
+						: FSlateColor(FLinearColor(0.6f, 0.6f, 0.6f));
+				})
+			]
+		]
+		.BodyContent()
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+			[
+				SNew(STextBlock)
+				.Text(this, &SPathfindingTuner::GetLoadedNavVolumeSummaryText)
+				.Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont"))
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 0.0f, 8.0f, 5.0f)
+			[
+				SNew(STextBlock)
+				.Text(this, &SPathfindingTuner::GetLoadedNavVolumeDetailText)
+				.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+				.AutoWrapText(true)
+				.ColorAndOpacity(FSlateColor(FLinearColor(0.72f, 0.72f, 0.72f)))
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("BakeLoadedVolumesButton", "Bake Stale Loaded Volumes"))
+					.ToolTipText(LOCTEXT("BakeLoadedVolumesTooltip",
+						"Bakes loaded Octree Voxel Volumes that are missing data or have stale data. In World Partition maps, this operates on the currently loaded cells."))
+					.OnClicked(this, &SPathfindingTuner::OnBakeLoadedVolumesButtonClicked)
+				]
+				+ SHorizontalBox::Slot().AutoWidth()
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("SelectLoadedVolumesButton", "Select Loaded Nav Volumes"))
+					.ToolTipText(LOCTEXT("SelectLoadedVolumesTooltip",
+						"Selects every loaded Octree Voxel Volume so its settings can be inspected or edited."))
+					.OnClicked(this, &SPathfindingTuner::OnSelectLoadedVolumesButtonClicked)
+				]
+			]
+		]
+		.InitiallyCollapsed(!TunerSettings->bIsWorldBakeCategoryExpanded)
+		.OnAreaExpansionChanged(this, &SPathfindingTuner::OnWorldPartitionWorkflowExpansionChanged);
+}
+
 TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
 {
 	const UPathfindingTunerSettings* TunerSettings = GetDefault<UPathfindingTunerSettings>();
@@ -162,10 +296,28 @@ TSharedRef<SWidget> SPathfindingTuner::BuildPerformanceSettingsSection()
 	return SNew(SExpandableArea)
 		.HeaderContent()
 		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("PerformanceSettingsCategory", "Performance Settings"))
-			.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
-			.ShadowOffset(FVector2D(1.0f, 1.0f))
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("PerformanceSettingsCategory", "Performance"))
+				.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
+				.ShadowOffset(FVector2D(1.0f, 1.0f))
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.f).HAlign(HAlign_Right).VAlign(VAlign_Center).Padding(8, 0, 0, 0)
+			[
+				SNew(STextBlock)
+				.Text_Lambda([this]() -> FText {
+					TOptional<int32> Threads = GetCurrentNumThreads();
+					if (Threads.IsSet())
+					{
+						return FText::Format(LOCTEXT("ThreadCountBadge", "{0} threads"), FText::AsNumber(Threads.GetValue()));
+					}
+					return FText::GetEmpty();
+				})
+				.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+				.ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)))
+			]
 		]
 		.BodyContent()
 		[
@@ -214,10 +366,32 @@ TSharedRef<SWidget> SPathfindingTuner::BuildOctreeVolumeSettingsSection()
 		.IsEnabled(this, &SPathfindingTuner::AreOnlyOctreeVolumesSelected)
 		.HeaderContent()
 		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("OctreeSettingsCategory", "Octree Volume Settings"))
-			.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
-			.ShadowOffset(FVector2D(1.0f, 1.0f))
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("OctreeSettingsCategory", "Volume Settings"))
+				.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
+				.ShadowOffset(FVector2D(1.0f, 1.0f))
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.f).HAlign(HAlign_Right).VAlign(VAlign_Center).Padding(8, 0, 0, 0)
+			[
+				SNew(STextBlock)
+				.Text_Lambda([this]() -> FText {
+					TArray<AOctreeVoxelVolume*> Volumes = GetSelectedActorsOfType<AOctreeVoxelVolume>();
+					if (Volumes.Num() > 0)
+					{
+						return FText::Format(LOCTEXT("VolumeCountBadge", "{0} selected"), FText::AsNumber(Volumes.Num()));
+					}
+					return LOCTEXT("NoVolumeSelected", "Select a volume");
+				})
+				.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+				.ColorAndOpacity_Lambda([this]() -> FSlateColor {
+					return AreOnlyOctreeVolumesSelected()
+						? FSlateColor(FLinearColor(0.7f, 0.7f, 0.7f))
+						: FSlateColor(FLinearColor(0.8f, 0.4f, 0.2f));
+				})
+			]
 		]
 		.BodyContent()
 		[
@@ -298,94 +472,82 @@ TSharedRef<SWidget> SPathfindingTuner::BuildBakedDataSettingsSection()
 		.IsEnabled(this, &SPathfindingTuner::AreOnlyOctreeVolumesSelected)
 		.HeaderContent()
 		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("BakedDataSettingsCategory", "Baked Data Settings"))
-			.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
-			.ShadowOffset(FVector2D(1.0f, 1.0f))
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("BakedDataSettingsCategory", "Bake Settings"))
+				.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
+				.ShadowOffset(FVector2D(1.0f, 1.0f))
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.f).HAlign(HAlign_Right).VAlign(VAlign_Center).Padding(8, 0, 0, 0)
+			[
+				SNew(STextBlock)
+				.Text_Lambda([this]() -> FText {
+					TArray<AOctreeVoxelVolume*> Volumes = GetSelectedActorsOfType<AOctreeVoxelVolume>();
+					if (Volumes.Num() > 0)
+					{
+						return IsAnySelectedVolumeBakeStale()
+							? LOCTEXT("BakeStaleWarningBadge", "Re-bake needed")
+							: LOCTEXT("BakeUpToDate", "Up to date");
+					}
+					return FText::GetEmpty();
+				})
+				.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+				.ColorAndOpacity_Lambda([this]() -> FSlateColor {
+					return IsAnySelectedVolumeBakeStale()
+						? FSlateColor(FLinearColor(1.0f, 0.6f, 0.1f))  // Orange warning
+						: FSlateColor(FLinearColor(0.3f, 0.7f, 0.3f)); // Green OK
+				})
+			]
 		]
 		.BodyContent()
 		[
 			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 5.0f)
+
+			// ── Staleness Warning Banner ──
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 4.0f)
 			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
-				[
-					SNew(STextBlock).Text(LOCTEXT("BakedDataSaveDirectoryLabel", "Baked Data Save Directory:")).Font(
-						FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-				]
-				+ SHorizontalBox::Slot().FillWidth(0.6f)
-				[
-					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-					[
-						SNew(SEditableTextBox)
-						.Text(this, &SPathfindingTuner::GetBakedDataSaveDirectoryAsText)
-						.OnTextCommitted(this, &SPathfindingTuner::OnBakedDataSaveDirectoryTextCommitted)
-						.HintText(LOCTEXT("DirectoryPathHint", "Path to save directory..."))
-					]
-					+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f).VAlign(VAlign_Center)
-					[
-						SNew(SButton)
-						.Text(FText::FromString(TEXT("...")))
-						.ToolTipText(LOCTEXT("BakedDataSaveDirectoryBrowseTooltip",
-						                     "Choose a directory from this computer"))
-						.OnClicked(this, &SPathfindingTuner::OnBrowseButtonClicked)
-					]
-				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f, 5.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.4f)
-				.VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("BakedOctreeDataLabel", "Baked Octree Data Asset:"))
-					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-				]
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.6f)
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("SettingsEditor.CheckoutWarningBorder"))
+				.BorderBackgroundColor(FLinearColor(1.0f, 0.6f, 0.1f, 0.15f))
+				.Padding(FMargin(8.f, 6.f))
+				.Visibility_Lambda([this]() -> EVisibility {
+					return IsAnySelectedVolumeBakeStale() ? EVisibility::Visible : EVisibility::Collapsed;
+				})
 				[
 					SNew(SVerticalBox)
-					+ SVerticalBox::Slot()
-					.AutoHeight()
+					+ SVerticalBox::Slot().AutoHeight()
 					[
-						SNew(SObjectPropertyEntryBox)
-						.AllowedClass(UOctreeDataAsset::StaticClass())
-						.ObjectPath(this, &SPathfindingTuner::GetBakedOctreeDataPath)
-						.OnObjectChanged(this, &SPathfindingTuner::OnBakedOctreeDataChanged)
+						SNew(STextBlock)
+						.Text(LOCTEXT("BakeStaleTitle", "Bake data may be outdated"))
+						.Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont"))
+						.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.7f, 0.2f)))
 					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0, 4, 0, 0)
+					+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 0)
 					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot()
-						.AutoWidth()
-						.VAlign(VAlign_Center)
-						.Padding(0, 0, 5, 0)
-						[
-							SNew(STextBlock)
-							.Text(LOCTEXT("PathLabel", "Path:"))
-							.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-							.ColorAndOpacity(FSlateColor(FLinearColor(0.7f, 0.7f, 0.7f)))
-						]
-						+ SHorizontalBox::Slot()
-						.FillWidth(1.0f)
-						.VAlign(VAlign_Center)
-						[
-							SNew(STextBlock)
-							.Text(this, &SPathfindingTuner::GetBakedDataFullPathAsText)
-							.Font(FAppStyle::GetFontStyle("PropertyWindow.ItalicFont"))
-							.ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)))
-						]
+						SNew(STextBlock)
+						.Text_Lambda([this]() -> FText {
+							TArray<FText> AllReasons;
+							IsAnySelectedVolumeBakeStale(&AllReasons);
+							if (AllReasons.Num() > 0)
+							{
+								TArray<FString> ReasonStrings;
+								for (const FText& R : AllReasons)
+								{
+									ReasonStrings.Add(FString::Printf(TEXT("  - %s"), *R.ToString()));
+								}
+								return FText::FromString(FString::Join(ReasonStrings, TEXT("\n")));
+							}
+							return FText::GetEmpty();
+						})
+						.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+						.ColorAndOpacity(FSlateColor(FLinearColor(0.8f, 0.8f, 0.8f)))
+						.AutoWrapText(true)
 					]
 				]
 			]
+
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			.Padding(8.0f, 5.0f)
@@ -481,15 +643,33 @@ TSharedRef<SWidget> SPathfindingTuner::BuildBakedDataSettingsSection()
 TSharedRef<SWidget> SPathfindingTuner::BuildAvoidanceSettingsSection()
 {
 	const UPathfindingTunerSettings* TunerSettings = GetDefault<UPathfindingTunerSettings>();
-	const UAvoidanceSubsystem* AvoidanceCDO = GetDefault<UAvoidanceSubsystem>();
 
 	return SNew(SExpandableArea)
 		.HeaderContent()
 		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("AvoidanceSettingsCategory", "Avoidance Tuning"))
-			.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
-			.ShadowOffset(FVector2D(1.0f, 1.0f))
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("AvoidanceSettingsCategory", "Avoidance Tuning"))
+				.Font(FAppStyle::Get().GetFontStyle("DetailsView.CategoryFontStyle"))
+				.ShadowOffset(FVector2D(1.0f, 1.0f))
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.f).HAlign(HAlign_Right).VAlign(VAlign_Center).Padding(8, 0, 0, 0)
+			[
+				SNew(STextBlock)
+				.Text_Lambda([this]() -> FText {
+					return IsPIEActive()
+						? LOCTEXT("AvoidanceLiveLabel", "[LIVE]")
+						: LOCTEXT("AvoidanceConfigLabel", "[Config]");
+				})
+				.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+				.ColorAndOpacity_Lambda([this]() -> FSlateColor {
+					return IsPIEActive()
+						? FSlateColor(FLinearColor(0.3f, 0.9f, 0.4f))
+						: FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f));
+				})
+			]
 		]
 		.BodyContent()
 		[
@@ -542,7 +722,10 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAvoidanceSettingsSection()
 				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
 				[
 					SNew(SCheckBox)
-					.IsChecked_Lambda([AvoidanceCDO]() { return AvoidanceCDO ? (AvoidanceCDO->GetbUseAvoidance() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked) : ECheckBoxState::Undetermined; })
+					.IsChecked_Lambda([this]() {
+						auto Val = ReadAvoidanceSetting(&UAvoidanceSubsystem::GetbUseAvoidance);
+						return Val.IsSet() ? (Val.GetValue() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked) : ECheckBoxState::Undetermined;
+					})
 					.OnCheckStateChanged(this, &SPathfindingTuner::OnbAvoidanceComitted)
 				]
 			]
@@ -559,7 +742,10 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAvoidanceSettingsSection()
 				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
 				[
 					SNew(SCheckBox)
-					.IsChecked_Lambda([AvoidanceCDO]() { return AvoidanceCDO ? (AvoidanceCDO->GetbShowVelocityDebugLine() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked) : ECheckBoxState::Undetermined; })
+					.IsChecked_Lambda([this]() {
+						auto Val = ReadAvoidanceSetting(&UAvoidanceSubsystem::GetbShowVelocityDebugLine);
+						return Val.IsSet() ? (Val.GetValue() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked) : ECheckBoxState::Undetermined;
+					})
 					.OnCheckStateChanged(this, &SPathfindingTuner::OnbAvoidanceVelocityDebugComitted)
 				]
 			]
@@ -576,7 +762,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAvoidanceSettingsSection()
 				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
 				[
 					SNew(SNumericEntryBox<float>)
-					.Value_Lambda([AvoidanceCDO]() -> TOptional<float> { return AvoidanceCDO ? TOptional(AvoidanceCDO->GetTimeHorizon()) : TOptional<float>(); })
+					.Value_Lambda([this]() -> TOptional<float> { return ReadAvoidanceSetting(&UAvoidanceSubsystem::GetTimeHorizon); })
 					.OnValueCommitted(this, &SPathfindingTuner::OnTimeHorizonCommitted)
 				]
 			]
@@ -593,7 +779,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAvoidanceSettingsSection()
 				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
 				[
 					SNew(SNumericEntryBox<int32>)
-					.Value_Lambda([AvoidanceCDO]() -> TOptional<int32> { return AvoidanceCDO ? TOptional(AvoidanceCDO->GetMaxNeighbors()) : TOptional<int32>(); })
+					.Value_Lambda([this]() -> TOptional<int32> { return ReadAvoidanceSetting(&UAvoidanceSubsystem::GetMaxNeighbors); })
 					.OnValueCommitted(this, &SPathfindingTuner::OnMaxNeighborsCommitted)
 					.MinValue(0).MaxValue(32)
 				]
@@ -611,7 +797,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAvoidanceSettingsSection()
 				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
 				[
 					SNew(SNumericEntryBox<float>)
-					.Value_Lambda([AvoidanceCDO]() -> TOptional<float> { return AvoidanceCDO ? TOptional(AvoidanceCDO->GetGridCellSize()) : TOptional<float>(); })
+					.Value_Lambda([this]() -> TOptional<float> { return ReadAvoidanceSetting(&UAvoidanceSubsystem::GetGridCellSize); })
 					.OnValueCommitted(this, &SPathfindingTuner::OnGridCellSizeCommitted)
 				]
 			]
@@ -628,7 +814,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAvoidanceSettingsSection()
 				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
 				[
 					SNew(SNumericEntryBox<float>)
-					.Value_Lambda([AvoidanceCDO]() -> TOptional<float> { return AvoidanceCDO ? TOptional(AvoidanceCDO->GetSymmetryBreakingRangeMultiplier()) : TOptional<float>(); })
+					.Value_Lambda([this]() -> TOptional<float> { return ReadAvoidanceSetting(&UAvoidanceSubsystem::GetSymmetryBreakingRangeMultiplier); })
 					.OnValueCommitted(this, &SPathfindingTuner::OnSymmetryBreakingRangeMultiplierCommitted)
 				]
 			]
@@ -645,7 +831,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAvoidanceSettingsSection()
 				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
 				[
 					SNew(SNumericEntryBox<int32>)
-					.Value_Lambda([AvoidanceCDO]() -> TOptional<int32> { return AvoidanceCDO ? TOptional(AvoidanceCDO->GetSolverIterations()) : TOptional<int32>(); })
+					.Value_Lambda([this]() -> TOptional<int32> { return ReadAvoidanceSetting(&UAvoidanceSubsystem::GetSolverIterations); })
 					.OnValueCommitted(this, &SPathfindingTuner::OnSolverIterationsCommitted)
 					.MinValue(1).MaxValue(20)
 				]
@@ -663,7 +849,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAvoidanceSettingsSection()
 				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
 				[
 					SNew(SNumericEntryBox<float>)
-					.Value_Lambda([AvoidanceCDO]() -> TOptional<float> { return AvoidanceCDO ? TOptional(AvoidanceCDO->GetSideBiasMagnitude()) : TOptional<float>(); })
+					.Value_Lambda([this]() -> TOptional<float> { return ReadAvoidanceSetting(&UAvoidanceSubsystem::GetSideBiasMagnitude); })
 					.OnValueCommitted(this, &SPathfindingTuner::OnSideBiasMagnitudeCommitted)
 				]
 			]
@@ -680,7 +866,7 @@ TSharedRef<SWidget> SPathfindingTuner::BuildAvoidanceSettingsSection()
 				+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
 				[
 					SNew(SNumericEntryBox<float>)
-					.Value_Lambda([AvoidanceCDO]() -> TOptional<float> { return AvoidanceCDO ? TOptional(AvoidanceCDO->GetInterpSpeed()) : TOptional<float>(); })
+					.Value_Lambda([this]() -> TOptional<float> { return ReadAvoidanceSetting(&UAvoidanceSubsystem::GetInterpSpeed); })
 					.OnValueCommitted(this, &SPathfindingTuner::OnInterpSpeedCommitted)
 				]
 			]
@@ -911,45 +1097,30 @@ FText SPathfindingTuner::GetSelectedVolumeDisplayText() const
 	return FText::Format(LOCTEXT("MultipleVolumesSelected", "{0} Volumes Selected"), FText::AsNumber(NumSelected));
 }
 
-FText SPathfindingTuner::GetBakedDataSaveDirectoryAsText() const
+bool SPathfindingTuner::IsAnySelectedVolumeBakeStale(TArray<FText>* OutReasons) const
 {
-	TArray<AOctreeVoxelVolume*> SelectedVolumes;
+	UPathfindingEditorSubsystem* EditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UPathfindingEditorSubsystem>() : nullptr;
+	if (!EditorSubsystem)
+	{
+		return false;
+	}
+
+	bool bAnyStale = false;
 	for (const TWeakObjectPtr<AActor>& WeakActor : LastSelectedActors)
 	{
-		if (AOctreeVoxelVolume* Volume = Cast<AOctreeVoxelVolume>(WeakActor.Get()))
+		if (const AOctreeVoxelVolume* Volume = Cast<AOctreeVoxelVolume>(WeakActor.Get()))
 		{
-			SelectedVolumes.Add(Volume);
-		}
-	}
-
-	TOptional<FString> CommonPath = GetCommonPropertyValue<AOctreeVoxelVolume, FString>(SelectedVolumes,
-		[](const AOctreeVoxelVolume* V) { return V->BakedDataSaveDirectory.Path; });
-
-	return CommonPath.IsSet() ? FText::FromString(CommonPath.GetValue()) : FText();
-}
-
-void SPathfindingTuner::OnBakedDataSaveDirectoryTextCommitted(const FText& InText, ETextCommit::Type CommitInfo)
-{
-	if (CommitInfo == ETextCommit::OnEnter || CommitInfo == ETextCommit::OnUserMovedFocus)
-	{
-		TArray<AOctreeVoxelVolume*> SelectedVolumes;
-		for (const TWeakObjectPtr<AActor>& WeakActor : LastSelectedActors)
-		{
-			if (AOctreeVoxelVolume* Volume = Cast<AOctreeVoxelVolume>(WeakActor.Get()))
+			if (EditorSubsystem->IsVolumeBakeStale(Volume, OutReasons))
 			{
-				SelectedVolumes.Add(Volume);
+				bAnyStale = true;
+				if (!OutReasons)
+				{
+					break;
+				}
 			}
 		}
-
-		SetCommonPropertyValue<AOctreeVoxelVolume, FString>(SelectedVolumes, InText.ToString(),
-		                                                    LOCTEXT("SetSaveDirectoryTransaction",
-		                                                            "Set Baked Data Save Directory"),
-		                                                    [](AOctreeVoxelVolume* V, const FString& Path)
-		                                                    {
-			                                                    V->BakedDataSaveDirectory.Path = Path;
-			                                                    V->MarkPackageDirty();
-		                                                    });
 	}
+	return bAnyStale;
 }
 
 FString SPathfindingTuner::GetObstacleProfilePath() const
@@ -1031,36 +1202,6 @@ FText SPathfindingTuner::GetObstacleProfileFullPathAsText() const
 	}
 
 	return FText::FromString(FPaths::GetPath(CommonProfile.GetValue()->GetPathName()));
-}
-
-FReply SPathfindingTuner::OnBrowseButtonClicked()
-{
-	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
-	if (DesktopPlatform)
-	{
-		const void* ParentWindowHandle = FSlateApplication::Get().GetActiveTopLevelWindow()->GetNativeWindow()->
-		                                                          GetOSWindowHandle();
-		FString SelectedDirectory;
-
-		if (DesktopPlatform->OpenDirectoryDialog(ParentWindowHandle, TEXT("Select Save Directory"),
-		                                         FPaths::ProjectContentDir(), SelectedDirectory))
-		{
-			const FString FullContentDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir());
-			if (!SelectedDirectory.StartsWith(FullContentDir))
-			{
-				FMessageDialog::Open(EAppMsgType::Ok,
-				                     LOCTEXT("InvalidPathMsg",
-				                             "Please select a directory inside the project's Content folder."));
-				return FReply::Handled();
-			}
-
-			FString RelativePath = SelectedDirectory;
-			FPaths::MakePathRelativeTo(RelativePath, *FullContentDir);
-
-			OnBakedDataSaveDirectoryTextCommitted(FText::FromString(RelativePath), ETextCommit::OnEnter);
-		}
-	}
-	return FReply::Handled();
 }
 
 TOptional<float> SPathfindingTuner::GetVoxelExtent() const
@@ -1145,83 +1286,6 @@ void SPathfindingTuner::OnMapSizeSelectionChanged(TSharedPtr<int32> NewSelection
 																   V->RerunConstructionScripts();
 															   });
 	}
-}
-
-//=================================================================================================
-// Baked Data Settings
-//=================================================================================================
-
-FString SPathfindingTuner::GetBakedOctreeDataPath() const
-{
-	TArray<AOctreeVoxelVolume*> SelectedVolumes;
-	for (const TWeakObjectPtr<AActor>& WeakActor : LastSelectedActors)
-	{
-		if (AOctreeVoxelVolume* Volume = Cast<AOctreeVoxelVolume>(WeakActor.Get()))
-		{
-			SelectedVolumes.Add(Volume);
-		}
-	}
-
-	TOptional<UOctreeDataAsset*> CommonAsset = GetCommonPropertyValue<AOctreeVoxelVolume, UOctreeDataAsset*>(
-		SelectedVolumes,
-		[](const AOctreeVoxelVolume* V) { return V->GetBakedOctreeData().Get(); });
-
-	return (CommonAsset.IsSet() && CommonAsset.GetValue()) ? CommonAsset.GetValue()->GetPathName() : FString();
-}
-
-void SPathfindingTuner::OnBakedOctreeDataChanged(const FAssetData& AssetData)
-{
-	UOctreeDataAsset* NewDataAsset = Cast<UOctreeDataAsset>(AssetData.GetAsset());
-	
-	TArray<AOctreeVoxelVolume*> SelectedVolumes;
-	for (const TWeakObjectPtr<AActor>& WeakActor : LastSelectedActors)
-	{
-		if (AOctreeVoxelVolume* Volume = Cast<AOctreeVoxelVolume>(WeakActor.Get()))
-		{
-			SelectedVolumes.Add(Volume);
-		}
-	}
-
-	SetCommonPropertyValue<AOctreeVoxelVolume, UOctreeDataAsset*>(SelectedVolumes, NewDataAsset,
-	                                                              LOCTEXT("SetBakedDataTransaction",
-	                                                                      "Set Baked Octree Data"),
-	                                                              [](AOctreeVoxelVolume* V, UOctreeDataAsset* Asset)
-	                                                              {
-		                                                              V->SetBakedOctreeData(Asset);
-		                                                              V->MarkPackageDirty();
-	                                                              });
-}
-
-FText SPathfindingTuner::GetBakedDataFullPathAsText() const
-{
-	TArray<AOctreeVoxelVolume*> SelectedVolumes;
-	for (const TWeakObjectPtr<AActor>& WeakActor : LastSelectedActors)
-	{
-		if (AOctreeVoxelVolume* Volume = Cast<AOctreeVoxelVolume>(WeakActor.Get()))
-		{
-			SelectedVolumes.Add(Volume);
-		}
-	}
-
-	TOptional<UOctreeDataAsset*> CommonAsset = GetCommonPropertyValue<AOctreeVoxelVolume, UOctreeDataAsset*>
-		(SelectedVolumes, [](const AOctreeVoxelVolume* V) { return V->GetBakedOctreeData().Get(); });
-
-	if (SelectedVolumes.Num() == 0)
-	{
-		return LOCTEXT("NonePath", "None");
-	}
-
-	if (!CommonAsset.IsSet())
-	{
-		return LOCTEXT("MultipleValues", "Multiple Values");
-	}
-
-	if (!CommonAsset.GetValue())
-	{
-		return LOCTEXT("NonePath", "None");
-	}
-
-	return FText::FromString(FPaths::GetPath(CommonAsset.GetValue()->GetPathName()));
 }
 
 //=================================================================================================
@@ -1367,27 +1431,31 @@ void SPathfindingTuner::OnDrawDebugPathChanged(ECheckBoxState NewState)
 // Agent Settings
 //=================================================================================================
 
+UAvoidanceSubsystem* SPathfindingTuner::GetPIEAvoidanceSubsystem() const
+{
+	if (!GEngine) return nullptr;
+
+	for (const FWorldContext& Context : GEngine->GetWorldContexts())
+	{
+		if (Context.WorldType == EWorldType::PIE && Context.World())
+		{
+			return Context.World()->GetSubsystem<UAvoidanceSubsystem>();
+		}
+	}
+	return nullptr;
+}
+
 void SPathfindingTuner::OnbAvoidanceComitted(ECheckBoxState NewState)
 {
-	if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
-	{
-		const bool bUseAvoidance = (NewState == ECheckBoxState::Checked);
-		AvoidanceCDO->SetbUseAvoidance(bUseAvoidance);
-		AvoidanceCDO->SaveConfig();
-		Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
-	}
+	const bool bUseAvoidance = (NewState == ECheckBoxState::Checked);
+	ApplyAvoidanceSetting(bUseAvoidance, &UAvoidanceSubsystem::SetbUseAvoidance);
 }
 
 void SPathfindingTuner::OnTimeHorizonCommitted(float NewValue, ETextCommit::Type CommitType)
 {
     if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
     {
-        if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
-        {
-            AvoidanceCDO->SetTimeHorizon(NewValue);
-            AvoidanceCDO->SaveConfig();
-            Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
-        }
+        ApplyAvoidanceSetting(NewValue, &UAvoidanceSubsystem::SetTimeHorizon);
     }
 }
 
@@ -1395,12 +1463,7 @@ void SPathfindingTuner::OnMaxNeighborsCommitted(int32 NewValue, ETextCommit::Typ
 {
     if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
     {
-        if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
-        {
-            AvoidanceCDO->SetMaxNeighbors(NewValue);
-            AvoidanceCDO->SaveConfig();
-            Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
-        }
+        ApplyAvoidanceSetting(NewValue, &UAvoidanceSubsystem::SetMaxNeighbors);
     }
 }
 
@@ -1408,12 +1471,7 @@ void SPathfindingTuner::OnGridCellSizeCommitted(float NewValue, ETextCommit::Typ
 {
     if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
     {
-        if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
-        {
-            AvoidanceCDO->SetGridCellSize(NewValue);
-            AvoidanceCDO->SaveConfig();
-            Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
-        }
+        ApplyAvoidanceSetting(NewValue, &UAvoidanceSubsystem::SetGridCellSize);
     }
 }
 
@@ -1421,12 +1479,7 @@ void SPathfindingTuner::OnSymmetryBreakingRangeMultiplierCommitted(float NewValu
 {
     if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
     {
-        if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
-        {
-            AvoidanceCDO->SetSymmetryBreakingRangeMultiplier(NewValue);
-            AvoidanceCDO->SaveConfig();
-            Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
-        }
+        ApplyAvoidanceSetting(NewValue, &UAvoidanceSubsystem::SetSymmetryBreakingRangeMultiplier);
     }
 }
 
@@ -1434,12 +1487,7 @@ void SPathfindingTuner::OnSolverIterationsCommitted(int32 NewValue, ETextCommit:
 {
     if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
     {
-        if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
-        {
-            AvoidanceCDO->SetSolverIterations(NewValue);
-            AvoidanceCDO->SaveConfig();
-            Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
-        }
+        ApplyAvoidanceSetting(NewValue, &UAvoidanceSubsystem::SetSolverIterations);
     }
 }
 
@@ -1447,12 +1495,7 @@ void SPathfindingTuner::OnSideBiasMagnitudeCommitted(float NewValue, ETextCommit
 {
     if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
     {
-        if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
-        {
-            AvoidanceCDO->SetSideBiasMagnitude(NewValue);
-            AvoidanceCDO->SaveConfig();
-            Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
-        }
+        ApplyAvoidanceSetting(NewValue, &UAvoidanceSubsystem::SetSideBiasMagnitude);
     }
 }
 
@@ -1460,24 +1503,14 @@ void SPathfindingTuner::OnInterpSpeedCommitted(float NewValue, ETextCommit::Type
 {
     if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus)
     {
-        if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
-        {
-            AvoidanceCDO->SetInterpSpeed(NewValue);
-            AvoidanceCDO->SaveConfig();
-            Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
-        }
+        ApplyAvoidanceSetting(NewValue, &UAvoidanceSubsystem::SetInterpSpeed);
     }
 }
 
 void SPathfindingTuner::OnbAvoidanceVelocityDebugComitted(ECheckBoxState NewState)
 {
-	if (UAvoidanceSubsystem* AvoidanceCDO = GetMutableDefault<UAvoidanceSubsystem>())
-	{
-		const bool bUseAvoidance = (NewState == ECheckBoxState::Checked);
-		AvoidanceCDO->SetbShowVelocityDebugLine(bUseAvoidance);
-		AvoidanceCDO->SaveConfig();
-		Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
-	}
+	const bool bShow = (NewState == ECheckBoxState::Checked);
+	ApplyAvoidanceSetting(bShow, &UAvoidanceSubsystem::SetbShowVelocityDebugLine);
 }
 
 bool SPathfindingTuner::AreOnlyAgentsSelected() const
@@ -1527,44 +1560,143 @@ FReply SPathfindingTuner::OnBakeButtonClicked()
 		return FReply::Handled();
 	}
 
-	for (AOctreeVoxelVolume* Volume : SelectedVolumes)
+	UPathfindingEditorSubsystem* EditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UPathfindingEditorSubsystem>() : nullptr;
+	if (!EditorSubsystem)
 	{
-		if (Volume->BakedDataSaveDirectory.Path.IsEmpty())
-		{
-			FText ErrorMsg = FText::Format(
-				LOCTEXT("BakePathNotSetForOne", "Cannot start baking. 'Baked Data Save Directory' is not set for {0}."),
-				FText::FromString(Volume->GetActorLabel()));
-			ShowWarningMessage(ErrorMsg);
-			return FReply::Handled();
-		}
+		ShowWarningMessage(LOCTEXT("NoEditorSubsystem", "Pathfinding Editor Subsystem not found. Cannot start bake."));
+		return FReply::Handled();
 	}
 
-	if (SelectedVolumes.Num() > 1)
+	TArray<FNavVolumeBakeIssue> Issues;
+	if (!EditorSubsystem->ValidateVolumesForBake(SelectedVolumes, Issues))
 	{
-		FText ConfirmationMessage = FText::Format(
-			LOCTEXT("MultiBakeConfirmation",
-			        "You have selected {0} volumes to bake.\nThis process could take a long time and may cause the editor to become unresponsive.\n\nDo you want to continue?"),
-			FText::AsNumber(SelectedVolumes.Num())
-		);
+		const FNavVolumeBakeIssue& FirstIssue = Issues[0];
+		const FString VolumeLabel = FirstIssue.Volume.IsValid() ? FirstIssue.Volume->GetActorLabel() : TEXT("Invalid Volume");
+		ShowWarningMessage(FText::Format(
+			LOCTEXT("SelectedBakeValidationFailed", "Cannot start baking. {0}: {1}"),
+			FText::FromString(VolumeLabel),
+			FirstIssue.Message));
+		return FReply::Handled();
+	}
+
+	UWorld* BakeWorld = SelectedVolumes[0] ? SelectedVolumes[0]->GetWorld() : GetEditorWorld();
+	const FNavBakeCostEstimate Estimate = EditorSubsystem->EstimateBakeCost(BakeWorld, SelectedVolumes, false);
+	if (SelectedVolumes.Num() > 1 || Estimate.bLikelyExpensive)
+	{
+		const FText ConfirmationMessage = FText::Format(
+			LOCTEXT("BakeConfirmationWithEstimate",
+				"{0}\n\nThis bake may take a long time or create large nav data assets.\n\nDo you want to continue?"),
+			EditorSubsystem->FormatBakeCostEstimate(Estimate));
 
 		if (FMessageDialog::Open(EAppMsgType::YesNo, ConfirmationMessage) != EAppReturnType::Yes)
 		{
 			return FReply::Handled();
 		}
 	}
-	
-	if (UPathfindingEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UPathfindingEditorSubsystem>())
+
+	EditorSubsystem->BakeSpecificVolumes(SelectedVolumes);
+	FNotificationInfo NotifyInfo(FText::FromString(TEXT("Bake Complete!")));
+	NotifyInfo.bUseLargeFont = true;
+	NotifyInfo.FadeOutDuration = 4.5f;
+	FSlateNotificationManager::Get().AddNotification(NotifyInfo);
+
+	return FReply::Handled();
+}
+
+FReply SPathfindingTuner::OnBakeLoadedVolumesButtonClicked()
+{
+	UWorld* World = GetEditorWorld();
+	if (!World)
 	{
-		EditorSubsystem->BakeSpecificVolumes(SelectedVolumes);
-		FNotificationInfo NotifyInfo(FText::FromString(TEXT("Bake Complete!")));
-		NotifyInfo.bUseLargeFont = true;
-		NotifyInfo.FadeOutDuration = 4.5f;
-		FSlateNotificationManager::Get().AddNotification(NotifyInfo);
+		ShowWarningMessage(LOCTEXT("NoEditorWorldForLoadedBake", "Editor world not found. Cannot bake loaded volumes."));
+		return FReply::Handled();
 	}
-	else
+
+	UPathfindingEditorSubsystem* EditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UPathfindingEditorSubsystem>() : nullptr;
+	if (!EditorSubsystem)
 	{
-		ShowWarningMessage(LOCTEXT("NoEditorSubsystem", "Pathfinding Editor Subsystem not found. Cannot start bake."));
+		ShowWarningMessage(LOCTEXT("NoEditorSubsystemForLoadedBake", "Pathfinding Editor Subsystem not found. Cannot bake loaded volumes."));
+		return FReply::Handled();
 	}
+
+	TArray<AOctreeVoxelVolume*> LoadedVolumes;
+	EditorSubsystem->GetLoadedOctreeVolumes(World, LoadedVolumes);
+	if (LoadedVolumes.IsEmpty())
+	{
+		ShowWarningMessage(LOCTEXT("NoLoadedVolumesForBake", "No loaded Octree Voxel Volumes were found in the current editor world."));
+		return FReply::Handled();
+	}
+
+	TArray<AOctreeVoxelVolume*> VolumesNeedingBake;
+	EditorSubsystem->GetVolumesNeedingBake(LoadedVolumes, VolumesNeedingBake);
+	if (VolumesNeedingBake.IsEmpty())
+	{
+		ShowWarningMessage(LOCTEXT("NoStaleLoadedVolumesForBake", "All loaded Octree Voxel Volumes are up to date."));
+		return FReply::Handled();
+	}
+
+	TArray<FNavVolumeBakeIssue> Issues;
+	if (!EditorSubsystem->ValidateVolumesForBake(VolumesNeedingBake, Issues))
+	{
+		const FNavVolumeBakeIssue& FirstIssue = Issues[0];
+		const FString VolumeLabel = FirstIssue.Volume.IsValid() ? FirstIssue.Volume->GetActorLabel() : TEXT("Invalid Volume");
+		ShowWarningMessage(FText::Format(
+			LOCTEXT("LoadedBakeValidationFailed", "Cannot start loaded-volume bake. {0}: {1}"),
+			FText::FromString(VolumeLabel),
+			FirstIssue.Message));
+		return FReply::Handled();
+	}
+
+	const FNavBakeCostEstimate Estimate = EditorSubsystem->EstimateBakeCost(World, LoadedVolumes, true);
+	const FText ConfirmationMessage = FText::Format(
+		LOCTEXT("LoadedBakeConfirmation",
+			"{0}\n\nIn World Partition maps this only includes volumes from currently loaded cells.\n\nDo you want to continue?"),
+		EditorSubsystem->FormatBakeCostEstimate(Estimate));
+	if (FMessageDialog::Open(EAppMsgType::YesNo, ConfirmationMessage) != EAppReturnType::Yes)
+	{
+		return FReply::Handled();
+	}
+
+	EditorSubsystem->BakeLoadedVolumes(World);
+
+	FNotificationInfo NotifyInfo(FText::Format(
+		LOCTEXT("LoadedBakeCompleteNotification", "Bake Complete: {0} loaded volumes"),
+		FText::AsNumber(VolumesNeedingBake.Num())));
+	NotifyInfo.bUseLargeFont = true;
+	NotifyInfo.FadeOutDuration = 4.5f;
+	FSlateNotificationManager::Get().AddNotification(NotifyInfo);
+
+	return FReply::Handled();
+}
+
+FReply SPathfindingTuner::OnSelectLoadedVolumesButtonClicked()
+{
+	UWorld* World = GetEditorWorld();
+	UPathfindingEditorSubsystem* EditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UPathfindingEditorSubsystem>() : nullptr;
+	if (!World || !EditorSubsystem)
+	{
+		ShowWarningMessage(LOCTEXT("CannotSelectLoadedVolumes", "Editor world or Pathfinding Editor Subsystem is not available."));
+		return FReply::Handled();
+	}
+
+	TArray<AOctreeVoxelVolume*> LoadedVolumes;
+	EditorSubsystem->GetLoadedOctreeVolumes(World, LoadedVolumes);
+	if (LoadedVolumes.IsEmpty())
+	{
+		ShowWarningMessage(LOCTEXT("NoLoadedVolumesToSelect", "No loaded Octree Voxel Volumes were found in the current editor world."));
+		return FReply::Handled();
+	}
+
+	GEditor->SelectNone(false, true, false);
+	for (AOctreeVoxelVolume* Volume : LoadedVolumes)
+	{
+		if (IsValid(Volume))
+		{
+			GEditor->SelectActor(Volume, true, false);
+		}
+	}
+	GEditor->NoteSelectionChange();
+	OnActorSelectionChanged();
 
 	return FReply::Handled();
 }
@@ -1658,6 +1790,15 @@ void SPathfindingTuner::OnBakedDataCategoryExpansionChanged(bool bIsExpanded)
 	}
 }
 
+void SPathfindingTuner::OnWorldPartitionWorkflowExpansionChanged(bool bIsExpanded)
+{
+	if (UPathfindingTunerSettings* TunerSettings = GetMutableDefault<UPathfindingTunerSettings>())
+	{
+		TunerSettings->bIsWorldBakeCategoryExpanded = bIsExpanded;
+		TunerSettings->SaveConfig();
+	}
+}
+
 void SPathfindingTuner::OnDebugSettingsCategoryExpansionChanged(bool bIsExpanded)
 {
 	if (UPathfindingTunerSettings* TunerSettings = GetMutableDefault<UPathfindingTunerSettings>())
@@ -1674,6 +1815,57 @@ void SPathfindingTuner::OnAgentDebugCategoryExpansionChanged(bool bIsExpanded)
 		TunerSettings->bAgentDebugSettingsExpanded = bIsExpanded;
 		TunerSettings->SaveConfig();
 	}
+}
+
+UWorld* SPathfindingTuner::GetEditorWorld() const
+{
+	if (!GEditor)
+	{
+		return nullptr;
+	}
+
+	return GEditor->GetEditorWorldContext().World();
+}
+
+bool SPathfindingTuner::IsWorldPartitionEnabled() const
+{
+	const UWorld* World = GetEditorWorld();
+	return World && World->GetWorldPartition() != nullptr;
+}
+
+FLoadedNavVolumeSummary SPathfindingTuner::GetLoadedNavVolumeSummary() const
+{
+	UWorld* World = GetEditorWorld();
+	const UPathfindingEditorSubsystem* EditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UPathfindingEditorSubsystem>() : nullptr;
+	if (!World || !EditorSubsystem)
+	{
+		return FLoadedNavVolumeSummary();
+	}
+
+	return EditorSubsystem->GetLoadedVolumeSummary(World);
+}
+
+FText SPathfindingTuner::GetLoadedNavVolumeSummaryText() const
+{
+	const FLoadedNavVolumeSummary Summary = GetLoadedNavVolumeSummary();
+	return FText::Format(
+		LOCTEXT("LoadedNavVolumeSummary", "Loaded Volumes: {0} | Missing Data: {1} | Stale: {2} | Invalid: {3}"),
+		FText::AsNumber(Summary.Total),
+		FText::AsNumber(Summary.MissingBakeData),
+		FText::AsNumber(Summary.Stale),
+		FText::AsNumber(Summary.Invalid));
+}
+
+FText SPathfindingTuner::GetLoadedNavVolumeDetailText() const
+{
+	if (IsWorldPartitionEnabled())
+	{
+		return LOCTEXT("WorldPartitionLoadedVolumeDetail",
+			"World Partition is enabled. These actions only operate on Octree Voxel Volumes in currently loaded cells.");
+	}
+
+	return LOCTEXT("StandardWorldLoadedVolumeDetail",
+		"World Partition is not enabled. These actions operate on all loaded Octree Voxel Volumes in the current editor world.");
 }
 
 bool SPathfindingTuner::IsPIEActive() const

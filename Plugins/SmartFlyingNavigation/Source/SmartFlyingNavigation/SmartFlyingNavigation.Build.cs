@@ -38,6 +38,8 @@ public class SmartFlyingNavigation : ModuleRules
 				"InputCore",
 				"Projects",
                 "Landscape",
+                "Slate",
+                "SlateCore",
             }
 		);
 		

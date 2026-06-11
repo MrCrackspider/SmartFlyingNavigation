@@ -1,4 +1,4 @@
-﻿// Copyright © 2025 TeamHamDev. All Rights Reserved.
+// Copyright © 2025 TeamHamDev. All Rights Reserved.
 
 #pragma once
 
@@ -7,41 +7,6 @@
 #include "AStarStrategy.generated.h"
 
 struct FPathfindingRequest;
-struct FOctreePathfindingData;
-struct FAstarPathNode;
-
-class FAstarPathfinder
-{
-public:
-	FAstarPathfinder(const FOctreePathfindingData& InOctreeData, int32 InStartIndex, int32 InEndIndex,
-								   const FVector& InOriginalStartLocation, const FVector& InEffectiveStartLocation,
-								   const FVector& InEndLocation, float InAgentRadius,
-								   TNodeMemoryPool<FAstarPathNode>& InMemoryPool);
-	
-	EPathfindingResult FindPath(TArray<FVector>& OutPath);
-
-	bool HasClearPath(const FVector& Start, const FVector& End) const;
-private:
-	void IdentifySuccessors(FAstarPathNode* Node, TArray<FAstarPathNode*>& OutSuccessors);
-	bool TryToRepairPartialPath(FAstarPathNode* PartialEndNode, TArray<FVector>& OutPath);
-	int64 CalculateBoundHeuristic(int32 NodeIndex) const;
-	int64 GetMoveCost(const FVector& A, const FVector& B) const;
-	void ReconstructAndSmoothPath(FAstarPathNode* EndNode, TArray<FVector>& OutPath);
-	const FOctreePathfindingData& OctreeData;
-	const int32 StartNodeIndex;
-	const int32 GoalNodeIndex;
-	const float AgentRadius;
-
-	const FVector OriginalStartLocation;
-	const FVector EffectiveStartLocation;
-
-	const FVector ActualGoalLocation;
-	TNodeMemoryPool<FAstarPathNode>& MemoryPool;
-
-	TArray<FAstarPathNode*> OpenSet;
-	TMap<int32, FAstarPathNode*> OpenSetLookup; // Key: NodeIndex
-	TMap<int32, FAstarPathNode*> ClosedSet; // Key: NodeIndex
-};
 
 UCLASS()
 class SMARTFLYINGNAVIGATION_API UAStarStrategy : public UPathfindingStrategy
@@ -66,4 +31,16 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, Category = "A* | Fallback Search", meta=(ClampMin="1"))
 	int32 NearbyGoalSearchIterations = 100;
+
+	/**
+	 * Extra cost multiplier applied to moves that hug obstacles (0 disables).
+	 * Requires a baked distance field; with weight W, a move with zero clearance
+	 * costs up to (1 + W) times its distance.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "A* | Clearance", meta=(ClampMin="0.0", ClampMax="10.0"))
+	float ClearancePenaltyWeight = 1.0f;
+
+	/** Clearance at or above AgentRadius * this multiplier incurs no penalty. */
+	UPROPERTY(EditDefaultsOnly, Category = "A* | Clearance", meta=(ClampMin="1.0", ClampMax="10.0"))
+	float PreferredClearanceMultiplier = 2.0f;
 };

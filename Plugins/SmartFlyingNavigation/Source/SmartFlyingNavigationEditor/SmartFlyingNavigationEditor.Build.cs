@@ -24,7 +24,7 @@ public class SmartFlyingNavigationEditor : ModuleRules
 				"SlateCore",
 				"AssetTools",
 				"LevelEditor",    
-				"EditorStyle",
+				"AppFramework",
 				"WorkspaceMenuStructure",
 				"EditorSubsystem",
 				"PropertyEditor", 

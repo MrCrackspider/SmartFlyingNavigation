@@ -41,6 +41,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Filter Criteria")
 	TSubclassOf<UActorComponent> MarkerComponentClass;
 
+	// ── Exclude Criteria ──
+	// Actors matching any exclude criterion are always skipped, regardless of include logic.
+
+	/** Collision channels to always exclude from baking. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Exclude Criteria")
+	TArray<TEnumAsByte<ECollisionChannel>> ExcludeChannels;
+
+	/** Actor tags that mark an actor for exclusion. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Exclude Criteria")
+	TArray<FName> ExcludeTags;
+
+	/** If an actor has this component, it will be excluded from baking. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Exclude Criteria")
+	TSubclassOf<UActorComponent> ExcludeMarkerComponentClass;
+
 	UFUNCTION(BlueprintCallable, Category="Filter")
 	bool DoesActorMatch(const AActor* InActor, const UPrimitiveComponent* InPrimitiveComponent) const;
 };

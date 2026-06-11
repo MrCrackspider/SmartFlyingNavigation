@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
-  "Version": 1,
-  "VersionName": "1.0.3",
+  "Version": 2,
+  "VersionName": "2.0.0",
   "FriendlyName": "SmartFlyingNavigation",
   "Description": "This is SmartFlyingNavigation",
   "Category": "Other",
@@ -11,7 +11,7 @@
   "FabURL": "com.epicgames.launcher://ue/Fab/product//5922d422-4b2b-4a0a-b33a-5caca08ce2be",
   "MarketplaceURL": "",
   "SupportURL": "",
-  "EngineVersion": "5.6.0",
+  "EngineVersion": "5.3.0",
   "SupportedEngineVersions": [
     "5.3",
     "5.4",
@@ -29,7 +29,8 @@
       "LoadingPhase": "Default",
       "PlatformAllowList": [
         "Win64",
-        "Mac"
+        "Mac",
+        "Android"
       ],
       "PlatformDenyList": [
       ]
@@ -52,7 +53,14 @@
   "Plugins": [
     {
       "Name": "EditorScriptingUtilities",
-      "Enabled": true
+      "Enabled": true,
+      "TargetAllowList": [
+        "Editor"
+      ],
+      "SupportedTargetPlatforms": [
+        "Win64",
+        "Mac"
+      ]
     }
   ]
 } 

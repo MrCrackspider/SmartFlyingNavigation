@@ -4,7 +4,6 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Component/DynamicObstacleComponent.h"
 #include "Engine/OverlapResult.h"
 #include "WorldCollision.h"
 #include "VoxelVolumeBase.generated.h"
@@ -192,8 +191,23 @@ public:
 	 * @brief The thickness of the debug lines.
 	 */
 
+	/**
+	 * @brief HISM component for visualizing solid nodes.
+	 * NOTE: exists on all platforms (empty at runtime) so cooked Blueprint subclasses
+	 * that reference the inherited component can load outside the editor.
+	 */
+	UPROPERTY()
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DebugSolidNodesComponent;
+
+	/**
+	 * @brief HISM component for visualizing mixed (partially filled) nodes.
+	 * NOTE: exists on all platforms (empty at runtime) — see DebugSolidNodesComponent.
+	 */
+	UPROPERTY()
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DebugMixedNodesComponent;
+
 #if WITH_EDITORONLY_DATA
-	
+
 	UPROPERTY(EditAnywhere, Category = "Voxel Volume|Debug")
 	float DebugLineWidth;
 	/**
@@ -201,20 +215,8 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel|Debug")
 	TSoftObjectPtr<UStaticMesh> DebugMeshAsset;
-	
-	/**
-	 * @brief Hierarchical Instanced Static Mesh Component for visualizing solid nodes.
-	 */
-	UPROPERTY()
-	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DebugSolidNodesComponent;
-	
-	/**
-	 * @brief Hierarchical Instanced Static Mesh Component for visualizing mixed (partially filled) nodes.
-	 */
-	UPROPERTY()
-	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DebugMixedNodesComponent;
 
-	
+
 	/**
 	 * @brief Soft path to the material for visualizing solid nodes (configurable in the editor).
 	 */
@@ -262,10 +264,4 @@ protected:
 	 * @brief Flag to prevent concurrent updates to the visualization.
 	 */
 	bool bIsUpdatingVisualization = false;
-
-	/**
-	 * @brief The set of dynamic obstacle components currently registered with this volume.
-	 */
-	UPROPERTY()
-	TSet<TObjectPtr<UDynamicObstacleComponent>> RegisteredObstacles;
 };

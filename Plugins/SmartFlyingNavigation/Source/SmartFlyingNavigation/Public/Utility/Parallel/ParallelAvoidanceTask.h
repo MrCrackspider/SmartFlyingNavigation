@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Async/AsyncWork.h"
-#include "Subsystem/AvoidanceSubsystem.h" 
+#include "Utility/Parallel/AvoidanceTypes.h"
 
 class FParallelAvoidanceTask : public FNonAbandonableTask
 {
@@ -18,7 +18,8 @@ public:
         const int32 InMaxNeighbors,
         const float InGridCellSize,
         const float InSymmetryBreakingRangeMultiplier,
-        const float InSideBiasMagnitude
+        const float InSideBiasMagnitude,
+        TArray<FDynamicObstacleThreadData>&& InDynamicObstacles = TArray<FDynamicObstacleThreadData>()
     );
 
     void DoWork();
@@ -40,4 +41,5 @@ private:
     const float GridCellSize;
     const float SymmetryBreakingRangeMultiplier;
     const float SideBiasMagnitude;
+    TArray<FDynamicObstacleThreadData> DynamicObstacles;
 };

@@ -8,23 +8,43 @@
 
 class AOctreeVoxelVolume;
 class UPathfindingTunerSettings;
-class ULandscapeComponent;
+class UWorld;
+class UWorldNavigationDataAsset;
 struct FOctreeNode;
+struct FNavPortalBakeLink;
+struct FNavDistanceField;
 
 #if WITH_EDITOR
-/**
- * A temporary struct to hold the results of a single volume bake during the world bake process.
- */
-struct FWorldBakeResult
+struct FNavVolumeBakeIssue
 {
-	AOctreeVoxelVolume* Volume;
-	TArray<FOctreeNode> NodePool;
+	TWeakObjectPtr<AOctreeVoxelVolume> Volume;
+	FText Message;
+};
+
+struct FLoadedNavVolumeSummary
+{
+	int32 Total = 0;
+	int32 MissingBakeData = 0;
+	int32 Stale = 0;
+	int32 Invalid = 0;
+};
+
+struct FNavBakeCostEstimate
+{
+	int32 InputVolumeCount = 0;
+	int32 VolumesToBake = 0;
+	int32 UpToDateSkipped = 0;
+	int32 RelevantComponentCount = 0;
+	int64 TotalVoxelCount = 0;
+	int64 MaxVolumeVoxelCount = 0;
+	int64 EstimatedWorstCaseUncompressedBytes = 0;
+	bool bLikelyExpensive = false;
 };
 #endif
 
 /**
  * Manages all editor-only pathfinding operations, primarily the baking process for OctreeVoxelVolumes.
- * This subsystem centralizes the logic that was previously in SPathfindingTuner.
+ * Bake output is written exclusively into the world navigation manifest (UWorldNavigationDataAsset).
  */
 UCLASS()
 class SMARTFLYINGNAVIGATIONEDITOR_API UPathfindingEditorSubsystem : public UEditorSubsystem
@@ -36,43 +56,34 @@ public:
 	/**
 	 * Bakes a specific list of already-existing OctreeVoxelVolumes.
 	 * This is the entry point for "Bake Selected".
-	 * @param VolumesToBake The list of volumes to process.
 	 */
 	void BakeSpecificVolumes(const TArray<AOctreeVoxelVolume*>& VolumesToBake);
 
+	void BakeLoadedVolumes(UWorld* InWorld);
+
+	void GetLoadedOctreeVolumes(UWorld* InWorld, TArray<AOctreeVoxelVolume*>& OutVolumes) const;
+	void GetVolumesNeedingBake(const TArray<AOctreeVoxelVolume*>& CandidateVolumes, TArray<AOctreeVoxelVolume*>& OutVolumes) const;
+	FLoadedNavVolumeSummary GetLoadedVolumeSummary(UWorld* InWorld) const;
+	FNavBakeCostEstimate EstimateBakeCost(UWorld* InWorld, const TArray<AOctreeVoxelVolume*>& CandidateVolumes, bool bOnlyVolumesNeedingBake) const;
+	FText FormatBakeCostEstimate(const FNavBakeCostEstimate& Estimate) const;
+	bool ValidateVolumesForBake(const TArray<AOctreeVoxelVolume*>& VolumesToBake, TArray<FNavVolumeBakeIssue>& OutIssues) const;
+
 	/**
-	 * Bakes the entire world by creating a grid of volumes, baking them, and connecting portals.
-	 * This is the entry point for "Bake World".
-	 * @param TunerSettings The settings asset that defines how the world bake should operate.
+	 * Returns true when the manifest has no payload for the volume or the volume's
+	 * bake-relevant settings changed since the manifest was written.
 	 */
-	//void BakeEntireWorld(const UPathfindingTunerSettings* TunerSettings);
+	bool IsVolumeBakeStale(const AOctreeVoxelVolume* Volume, TArray<FText>* OutReasons = nullptr) const;
 
 private:
-	// --- Helper functions for the World Bake process ---
-
-	/** Deletes all previously baked OctreeVoxelVolume actors and their associated Data Assets. */
-	void CleanupPreviousAssets(UWorld* InWorld, const FString& InSavePath) const;
-
-	/** Calculates the total bounds of all static meshes and landscapes in the world to determine the bake area. */
-	bool CalculateWorldBakeBounds(UWorld* InWorld, FBox& OutBounds) const;
-
-	/** Spawns volumes in a grid, bakes their internal data, and collects the results. */
-	bool BakeAndCreateVolumesInGrid(
-		UWorld* InWorld,
-		const FBox& InWorldBounds,
-		const UPathfindingTunerSettings* InSettings,
-		TArray<FWorldBakeResult>& OutBakeResults);
-
-	/** Saves all the generated Data Assets and the level containing the new volume actors. */
-	void SaveBakedResults(const TArray<TObjectPtr<UPackage>>& InPackagesToSave, const TArray<TObjectPtr<AActor>>& InCreatedActors) const;
-
-	/** Temporarily enables collision on all landscape components to ensure they are included in the bake. */
-	void SetupLandscapeCollisions_Internal(UWorld* InWorld, TMap<ULandscapeComponent*, TEnumAsByte<ECollisionEnabled::Type>>& OutOriginalStates) const;
-
-	/** Restores the original collision settings of landscape components after the bake is complete. */
-	void RestoreLandscapeCollisions_Internal(const TMap<ULandscapeComponent*, TEnumAsByte<ECollisionEnabled::Type>>& InOriginalStates) const;
-
 	void BakeAndConnectVolumes_Internal(const TArray<AOctreeVoxelVolume*>& VolumesToProcess, UWorld* InWorld);
+	void SaveBakedDataToManifest_Internal(
+		const TArray<AOctreeVoxelVolume*>& AllRelevantVolumes,
+		const TMap<AOctreeVoxelVolume*, TArray<FOctreeNode>>& BakedVolumeData,
+		const TMap<AOctreeVoxelVolume*, TMap<int32, TArray<FNavPortalBakeLink>>>& PortalData,
+		const TMap<AOctreeVoxelVolume*, FNavDistanceField>& DistanceFields,
+		UWorld* InWorld) const;
+	int32 CountRelevantBakeComponents(UWorld* InWorld, const AOctreeVoxelVolume* Volume) const;
+	bool HasManifestPayloadForVolume(UWorld* InWorld, const AOctreeVoxelVolume* Volume) const;
 
 #endif
 };

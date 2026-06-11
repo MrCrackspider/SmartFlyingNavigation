@@ -10,7 +10,8 @@ UENUM(BlueprintType)
 enum class EPathfindingNodeType : uint8
 {
     Grid,
-    Octree
+    Octree,
+    AirwayGraph
 };
 
 struct FPathNodeMemoryPoolBase

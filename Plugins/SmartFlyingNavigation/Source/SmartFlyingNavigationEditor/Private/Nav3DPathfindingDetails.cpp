@@ -63,27 +63,9 @@ void FNav3DPathfindingDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuil
 		.ToolTip(LOCTEXT("RepathCooldown_Tooltip", "The time in seconds to wait between automatic path requests when bPeriodicRepath is enabled."));
 	
 	// --- Debugging & Tools Category ---
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, bDrawDebugPath))
-		.ToolTip(LOCTEXT("bDrawDebugPath_Tooltip", "If true, the agent's calculated path will be visualized in the world."));
+	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, DebugDraw))
+		.ToolTip(LOCTEXT("DebugDraw_Tooltip", "Debug visualization settings for the agent's calculated path."));
 
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, Duration))
-		.ToolTip(LOCTEXT("Duration_Tooltip", "How long (in seconds) the debug path visualization persists in the viewport."));
-
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, LineThickness))
-		.ToolTip(LOCTEXT("LineThickness_Tooltip", "The thickness of the debug path lines."));
-
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, BoxThickness))
-		.ToolTip(LOCTEXT("BoxThickness_Tooltip", "The thickness of the outline for the debug boxes at each waypoint."));
-
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, BoxHalfSize))
-		.ToolTip(LOCTEXT("BoxHalfSize_Tooltip", "The size of the debug boxes drawn at each waypoint."));
-
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PathColor))
-		.ToolTip(LOCTEXT("PathColor_Tooltip", "The color of the debug path lines connecting waypoints."));
-
-	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, PathPointColor))
-		.ToolTip(LOCTEXT("PathPointColor_Tooltip", "The color of the debug boxes at each waypoint."));
-	
 	// --- 상태 변수 (Read-Only) ---
 	DebuggingCategory.AddProperty(GET_MEMBER_NAME_CHECKED(UPathfindingComponent, CurrentState))
 		.ToolTip(LOCTEXT("CurrentState_Tooltip", "Read-Only: Shows the agent's current high-level behavior (e.g., Idle, FollowPath)."));
