@@ -4,7 +4,9 @@
 #include "Subsystem/OctreeNavSubsystem.h"
 #include "Component/PathfindingComponent.h"
 #include "NavCore/DynamicObstacleRegistry.h"
+#include "NavCore/NavDistanceField.h"
 #include "NavCore/SmartFlyingNavStats.h"
+#include "NavVolume/OctreeVoxelVolume.h"
 #include "GameFramework/Actor.h"
 #include "Stats/Stats.h"
 #include "Engine/Engine.h"
@@ -16,7 +18,12 @@
 
 DECLARE_CYCLE_STAT(TEXT("AvoidanceSubsystem Tick"), STAT_AvoidanceSubsystem_Tick, STATGROUP_Game);
 
-static void GenerateVoxelConstraints_ThreadSafe(const UWorld* World, const FAgentThreadData& CurrentAgent, const FVector& DesiredVelocity, TArray<FPlane>& OutConstraints, float TimeHorizon);
+static TAutoConsoleVariable<int32> CVarAvoidanceUseSdfWalls(
+    TEXT("sfn.Avoidance.UseSDFWalls"),
+    1,
+    TEXT("When 1, agent wall sliding samples the baked SDF (no physics sweep). Falls back to a collision sweep where no distance field covers the agent."),
+    ECVF_Default);
+
 static void GenerateAgentConstraints_ThreadSafe(const FAgentThreadData& CurrentAgent, const FVector& ActualPreferredVelocity, const TArray<const FAgentThreadData*>& NearbyAgents, TArray<FPlane>& OutConstraints, float TimeHorizon);
 static FVector CalculateSymmetryBreakingVelocity_ThreadSafe(const FAgentThreadData& CurrentAgent, const FVector& PreferredVelocity, const TArray<const FAgentThreadData*>& NearbyAgents, float SymmetryBreakingRangeMultiplier, float SideBiasMagnitude);
 
@@ -181,18 +188,26 @@ void UAvoidanceSubsystem::Tick(float DeltaTime)
                 const FVector AgentLocation = Agent->GetOwner()->GetActorLocation();
                 const FVector MoveDelta = FinalVelocity * DeltaTime;
 
-                if (!Agent->bExecutorHandlesCollision)
+                if (!Agent->bExecutorHandlesCollision && MoveDelta.SizeSquared() > KINDA_SMALL_NUMBER)
                 {
                     // Use AgentRadius (physical size) for collision, not AvoidanceRadius (ORCA buffer).
-                FCollisionShape OverlapSphere = FCollisionShape::MakeSphere(Agent->GetAgentRadius());
-                    FCollisionQueryParams OverlapParams(TEXT("PenetrationCheck"), false);
-                    if (Agent->GetOwner())
+                    const float AgentRadius = Agent->GetAgentRadius();
+
+                    bool bHandledBySdf = false;
+                    if (CVarAvoidanceUseSdfWalls.GetValueOnGameThread() != 0)
                     {
-                        OverlapParams.AddIgnoredActor(Agent->GetOwner());
+                        bHandledBySdf = ApplySdfWallSlide(AgentLocation, AgentRadius, DeltaTime, FinalVelocity);
                     }
 
-                    if (MoveDelta.SizeSquared() > KINDA_SMALL_NUMBER)
+                    if (!bHandledBySdf)
                     {
+                        FCollisionShape OverlapSphere = FCollisionShape::MakeSphere(AgentRadius);
+                        FCollisionQueryParams OverlapParams(TEXT("PenetrationCheck"), false);
+                        if (Agent->GetOwner())
+                        {
+                            OverlapParams.AddIgnoredActor(Agent->GetOwner());
+                        }
+
                         bool bWillCollide = GetWorld()->SweepSingleByChannel(
                             HitResult,
                             AgentLocation,
@@ -379,6 +394,13 @@ void UAvoidanceSubsystem::TickSimpleAvoidance(float DeltaTime)
         if (!Separation.IsNearlyZero())
         {
             FinalVelocity += Separation.GetSafeNormal() * Agent->GetMovementSpeed() * 0.5f;
+        }
+
+        // Simple mode has no physics sweep; the SDF slide gives wall safety for the
+        // cost of two field samples per agent.
+        if (!Agent->bExecutorHandlesCollision && CVarAvoidanceUseSdfWalls.GetValueOnGameThread() != 0)
+        {
+            ApplySdfWallSlide(AgentLocation, Agent->GetAgentRadius(), DeltaTime, FinalVelocity);
         }
 
         const FVector ClampedVelocity = FinalVelocity.GetClampedToMaxSize(Agent->GetMovementSpeed());
@@ -675,74 +697,55 @@ static void GenerateAgentConstraints_ThreadSafe(const FAgentThreadData& CurrentA
     }
 }
 
-static void GenerateVoxelConstraints_ThreadSafe(const UWorld* World, const FAgentThreadData& CurrentAgent, const FVector& DesiredVelocity, TArray<FPlane>& OutConstraints, float TimeHorizon)
+bool UAvoidanceSubsystem::ApplySdfWallSlide(const FVector& AgentLocation, float AgentRadius, float DeltaTime, FVector& InOutVelocity) const
 {
-    if (!World) return;
-
-    const FVector PositionA = CurrentAgent.Position;
-    const float RadiusA = CurrentAgent.AvoidanceRadius;
-    const FVector VelocityA = DesiredVelocity;
-    const FVector EndPoint = PositionA + VelocityA * TimeHorizon;
-
-    FCollisionObjectQueryParams ObjectQueryParams(FCollisionObjectQueryParams::InitType::AllStaticObjects);
-    FCollisionQueryParams CollisionParams(TEXT("VoxelAvoidance_ThreadSafe"), false);
-    CollisionParams.bTraceComplex = true;
-
-    // Wall avoidance is handled by the collision sweep in Tick(), not by ORCA constraints.
-    // ORCA constraints for walls cause circling behavior because PreferredVelocity
-    // points toward the waypoint (through the wall) while wall constraints push tangentially.
-    TArray<FHitResult> HitResults;
-    bool bHasHits = World->SweepMultiByObjectType(
-        HitResults,
-        PositionA,
-        EndPoint,
-        FQuat::Identity,
-        ObjectQueryParams,
-        FCollisionShape::MakeSphere(RadiusA),
-        CollisionParams
-    );
-
-    if (bHasHits)
+    const UWorld* World = GetWorld();
+    if (!World || AgentRadius <= 0.f || DeltaTime <= 0.f)
     {
-        for (const FHitResult& Hit : HitResults)
+        return false;
+    }
+
+    const UOctreeNavSubsystem* NavSubsystem = World->GetSubsystem<UOctreeNavSubsystem>();
+    if (!NavSubsystem)
+    {
+        return false;
+    }
+
+    const AOctreeVoxelVolume* Volume = NavSubsystem->GetVolumeChunkAt(AgentLocation);
+    const FNavDistanceField* Field = Volume ? Volume->GetDistanceField() : nullptr;
+    if (!Field)
+    {
+        return false;
+    }
+
+    const FVector TargetPos = AgentLocation + InOutVelocity * DeltaTime;
+    const float TargetClearance = Field->SampleClearance(TargetPos);
+    if (TargetClearance >= AgentRadius)
+    {
+        return true;
+    }
+
+    // Approaching a wall: slide along the iso-surface tangent plane.
+    FVector WallNormal = Field->SampleGradient(TargetPos);
+    if (WallNormal.IsNearlyZero())
+    {
+        WallNormal = -InOutVelocity.GetSafeNormal();
+        if (WallNormal.IsNearlyZero())
         {
-            if (Hit.Time > KINDA_SMALL_NUMBER)
-            {
-                const FVector RelativePosition = Hit.ImpactPoint - PositionA;
-                const float EffectiveTimeHorizon = Hit.Time;
-                const float InverseEffectiveTimeHorizon = 1.0f / EffectiveTimeHorizon;
-                const FVector w = VelocityA - RelativePosition * InverseEffectiveTimeHorizon;
-                const float w_sq = w.SizeSquared();
-                FVector u = FVector::ZeroVector;
-                const float VORadius = RadiusA * InverseEffectiveTimeHorizon;
-                const float VORadiusSq = FMath::Square(VORadius);
-
-                if (FVector::DotProduct(w, RelativePosition) < 0.0f && FMath::Square(FVector::DotProduct(w, RelativePosition)) > w_sq * VORadiusSq)
-                {
-                    const float w_len = FMath::Sqrt(w_sq);
-                    const FVector n_w = w / w_len;
-                    u = (n_w * VORadius - w);
-                }
-
-                if (!u.IsNearlyZero(KINDA_SMALL_NUMBER))
-                {
-                    const FVector n_correction = u.GetSafeNormal();
-                    if (!n_correction.IsNearlyZero(KINDA_SMALL_NUMBER))
-                    {
-                        OutConstraints.Emplace(VelocityA + u, n_correction);
-                    }
-                }
-            }
-            else
-            {
-                const FVector Normal = Hit.ImpactNormal;
-                if (!Normal.IsNearlyZero())
-                {
-                    OutConstraints.Emplace(FVector::ZeroVector, Normal);
-                }
-            }
+            return true;
         }
     }
+    InOutVelocity = FVector::VectorPlaneProject(InOutVelocity, WallNormal);
+
+    // Already inside the agent-radius shell: add a gentle outward recovery so
+    // agents don't stay pinned against geometry (half the penetration per frame).
+    const float CurrentClearance = Field->SampleClearance(AgentLocation);
+    if (CurrentClearance < AgentRadius)
+    {
+        InOutVelocity += WallNormal * ((AgentRadius - CurrentClearance) * 0.5f / DeltaTime);
+    }
+
+    return true;
 }
 
 FVector UAvoidanceSubsystem::SolveOptimalVelocity(const TArray<FPlane>& Constraints, const FVector& PreferredVelocity) const

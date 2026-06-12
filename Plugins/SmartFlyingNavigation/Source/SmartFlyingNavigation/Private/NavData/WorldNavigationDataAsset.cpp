@@ -1,5 +1,6 @@
 #include "NavData/WorldNavigationDataAsset.h"
 #include "NavCore/NavDistanceField.h"
+#include "Algo/Unique.h"
 #include "Misc/Compression.h"
 #include "Serialization/MemoryReader.h"
 #include "Serialization/MemoryWriter.h"
@@ -104,7 +105,10 @@ bool UWorldNavigationDataAsset::DecompressChunkPayload(int32 ChunkId, TArray<FOc
 		NodeReader << OutNodePool;
 	}
 
-	if (Payload->CompressedAirwayGraph.Num() > 0)
+	// v6 changed the airway stream to undirected half-edges; older streams would
+	// decode into a silently corrupt graph, so they are skipped (node pools are
+	// still readable — the editor reuses them for portal connections on rebake).
+	if (Payload->CompressedAirwayGraph.Num() > 0 && FormatVersion >= CurrentFormatVersion)
 	{
 		TArray<uint8> RawAirwayData;
 		if (!DecompressBuffer(Payload->CompressedAirwayGraph, Payload->UncompressedAirwayGraphSize, RawAirwayData))
@@ -198,13 +202,15 @@ bool UWorldNavigationDataAsset::SetChunkPayloadFromNodePool(int32 ChunkId, const
 			NodeToGraphIndex[NodeIndex] = BuiltAirwayGraph.Nodes.Add(CompactNode);
 		}
 
-		// CSR adjacency: iterate in the same order graph indices were assigned.
-		BuiltAirwayGraph.AdjOffsets.Reserve(BuiltAirwayGraph.Nodes.Num() + 1);
-		BuiltAirwayGraph.AdjOffsets.Add(0);
-
+		// Octree neighbor links can be asymmetric across leaf sizes (a coarse leaf
+		// stores only one neighbor per face), so adjacency is collected as unordered
+		// pairs and both directions are emitted from each pair. This also makes the
+		// graph safe to serialize as undirected half-edges.
+		TArray<uint64> EdgePairs;
 		for (int32 NodeIndex = 0; NodeIndex < InNodePool.Num(); ++NodeIndex)
 		{
-			if (NodeToGraphIndex[NodeIndex] == -1)
+			const int32 SourceGraphIndex = NodeToGraphIndex[NodeIndex];
+			if (SourceGraphIndex == -1)
 			{
 				continue;
 			}
@@ -218,17 +224,54 @@ bool UWorldNavigationDataAsset::SetChunkPayloadFromNodePool(int32 ChunkId, const
 					continue;
 				}
 
-				const uint32 TargetIndex = static_cast<uint32>(NodeToGraphIndex[NeighborNodeIndex]);
-				const uint8 EdgeClearanceQ = FAirwayGraph::QuantizeClearance(
-					FMath::Min(SourceNode.MaxAllowedRadius, InNodePool[NeighborNodeIndex].MaxAllowedRadius));
-				BuiltAirwayGraph.Edges.Add((static_cast<uint32>(EdgeClearanceQ) << 24) | (TargetIndex & FAirwayGraph::EdgeIndexMask));
-			}
+				const int32 TargetGraphIndex = NodeToGraphIndex[NeighborNodeIndex];
+				if (TargetGraphIndex == SourceGraphIndex)
+				{
+					continue;
+				}
 
-			BuiltAirwayGraph.AdjOffsets.Add(BuiltAirwayGraph.Edges.Num());
+				const uint32 Low = static_cast<uint32>(FMath::Min(SourceGraphIndex, TargetGraphIndex));
+				const uint32 High = static_cast<uint32>(FMath::Max(SourceGraphIndex, TargetGraphIndex));
+				EdgePairs.Add((static_cast<uint64>(Low) << 32) | High);
+			}
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("WorldNavigationDataAsset: ChunkId=%d CSR airway graph: %d nodes, %d edges, %.2f MB."),
-			ChunkId, BuiltAirwayGraph.Num(), BuiltAirwayGraph.Edges.Num(),
+		EdgePairs.Sort();
+		EdgePairs.SetNum(Algo::Unique(EdgePairs));
+
+		// Edge clearance is the min of both endpoint clearances; node ClearanceQ uses
+		// the same floor quantizer, so min in quantized space matches the float min.
+		TArray<uint32> Degree;
+		Degree.SetNumZeroed(BuiltAirwayGraph.Nodes.Num());
+		for (const uint64 Pair : EdgePairs)
+		{
+			++Degree[static_cast<int32>(Pair >> 32)];
+			++Degree[static_cast<int32>(Pair & 0xFFFFFFFFu)];
+		}
+
+		BuiltAirwayGraph.AdjOffsets.SetNumUninitialized(BuiltAirwayGraph.Nodes.Num() + 1);
+		BuiltAirwayGraph.AdjOffsets[0] = 0;
+		for (int32 Index = 0; Index < BuiltAirwayGraph.Nodes.Num(); ++Index)
+		{
+			BuiltAirwayGraph.AdjOffsets[Index + 1] = BuiltAirwayGraph.AdjOffsets[Index] + Degree[Index];
+		}
+
+		TArray<uint32>& Cursor = Degree;
+		FMemory::Memcpy(Cursor.GetData(), BuiltAirwayGraph.AdjOffsets.GetData(), BuiltAirwayGraph.Nodes.Num() * sizeof(uint32));
+
+		BuiltAirwayGraph.Edges.SetNumUninitialized(2 * EdgePairs.Num());
+		for (const uint64 Pair : EdgePairs)
+		{
+			const int32 Low = static_cast<int32>(Pair >> 32);
+			const int32 High = static_cast<int32>(Pair & 0xFFFFFFFFu);
+			const uint32 ClearanceBits = static_cast<uint32>(FMath::Min(
+				BuiltAirwayGraph.Nodes[Low].ClearanceQ, BuiltAirwayGraph.Nodes[High].ClearanceQ)) << 24;
+			BuiltAirwayGraph.Edges[Cursor[Low]++] = ClearanceBits | static_cast<uint32>(High);
+			BuiltAirwayGraph.Edges[Cursor[High]++] = ClearanceBits | static_cast<uint32>(Low);
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("WorldNavigationDataAsset: ChunkId=%d CSR airway graph: %d nodes, %d undirected edges (%d directed), %.2f MB in memory."),
+			ChunkId, BuiltAirwayGraph.Num(), EdgePairs.Num(), BuiltAirwayGraph.Edges.Num(),
 			BuiltAirwayGraph.GetAllocatedBytes() / (1024.0 * 1024.0));
 	}
 	TArray<uint8> RawAirwayData;

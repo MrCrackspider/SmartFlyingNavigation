@@ -31,6 +31,9 @@ struct FVoxelVolumeDesc
 	FIntVector MapSize = FIntVector::ZeroValue;
 	int32 MaxDepth = 1;
 
+	/** Distance clamp band, in voxels (see AOctreeVoxelVolume::DistanceFieldBandVoxels). */
+	int32 DistanceFieldBandVoxels = 32;
+
 	// --- Obstacle filter (authoring data, read from the volume actor) ---
 	TArray<TEnumAsByte<ECollisionChannel>> CollisionChannels;
 	bool bRespectCanAffectNavigation = true;

@@ -26,8 +26,8 @@ static TAutoConsoleVariable<int32> CVarBakeParallel(
 
 namespace
 {
-	/** Distance clamp band, in voxels. Distances saturate at this value. */
-	constexpr int32 GBakeDistanceBandVoxels = 32;
+	/** Distance clamp band upper bound, in voxels — the 8-bit 1/8-voxel quantization maximum. */
+	constexpr int32 GMaxBakeDistanceBandVoxels = 32;
 
 	/**
 	 * Bias subtracted from center-to-center voxel distances, in voxels.
@@ -97,6 +97,7 @@ bool FOctreeBaker::BuildDescFromVolume(AOctreeVoxelVolume* Volume, FVoxelVolumeD
 	OutDesc.VoxelExtent = Volume->VoxelExtent;
 	OutDesc.MapSize = CalculatedMapSize;
 	OutDesc.MaxDepth = Volume->GetMaxOctreeDepth();
+	OutDesc.DistanceFieldBandVoxels = Volume->GetDistanceFieldBandVoxels();
 	OutDesc.CollisionChannels = Volume->BakeCollisionChannels;
 	OutDesc.bRespectCanAffectNavigation = Volume->bRespectCanAffectNavigation;
 	OutDesc.ObstacleProfile = Volume->GetStaticObstacleProfile();
@@ -125,7 +126,7 @@ bool FOctreeBaker::BakeVolume(UWorld* World, const FVoxelVolumeDesc& Desc, TArra
 	BakeTask.MakeDialog(true);
 
 	FVoxelField Field;
-	Field.BandVoxels = GBakeDistanceBandVoxels;
+	Field.BandVoxels = FMath::Clamp(Desc.DistanceFieldBandVoxels, 4, GMaxBakeDistanceBandVoxels);
 
 	// --- Stage A: occupancy ---
 	BakeTask.EnterProgressFrame(1.f, LOCTEXT("BakeStageOccupancy", "Voxelizing obstacles... (1/3)"));

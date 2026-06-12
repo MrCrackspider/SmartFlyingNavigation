@@ -123,8 +123,9 @@ public:
 	static const FName WorldNavigationAssetType;
 
 	/** Format version this plugin reads and writes. Older assets are rejected and must be re-baked.
-	 *  v5: CSR airway graph (8 B nodes on the half-voxel lattice, 4 B edges), mixed 4/8-bit SDF bricks. */
-	static constexpr int32 CurrentFormatVersion = 5;
+	 *  v5: CSR airway graph (8 B nodes on the half-voxel lattice, 4 B edges), mixed 4/8-bit SDF bricks.
+	 *  v6: airway edges stored undirected (Target > Source half only); symmetric CSR rebuilt on load. */
+	static constexpr int32 CurrentFormatVersion = 6;
 
 	UPROPERTY(VisibleAnywhere, Category = "Navigation")
 	int32 FormatVersion = CurrentFormatVersion;

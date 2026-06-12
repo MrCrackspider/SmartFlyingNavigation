@@ -4,13 +4,6 @@
 
 #include "CoreMinimal.h"
 
-/** Cached nearby wall info for an agent, collected on the game thread. */
-struct FNearbyWall
-{
-    FVector Normal;
-    float Distance;
-};
-
 struct FAgentThreadData
 {
     uint32 AgentId;
@@ -20,7 +13,6 @@ struct FAgentThreadData
     FVector PreferredVelocity;
     float AvoidanceRadius;
     float MovementSpeed;
-    TArray<FNearbyWall> NearbyWalls;
 };
 
 /** Thread-safe snapshot of a dynamic obstacle for ORCA constraint generation. */

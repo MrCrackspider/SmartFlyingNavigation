@@ -71,12 +71,13 @@ static FString BuildVolumeSourceHash(const AOctreeVoxelVolume* Volume)
 
 	const FBox Bounds = Volume->GetVolumeBounds();
 	return FString::Printf(
-		TEXT("%s|%s|%.3f|%d|%s"),
+		TEXT("%s|%s|%.3f|%d|%s|band%d"),
 		*Volume->GetPathName(),
 		*Volume->GetMapSize().ToString(),
 		Volume->VoxelExtent,
 		Volume->GetMaxOctreeDepth(),
-		*Bounds.ToString());
+		*Bounds.ToString(),
+		Volume->GetDistanceFieldBandVoxels());
 }
 
 static FIntVector EstimateChunkCoord(const AOctreeVoxelVolume* Volume)
@@ -441,7 +442,7 @@ bool UPathfindingEditorSubsystem::IsVolumeBakeStale(const AOctreeVoxelVolume* Vo
 
 	if (Chunk->SourceBuildHash != BuildVolumeSourceHash(Volume))
 	{
-		if (OutReasons) OutReasons->Add(LOCTEXT("StaleHashMismatch", "Volume settings (size, voxel extent, depth, or bounds) changed since the last bake."));
+		if (OutReasons) OutReasons->Add(LOCTEXT("StaleHashMismatch", "Volume settings (size, voxel extent, depth, bounds, or distance field band) changed since the last bake."));
 		return true;
 	}
 
@@ -617,7 +618,7 @@ void UPathfindingEditorSubsystem::SaveBakedDataToManifest_Internal(
 			if (Manifest->SetChunkPayloadFromNodePool(ChunkId, *NodePool, DistanceField))
 			{
 				Chunk.bHasDistanceField = DistanceField != nullptr;
-				Chunk.DistanceFieldBandVoxels = DistanceField ? 32 : 0;
+				Chunk.DistanceFieldBandVoxels = DistanceField ? Volume->GetDistanceFieldBandVoxels() : 0;
 
 				if (const FNavigationChunkPayload* Payload = Manifest->Payloads.FindByPredicate(
 					[ChunkId](const FNavigationChunkPayload& Candidate)

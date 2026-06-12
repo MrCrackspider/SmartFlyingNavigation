@@ -199,6 +199,18 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Octree|Baking", AdvancedDisplay, meta = (DisplayName = "Advanced: Obstacle Profile Override"))
 	TObjectPtr<UVoxelObstacleProfile> StaticObjectProfile;
 
+	/**
+	 * Distance field clamp band, in voxels. Distances saturate at this value, so a
+	 * narrower band turns more far-from-wall bricks uniform (smaller SDF payload) at
+	 * the cost of shorter sphere-trace steps in wide-open space. 32 is the 8-bit
+	 * quantization maximum; 12 is a good mobile setting. Requires a re-bake.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Octree|Baking", AdvancedDisplay, meta = (DisplayName = "Distance Field Band (Voxels)", ClampMin = 4, ClampMax = 32))
+	int32 DistanceFieldBandVoxels = 32;
+
+	/** Band clamped to the quantizable range, as fed to the baker. */
+	FORCEINLINE int32 GetDistanceFieldBandVoxels() const { return FMath::Clamp(DistanceFieldBandVoxels, 4, 32); }
+
 #if WITH_EDITORONLY_DATA
 
 	/** A list of actors to explicitly ignore during the baking process. */

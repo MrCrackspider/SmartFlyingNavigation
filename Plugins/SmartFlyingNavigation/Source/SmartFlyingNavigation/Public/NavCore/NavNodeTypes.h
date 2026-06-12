@@ -53,6 +53,11 @@ struct FOctreeNode
  *   leaf center lies on the half-voxel lattice) + quantized clearance.
  * - Edge: 4 bytes — 24-bit target index + 8-bit corridor clearance (8 cm units).
  * - Adjacency: offsets array, so only existing edges are stored (no fixed 6 slots).
+ *
+ * The in-memory CSR is symmetric (both directions present, required for A*
+ * traversal). On disk only the half with Target > Source is stored — clearance
+ * is symmetric (min of both endpoints) so the mirror is reconstructed losslessly
+ * on load. This halves the edge payload (~ -2.3 MB on a 256³ maze chunk).
  */
 struct SMARTFLYINGNAVIGATION_API FAirwayGraph
 {
@@ -123,13 +128,101 @@ struct SMARTFLYINGNAVIGATION_API FAirwayGraph
 		return Ar;
 	}
 
+	/** Rebuilds the symmetric runtime CSR from half-edges (one entry per undirected pair, Target > Source). */
+	void BuildFromUndirectedEdges(const TArray<uint32>& HalfOffsets, const TArray<uint32>& HalfEdges)
+	{
+		AdjOffsets.Reset();
+		Edges.Reset();
+
+		const int32 NodeCount = Nodes.Num();
+		if (NodeCount == 0 || HalfOffsets.Num() != NodeCount + 1)
+		{
+			AdjOffsets.Init(0, NodeCount + 1);
+			return;
+		}
+
+		TArray<uint32> Degree;
+		Degree.SetNumZeroed(NodeCount);
+		for (int32 Source = 0; Source < NodeCount; ++Source)
+		{
+			for (uint32 EdgeIndex = HalfOffsets[Source]; EdgeIndex < HalfOffsets[Source + 1]; ++EdgeIndex)
+			{
+				const int32 Target = GetEdgeTarget(HalfEdges[EdgeIndex]);
+				if (Nodes.IsValidIndex(Target))
+				{
+					++Degree[Source];
+					++Degree[Target];
+				}
+			}
+		}
+
+		AdjOffsets.SetNumUninitialized(NodeCount + 1);
+		AdjOffsets[0] = 0;
+		for (int32 Index = 0; Index < NodeCount; ++Index)
+		{
+			AdjOffsets[Index + 1] = AdjOffsets[Index] + Degree[Index];
+		}
+
+		// Reuse Degree as per-node write cursors while mirroring each half-edge.
+		TArray<uint32>& Cursor = Degree;
+		FMemory::Memcpy(Cursor.GetData(), AdjOffsets.GetData(), NodeCount * sizeof(uint32));
+
+		Edges.SetNumUninitialized(AdjOffsets[NodeCount]);
+		for (int32 Source = 0; Source < NodeCount; ++Source)
+		{
+			for (uint32 EdgeIndex = HalfOffsets[Source]; EdgeIndex < HalfOffsets[Source + 1]; ++EdgeIndex)
+			{
+				const uint32 Edge = HalfEdges[EdgeIndex];
+				const int32 Target = GetEdgeTarget(Edge);
+				if (!Nodes.IsValidIndex(Target))
+				{
+					continue;
+				}
+				const uint32 ClearanceBits = Edge & ~EdgeIndexMask;
+				Edges[Cursor[Source]++] = ClearanceBits | static_cast<uint32>(Target);
+				Edges[Cursor[Target]++] = ClearanceBits | static_cast<uint32>(Source);
+			}
+		}
+	}
+
 	friend FArchive& operator<<(FArchive& Ar, FAirwayGraph& Graph)
 	{
 		Ar << Graph.OriginWS;
 		Ar << Graph.HalfVoxelSize;
 		Ar << Graph.Nodes;
-		Ar << Graph.AdjOffsets;
-		Ar << Graph.Edges;
+
+		if (Ar.IsLoading())
+		{
+			TArray<uint32> HalfOffsets;
+			TArray<uint32> HalfEdges;
+			Ar << HalfOffsets;
+			Ar << HalfEdges;
+			Graph.BuildFromUndirectedEdges(HalfOffsets, HalfEdges);
+		}
+		else
+		{
+			// Persist only the Target > Source half of each undirected pair.
+			TArray<uint32> HalfOffsets;
+			TArray<uint32> HalfEdges;
+			const int32 NodeCount = Graph.AdjOffsets.Num() == Graph.Nodes.Num() + 1 ? Graph.Nodes.Num() : 0;
+			HalfOffsets.Reserve(NodeCount + 1);
+			HalfOffsets.Add(0);
+			HalfEdges.Reserve(Graph.Edges.Num() / 2);
+			for (int32 Source = 0; Source < NodeCount; ++Source)
+			{
+				for (uint32 EdgeIndex = Graph.AdjOffsets[Source]; EdgeIndex < Graph.AdjOffsets[Source + 1]; ++EdgeIndex)
+				{
+					const uint32 Edge = Graph.Edges[EdgeIndex];
+					if (GetEdgeTarget(Edge) > Source)
+					{
+						HalfEdges.Add(Edge);
+					}
+				}
+				HalfOffsets.Add(HalfEdges.Num());
+			}
+			Ar << HalfOffsets;
+			Ar << HalfEdges;
+		}
 		return Ar;
 	}
 };

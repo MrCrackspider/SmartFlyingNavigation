@@ -137,6 +137,13 @@ private:
     FVector SolveOptimalVelocity(const TArray<FPlane>& Constraints, const FVector& PreferredVelocity) const;
     void TickSimpleAvoidance(float DeltaTime);
 
+    /**
+     * Wall slide against the baked SDF (clearance sample + gradient projection)
+     * instead of a physics sweep. Returns false when no valid distance field
+     * covers the agent — the caller falls back to the collision sweep.
+     */
+    bool ApplySdfWallSlide(const FVector& AgentLocation, float AgentRadius, float DeltaTime, FVector& InOutVelocity) const;
+
     /** Builds the per-solve dynamic obstacle snapshot from the world obstacle registry. */
     void GatherDynamicObstacleData(TArray<FDynamicObstacleThreadData>& OutObstacles) const;
 
