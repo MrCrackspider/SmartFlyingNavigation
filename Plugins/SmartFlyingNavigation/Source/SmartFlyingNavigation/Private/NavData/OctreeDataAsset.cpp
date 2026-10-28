@@ -34,7 +34,7 @@ void UOctreeDataAsset::SetAndCompressBakedData(const TArray<FOctreeNode>& InNode
 	int32 ActualCompressedSize = MaxCompressedSize;
 	if (FCompression::CompressMemory(CompressionFormat, this->CompressedNodePool.GetData(), ActualCompressedSize, RawData.GetData(), RawData.Num()))
 	{
-		this->CompressedNodePool.SetNum(ActualCompressedSize, false);
+		this->CompressedNodePool.SetNum(ActualCompressedSize, EAllowShrinking::No);
 	}
 	else
 	{
